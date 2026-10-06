@@ -66,9 +66,12 @@ export const getMediaDownloadLink = async (req: Request, res: Response) => {
  */
 export const proxyTelegramFileStream = async (req: Request, res: Response) => {
   try {
-    const { fileId } = req.params;
+    const rawFileId = req.params.fileId;
+    const fileId = decodeURIComponent(rawFileId);
     const botToken = process.env.TELEGRAM_BOT_TOKEN;
     const range = req.headers.range;
+
+    console.log(`[ProxyStream] Incoming request for fileId: ${fileId.slice(0, 35)}... Range: ${range || 'none'}`);
 
     // 1. Check if it's a thumbnail photo or small file via Telegram Bot HTTP API getFile
     const isImage = fileId.length > 50 && (fileId.startsWith('AAMC') || fileId.includes('thumb'));
@@ -83,20 +86,24 @@ export const proxyTelegramFileStream = async (req: Request, res: Response) => {
 
     // 2. MTProto Range Chunk Streaming for Movies (handles > 20 MB files)
     let start = 0;
-    let chunkSize = 512 * 1024; // 512 KB per chunk for fast seeking
+    let reqSize = 512 * 1024;
 
     if (range) {
       const parts = range.replace(/bytes=/, '').split('-');
       start = parseInt(parts[0], 10) || 0;
       if (parts[1]) {
         const end = parseInt(parts[1], 10);
-        chunkSize = Math.min(end - start + 1, 1024 * 1024);
+        reqSize = Math.min(end - start + 1, 1024 * 1024);
       }
     }
 
-    const buffer = await telegramStreamService.getChunk(fileId, start, chunkSize);
+    // Align offset to 4KB boundary required by Telegram MTProto API
+    const alignedOffset = Math.floor(start / 4096) * 4096;
+    const limit = 512 * 1024; // 512 KB standard Telegram MTProto chunk limit
 
-    if (!buffer) {
+    const rawBuffer = await telegramStreamService.getChunk(fileId, alignedOffset, limit);
+
+    if (!rawBuffer) {
       // Fallback to Bot API getFile if file happens to be small (< 20MB)
       if (botToken) {
         const fileRes = await axios.get(`https://api.telegram.org/bot${botToken}/getFile?file_id=${fileId}`).catch(() => null);
@@ -130,6 +137,11 @@ export const proxyTelegramFileStream = async (req: Request, res: Response) => {
       }
       return res.status(404).json({ message: 'Media stream unavailable' });
     }
+
+    // Slice the exact byte range requested by the browser
+    const sliceStart = start - alignedOffset;
+    const sliceEnd = Math.min(sliceStart + reqSize, rawBuffer.length);
+    const buffer = rawBuffer.subarray(sliceStart, sliceEnd);
 
     const contentType = isImage ? 'image/jpeg' : 'video/mp4';
 
