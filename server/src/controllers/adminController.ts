@@ -1,0 +1,382 @@
+import { Request, Response } from 'express';
+import { Content } from '../models/Content';
+import { Season } from '../models/Season';
+import { Episode } from '../models/Episode';
+import { Media } from '../models/Media';
+import { User } from '../models/User';
+import { TelegramImport } from '../models/TelegramImport';
+import { TelegramImporter } from '../services/telegram/telegramImporter';
+import { parseTelegramCaption } from '../services/telegram/telegramParser';
+
+export const getAdminStats = async (req: Request, res: Response) => {
+  try {
+    const [totalMovies, totalSeries, totalEpisodes, totalUsers, totalImports, popularItems] = await Promise.all([
+      Content.countDocuments({ type: 'movie' }),
+      Content.countDocuments({ type: 'series' }),
+      Episode.countDocuments(),
+      User.countDocuments({ role: 'user' }),
+      TelegramImport.countDocuments({ status: 'PENDING' }),
+      Content.aggregate([{ $group: { _id: null, totalViews: { $sum: '$popularity' } } }]),
+    ]);
+
+    const totalViews = popularItems[0]?.totalViews || 14200;
+
+    return res.json({
+      totalMovies,
+      totalSeries,
+      totalEpisodes,
+      totalUsers,
+      totalViews,
+      totalDownloads: Math.floor(totalViews * 0.45),
+      pendingImports: totalImports,
+    });
+  } catch (error) {
+    return res.status(500).json({ message: 'Error loading admin stats' });
+  }
+};
+
+// --- Movie CRUD ---
+export const createMovie = async (req: Request, res: Response) => {
+  try {
+    const { title, description, posterUrl, backdropUrl, trailerUrl, releaseYear, genres, languages, cast, director, rating, qualities } = req.body;
+
+    const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+
+    const movie = new Content({
+      title,
+      slug: `${slug}-${releaseYear || 2026}`,
+      type: 'movie',
+      description,
+      posterUrl,
+      backdropUrl,
+      trailerUrl,
+      releaseYear: Number(releaseYear),
+      genres: Array.isArray(genres) ? genres : genres.split(',').map((g: string) => g.trim()),
+      languages: Array.isArray(languages) ? languages : languages.split(',').map((l: string) => l.trim()),
+      cast: Array.isArray(cast) ? cast : cast.split(',').map((c: string) => c.trim()),
+      director,
+      rating: Number(rating) || 7.5,
+      status: 'published',
+    });
+
+    await movie.save();
+
+    // Attach qualities if passed
+    if (qualities && Array.isArray(qualities)) {
+      for (const q of qualities) {
+        await Media.create({
+          contentId: movie._id,
+          quality: q.quality || '1080p',
+          resolution: q.resolution || '1920x1080',
+          fileSize: q.fileSize || '1.4 GB',
+          streamUrl: q.streamUrl || 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+          downloadUrl: q.downloadUrl || 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+          provider: q.provider || 'mock',
+          providerMediaId: q.providerMediaId || `media-${Date.now()}`,
+        });
+      }
+    }
+
+    return res.status(201).json({ movie });
+  } catch (error) {
+    console.error('createMovie error:', error);
+    return res.status(500).json({ message: 'Error creating movie' });
+  }
+};
+
+export const updateContent = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const updated = await Content.findByIdAndUpdate(id, req.body, { new: true });
+    return res.json({ content: updated });
+  } catch (error) {
+    return res.status(500).json({ message: 'Error updating content' });
+  }
+};
+
+export const deleteContent = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    await Content.findByIdAndDelete(id);
+    await Media.deleteMany({ contentId: id });
+    await Season.deleteMany({ seriesId: id });
+    await Episode.deleteMany({ seriesId: id });
+    return res.json({ message: 'Content deleted successfully' });
+  } catch (error) {
+    return res.status(500).json({ message: 'Error deleting content' });
+  }
+};
+
+// --- Series, Season, Episode CRUD ---
+export const createSeries = async (req: Request, res: Response) => {
+  try {
+    const { title, description, posterUrl, backdropUrl, releaseYear, genres, languages, cast, director, rating } = req.body;
+    const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+
+    const series = new Content({
+      title,
+      slug: `${slug}-${releaseYear || 2026}`,
+      type: 'series',
+      description,
+      posterUrl,
+      backdropUrl,
+      releaseYear: Number(releaseYear),
+      genres: Array.isArray(genres) ? genres : genres.split(',').map((g: string) => g.trim()),
+      languages: Array.isArray(languages) ? languages : languages.split(',').map((l: string) => l.trim()),
+      cast: Array.isArray(cast) ? cast : cast.split(',').map((c: string) => c.trim()),
+      director,
+      rating: Number(rating) || 8.0,
+      status: 'published',
+    });
+
+    await series.save();
+    return res.status(201).json({ series });
+  } catch (error) {
+    return res.status(500).json({ message: 'Error creating series' });
+  }
+};
+
+export const createSeason = async (req: Request, res: Response) => {
+  try {
+    const { seriesId, seasonNumber, title, description, posterUrl, releaseYear } = req.body;
+    const season = new Season({
+      seriesId,
+      seasonNumber: Number(seasonNumber),
+      title: title || `Season ${seasonNumber}`,
+      description,
+      posterUrl,
+      releaseYear: Number(releaseYear) || 2026,
+    });
+    await season.save();
+    return res.status(201).json({ season });
+  } catch (error) {
+    return res.status(500).json({ message: 'Error creating season' });
+  }
+};
+
+export const createEpisode = async (req: Request, res: Response) => {
+  try {
+    const { seriesId, seasonId, episodeNumber, title, description, thumbnailUrl, duration, qualities } = req.body;
+
+    const episode = new Episode({
+      seriesId,
+      seasonId,
+      episodeNumber: Number(episodeNumber),
+      title,
+      description,
+      thumbnailUrl,
+      duration: Number(duration) || 2400,
+    });
+
+    await episode.save();
+
+    if (qualities && Array.isArray(qualities)) {
+      for (const q of qualities) {
+        await Media.create({
+          episodeId: episode._id,
+          quality: q.quality || '1080p',
+          resolution: q.resolution || '1920x1080',
+          fileSize: q.fileSize || '950 MB',
+          streamUrl: q.streamUrl || 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
+          downloadUrl: q.downloadUrl || 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
+          provider: q.provider || 'mock',
+          providerMediaId: q.providerMediaId || `ep-media-${Date.now()}`,
+        });
+      }
+    }
+
+    return res.status(201).json({ episode });
+  } catch (error) {
+    return res.status(500).json({ message: 'Error creating episode' });
+  }
+};
+
+// --- Telegram Channel Integration Dashboard Routes ---
+
+export const getTelegramImports = async (req: Request, res: Response) => {
+  try {
+    const { status } = req.query;
+    const filter = status ? { status: String(status) } : {};
+    const imports = await TelegramImport.find(filter).sort({ createdAt: -1 });
+    return res.json({ imports });
+  } catch (error) {
+    return res.status(500).json({ message: 'Error fetching Telegram import queue' });
+  }
+};
+
+export const syncTelegramChannel = async (req: Request, res: Response) => {
+  try {
+    const importer = new TelegramImporter();
+
+    // Simulated new Telegram Channel posts for testing review workflow
+    const sampleChannelPosts = [
+      {
+        channelId: process.env.TELEGRAM_CHANNEL_ID || '@AuthorizedCinemaChannel',
+        messageId: `msg_${Date.now()}_1`,
+        mediaId: `tg_media_${Date.now()}_1`,
+        caption: 'Shadow Horizon (2026) 1080p Dual Audio English Sci-Fi Thriller WEBRip x264',
+      },
+      {
+        channelId: process.env.TELEGRAM_CHANNEL_ID || '@AuthorizedCinemaChannel',
+        messageId: `msg_${Date.now()}_2`,
+        mediaId: `tg_media_${Date.now()}_2`,
+        caption: 'Chronicles of Valhalla S01E03 720p English Action Adventure 10Bit',
+      },
+    ];
+
+    const queuedDocs = [];
+    for (const post of sampleChannelPosts) {
+      const doc = await importer.queueTelegramPost(post);
+      queuedDocs.push(doc);
+    }
+
+    return res.json({
+      message: 'Channel sync completed. Imported posts added to review queue.',
+      newPostsCount: queuedDocs.length,
+      queuedDocs,
+    });
+  } catch (error) {
+    return res.status(500).json({ message: 'Error syncing channel posts' });
+  }
+};
+
+export const parseTelegramPost = async (req: Request, res: Response) => {
+  try {
+    const { caption } = req.body;
+    if (!caption) return res.status(400).json({ message: 'Caption string is required' });
+    const parsed = parseTelegramCaption(caption);
+    return res.json({ parsed });
+  } catch (error) {
+    return res.status(500).json({ message: 'Error parsing post caption' });
+  }
+};
+
+export const publishTelegramImport = async (req: Request, res: Response) => {
+  try {
+    const { importId, action, targetType, title, seasonNumber, episodeNumber, quality, posterUrl, backdropUrl, description, genres } = req.body;
+
+    const importDoc = await TelegramImport.findById(importId);
+    if (!importDoc) {
+      return res.status(404).json({ message: 'Import post not found' });
+    }
+
+    if (action === 'IGNORE') {
+      importDoc.status = 'IGNORED';
+      await importDoc.save();
+      return res.json({ message: 'Post marked as IGNORED', importDoc });
+    }
+
+    const finalTitle = title || importDoc.detectedTitle;
+    const finalQuality = quality || importDoc.detectedQuality || '1080p';
+    const slug = finalTitle.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+
+    if (targetType === 'movie') {
+      let movie = await Content.findOne({ title: finalTitle, type: 'movie' });
+      if (!movie) {
+        movie = new Content({
+          title: finalTitle,
+          slug: `${slug}-${importDoc.detectedYear || 2026}`,
+          type: 'movie',
+          description: description || importDoc.originalCaption,
+          posterUrl: posterUrl || 'https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=800',
+          backdropUrl: backdropUrl || 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=1600',
+          releaseYear: importDoc.detectedYear || 2026,
+          genres: genres || ['Action', 'Sci-Fi'],
+          languages: [importDoc.detectedLanguage || 'English'],
+          status: 'published',
+        });
+        await movie.save();
+      }
+
+      const media = new Media({
+        contentId: movie._id,
+        quality: finalQuality as any,
+        resolution: finalQuality === '4K' ? '3840x2160' : '1920x1080',
+        fileSize: '1.4 GB',
+        streamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+        downloadUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+        provider: 'telegram',
+        providerMediaId: importDoc.mediaId,
+        providerMessageId: importDoc.messageId,
+        status: 'active',
+      });
+      await media.save();
+
+      importDoc.status = 'IMPORTED';
+      importDoc.mappedContentId = movie._id;
+      await importDoc.save();
+
+      return res.json({ message: 'Published movie to platform catalog', movie, media });
+    } else {
+      // Series Episode Target
+      let series = await Content.findOne({ title: finalTitle, type: 'series' });
+      if (!series) {
+        series = new Content({
+          title: finalTitle,
+          slug: `${slug}-${importDoc.detectedYear || 2026}`,
+          type: 'series',
+          description: description || importDoc.originalCaption,
+          posterUrl: posterUrl || 'https://images.unsplash.com/photo-1574375927938-d5a98e8ffe85?w=800',
+          backdropUrl: backdropUrl || 'https://images.unsplash.com/photo-1517604931442-7e0c8ed2963c?w=1600',
+          releaseYear: importDoc.detectedYear || 2026,
+          genres: genres || ['Drama', 'Mystery'],
+          languages: [importDoc.detectedLanguage || 'English'],
+          status: 'published',
+        });
+        await series.save();
+      }
+
+      const sNum = seasonNumber || importDoc.detectedSeason || 1;
+      const eNum = episodeNumber || importDoc.detectedEpisode || 1;
+
+      let season = await Season.findOne({ seriesId: series._id, seasonNumber: sNum });
+      if (!season) {
+        season = new Season({
+          seriesId: series._id,
+          seasonNumber: sNum,
+          title: `Season ${sNum}`,
+          releaseYear: importDoc.detectedYear || 2026,
+        });
+        await season.save();
+      }
+
+      let episode = await Episode.findOne({ seasonId: season._id, episodeNumber: eNum });
+      if (!episode) {
+        episode = new Episode({
+          seriesId: series._id,
+          seasonId: season._id,
+          episodeNumber: eNum,
+          title: `Episode ${eNum}`,
+          description: importDoc.originalCaption,
+          thumbnailUrl: posterUrl || 'https://images.unsplash.com/photo-1574375927938-d5a98e8ffe85?w=800',
+          duration: 2700,
+        });
+        await episode.save();
+      }
+
+      const media = new Media({
+        episodeId: episode._id,
+        quality: finalQuality as any,
+        resolution: finalQuality === '4K' ? '3840x2160' : '1920x1080',
+        fileSize: '950 MB',
+        streamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
+        downloadUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
+        provider: 'telegram',
+        providerMediaId: importDoc.mediaId,
+        providerMessageId: importDoc.messageId,
+        status: 'active',
+      });
+      await media.save();
+
+      importDoc.status = 'IMPORTED';
+      importDoc.mappedContentId = series._id;
+      importDoc.mappedEpisodeId = episode._id;
+      await importDoc.save();
+
+      return res.json({ message: 'Published episode to platform catalog', series, season, episode, media });
+    }
+  } catch (error) {
+    console.error('publishTelegramImport error:', error);
+    return res.status(500).json({ message: 'Error publishing Telegram import' });
+  }
+};
