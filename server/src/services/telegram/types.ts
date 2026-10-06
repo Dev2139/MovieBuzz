@@ -31,4 +31,6 @@ export interface ParsedTelegramMetadata {
   resolution: string;
   language: string;
   fileSize?: string;
+  cast?: string[];
+  genres?: string[];
 }

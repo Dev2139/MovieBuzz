@@ -2,89 +2,100 @@ import { ParsedTelegramMetadata } from './types';
 
 /**
  * Robust Telegram Channel Post Parser
- * Extracts Title, Year, Season, Episode, Quality, Resolution, and Language from post caption text.
+ * Parses single-line and multi-line posts from Telegram channels like JNV Moviebuzz.
  * Examples:
- *  - "Cyberpunk: Neon City (2026) 1080p English Sci-Fi"
- *  - "Starlight Odyssey S02E04 720p WEBRip Dual Audio"
- *  - "The Last Sentinel Season 1 Episode 3 1080p x264"
+ *  - "Drishyam: The Conclusion (2026)\nTheatre Print\n\nCast: Ajay Devgn, Jaideep Ahlawat\nGenres: Crime, Drama\n#jnvmoviebuzz"
+ *  - "Bethlehem Kudumba Unit (2026) 720p HD Dual Audio: Hindi + Malayalam"
  */
 export function parseTelegramCaption(caption: string): ParsedTelegramMetadata {
-  const cleanCaption = caption.replace(/\r?\n|\r/g, ' ').trim();
+  const lines = caption.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const firstLine = lines[0] || '';
 
-  // 1. Detect Season & Episode (S01E02, S1 E3, Season 1 Episode 2, S01, E02, etc.)
+  // 1. Detect Season & Episode
   let season: number | undefined;
   let episode: number | undefined;
 
   const sAndERegex = /S(\d{1,2})\s*E(\d{1,2})/i;
-  const sAndEMatch = cleanCaption.match(sAndERegex);
+  const sAndEMatch = caption.match(sAndERegex);
 
   if (sAndEMatch) {
     season = parseInt(sAndEMatch[1], 10);
     episode = parseInt(sAndEMatch[2], 10);
   } else {
-    const seasonRegex = /(?:Season|S)\s*(\d{1,2})/i;
-    const seasonMatch = cleanCaption.match(seasonRegex);
+    const seasonMatch = caption.match(/(?:Season|S)\s*(\d{1,2})/i);
     if (seasonMatch) season = parseInt(seasonMatch[1], 10);
 
-    const epRegex = /(?:Episode|Ep|E)\s*(\d{1,2})/i;
-    const epMatch = cleanCaption.match(epRegex);
+    const epMatch = caption.match(/(?:Episode|Ep|E)\s*(\d{1,2})/i);
     if (epMatch) episode = parseInt(epMatch[1], 10);
   }
 
-  // 2. Detect Quality (1080p, 720p, 480p, 4K, 2160p, WEB-DL, BluRay)
+  // 2. Quality
   let quality = '1080p';
   let resolution = '1920x1080';
 
-  if (/4K|2160p|UHD/i.test(cleanCaption)) {
+  if (/4K|2160p|UHD/i.test(caption)) {
     quality = '4K';
     resolution = '3840x2160';
-  } else if (/1080p|FHD/i.test(cleanCaption)) {
+  } else if (/1080p|FHD/i.test(caption)) {
     quality = '1080p';
     resolution = '1920x1080';
-  } else if (/720p|HD/i.test(cleanCaption)) {
+  } else if (/720p|HD/i.test(caption)) {
     quality = '720p';
     resolution = '1280x720';
-  } else if (/480p|SD/i.test(cleanCaption)) {
+  } else if (/480p|SD/i.test(caption)) {
     quality = '480p';
     resolution = '854x480';
   }
 
-  // 3. Detect Release Year (e.g. (2026), [2025], 2024)
+  // 3. Release Year
   let year: number | undefined;
-  const yearRegex = /\b(19\d{2}|20\d{2})\b/;
-  const yearMatch = cleanCaption.match(yearRegex);
+  const yearMatch = caption.match(/\b(19\d{2}|20\d{2})\b/);
   if (yearMatch) {
     year = parseInt(yearMatch[1], 10);
   }
 
-  // 4. Detect Language (English, Spanish, Hindi, French, Japanese, Dual Audio)
+  // 4. Languages
   let language = 'English';
-  if (/Dual Audio/i.test(cleanCaption)) {
-    language = 'Dual Audio (Eng/Multi)';
-  } else if (/Spanish|Español/i.test(cleanCaption)) {
-    language = 'Spanish';
-  } else if (/Hindi/i.test(cleanCaption)) {
+  if (/Dual Audio/i.test(caption)) {
+    const langsMatch = caption.match(/Dual Audio:?\s*([^\n]+)/i);
+    language = langsMatch ? `Dual Audio (${langsMatch[1].trim()})` : 'Dual Audio (Hindi/Malayalam)';
+  } else if (/Hindi/i.test(caption)) {
     language = 'Hindi';
-  } else if (/Japanese|Anime/i.test(cleanCaption)) {
+  } else if (/Malayalam/i.test(caption)) {
+    language = 'Malayalam';
+  } else if (/Spanish/i.test(caption)) {
+    language = 'Spanish';
+  } else if (/Japanese/i.test(caption)) {
     language = 'Japanese';
-  } else if (/French|Français/i.test(cleanCaption)) {
-    language = 'French';
   }
 
-  // 5. Detect Title (Remove S01E01, year, quality keywords from title)
-  let title = cleanCaption;
-  // Remove quality tags
-  title = title.replace(/\b(1080p|720p|480p|4K|2160p|WEB-DL|WEBRip|BluRay|x264|HEVC|Dual Audio|HDR|AAC)\b/gi, '');
-  // Remove Season/Episode tags
-  title = title.replace(/S\d{1,2}\s*E\d{1,2}/gi, '');
-  title = title.replace(/(?:Season|Season\s*\d{1,2}|Episode\s*\d{1,2})/gi, '');
-  // Remove year in brackets/parens
+  // 5. Cast
+  let cast: string[] | undefined;
+  const castMatch = caption.match(/Cast:\s*([^\n]+)/i);
+  if (castMatch) {
+    cast = castMatch[1].split(',').map((c) => c.trim()).filter(Boolean);
+  }
+
+  // 6. Genres
+  let genres: string[] | undefined;
+  const genresMatch = caption.match(/Genres:\s*([^\n]+)/i);
+  if (genresMatch) {
+    genres = genresMatch[1].split(',').map((g) => g.trim()).filter(Boolean);
+  }
+
+  // 7. Title Extraction from first line
+  let title = firstLine;
+  // Strip year
   title = title.replace(/\s*[\(\[]?\b(19\d{2}|20\d{2})\b[\)\]]?\s*/g, ' ');
-  // Clean up punctuation and whitespace
-  title = title.replace(/[-_.:]/g, ' ').replace(/\s+/g, ' ').trim();
+  // Strip quality tags
+  title = title.replace(/\b(1080p|720p|480p|4K|2160p|HD|FHD|WEB-DL|WEBRip|BluRay|Dual Audio)\b/gi, '');
+  // Strip hashtags & unwanted text
+  title = title.replace(/#[a-z0-9_]+/gi, '');
+  title = title.replace(/\b(Theatre Print|PreDVDRip|HQ|x264|HEVC)\b/gi, '');
+  title = title.replace(/\s+/g, ' ').trim();
 
   if (!title) {
-    title = 'Untitled Imported Media';
+    title = 'Untitled Movie';
   }
 
   return {
@@ -95,5 +106,7 @@ export function parseTelegramCaption(caption: string): ParsedTelegramMetadata {
     quality,
     resolution,
     language,
+    cast,
+    genres,
   };
 }
