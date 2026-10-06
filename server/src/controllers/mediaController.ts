@@ -146,7 +146,13 @@ export const proxyTelegramFileStream = async (req: Request, res: Response) => {
     const totalSize = (await telegramStreamService.getFileSize(fileId)) || 1500000000;
     const end = Math.min(start + buffer.length - 1, totalSize - 1);
 
-    const contentType = isImage ? 'image/jpeg' : 'video/mp4';
+    // Determine content type (image vs MKV vs MP4)
+    let contentType = 'video/mp4';
+    if (isImage) {
+      contentType = 'image/jpeg';
+    } else if (rawBuffer.length >= 4 && rawBuffer[0] === 0x1a && rawBuffer[1] === 0x45 && rawBuffer[2] === 0xdf && rawBuffer[3] === 0xa3) {
+      contentType = 'video/x-matroska';
+    }
 
     if (range && !isImage) {
       res.writeHead(206, {

@@ -260,7 +260,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     >
       <video
         ref={videoRef}
-        src={streamUrl}
         onTimeUpdate={handleTimeUpdate}
         onLoadedMetadata={handleLoadedMetadata}
         onPlay={() => setIsPlaying(true)}
@@ -273,7 +272,11 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         className="w-full h-full object-contain cursor-pointer"
         poster={posterUrl}
         playsInline
-      />
+      >
+        <source src={streamUrl} type="video/x-matroska" />
+        <source src={streamUrl} type="video/webm" />
+        <source src={streamUrl} type="video/mp4" />
+      </video>
 
       {/* Overlay Title when paused or hovering */}
       <div
