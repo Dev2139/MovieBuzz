@@ -143,12 +143,14 @@ export const proxyTelegramFileStream = async (req: Request, res: Response) => {
     const sliceEnd = Math.min(sliceStart + reqSize, rawBuffer.length);
     const buffer = rawBuffer.subarray(sliceStart, sliceEnd);
 
+    const totalSize = (await telegramStreamService.getFileSize(fileId)) || 1500000000;
+    const end = Math.min(start + buffer.length - 1, totalSize - 1);
+
     const contentType = isImage ? 'image/jpeg' : 'video/mp4';
 
     if (range && !isImage) {
-      const end = start + buffer.length - 1;
       res.writeHead(206, {
-        'Content-Range': `bytes ${start}-${end}/*`,
+        'Content-Range': `bytes ${start}-${end}/${totalSize}`,
         'Accept-Ranges': 'bytes',
         'Content-Length': buffer.length,
         'Content-Type': contentType,

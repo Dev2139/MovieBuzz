@@ -11,6 +11,7 @@ dotenv.config();
 interface CachedLocation {
   inputLocation: any;
   dcId: number;
+  size: number;
   updatedAt: number;
 }
 
@@ -25,7 +26,7 @@ class TelegramStreamService {
   private channelId = process.env.TELEGRAM_CHANNEL_ID || '@devcinestreambot';
   private sessionFilePath = path.join(process.cwd(), '.bot_session');
 
-  // Map of documentId string -> CachedLocation with fresh fileReference
+  // Map of documentId string -> CachedLocation with fresh fileReference & size
   private locationCache = new Map<string, CachedLocation>();
 
   async getClient(): Promise<TelegramClient | null> {
@@ -78,7 +79,7 @@ class TelegramStreamService {
   }
 
   /**
-   * Fetch recent chat/channel messages to refresh fileReferences for all videos
+   * Fetch recent chat/channel messages to refresh fileReferences & sizes for all videos
    */
   async refreshLocations(): Promise<void> {
     try {
@@ -95,8 +96,10 @@ class TelegramStreamService {
         if (msg.media && (msg.media as any).document) {
           const doc = (msg.media as any).document;
           const docId = doc.id.toString();
+          const docSize = doc.size ? (doc.size.toNumber ? doc.size.toNumber() : Number(doc.size)) : 0;
           this.locationCache.set(docId, {
             dcId: doc.dcId,
+            size: docSize,
             updatedAt: now,
             inputLocation: new Api.InputDocumentFileLocation({
               id: doc.id,
@@ -110,6 +113,24 @@ class TelegramStreamService {
       console.log(`[TelegramStreamService] Refreshed ${this.locationCache.size} media file references from Telegram!`);
     } catch (err: any) {
       console.warn('[TelegramStreamService] refreshLocations note:', err.message);
+    }
+  }
+
+  /**
+   * Get total file size in bytes for a fileId
+   */
+  async getFileSize(fileId: string): Promise<number> {
+    try {
+      const decoded = decodeFileId(fileId);
+      const docIdStr = String(decoded.id);
+      let cached = this.locationCache.get(docIdStr);
+      if (!cached) {
+        await this.refreshLocations();
+        cached = this.locationCache.get(docIdStr);
+      }
+      return cached ? cached.size : 0;
+    } catch {
+      return 0;
     }
   }
 
