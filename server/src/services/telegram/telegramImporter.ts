@@ -55,6 +55,9 @@ export class TelegramImporter {
     try {
       const parsed = parseTelegramCaption(raw.caption);
       const title = parsed.title;
+      if (!title || title.startsWith('/') || title.toLowerCase() === 'start' || title.length < 2) {
+        return null;
+      }
       const year = parsed.year || 2026;
       const quality = parsed.quality || '1080p';
       const language = parsed.language || 'English';
