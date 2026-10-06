@@ -29,24 +29,29 @@ class TelegramStreamService {
     this.isInitializing = true;
     this.initPromise = (async () => {
       try {
-        let savedSession = '';
-        if (fs.existsSync(this.sessionFilePath)) {
+        let savedSession = process.env.TELEGRAM_SESSION_STRING || '';
+        if (!savedSession && fs.existsSync(this.sessionFilePath)) {
           savedSession = fs.readFileSync(this.sessionFilePath, 'utf-8').trim();
         }
 
-        console.log('[TelegramStreamService] Connecting MTProto Bot Client...');
+        console.log('[TelegramStreamService] Connecting MTProto Client...');
         const stringSession = new StringSession(savedSession);
         const client = new TelegramClient(stringSession, this.apiId, this.apiHash, {
           connectionRetries: 5,
         });
 
-        await client.start({ botAuthToken: this.botToken });
-        console.log('[TelegramStreamService] MTProto Bot Client connected!');
+        if (savedSession && savedSession.length > 5) {
+          await client.connect();
+          console.log('[TelegramStreamService] MTProto Client connected via Session!');
+        } else {
+          await client.start({ botAuthToken: this.botToken });
+          console.log('[TelegramStreamService] MTProto Bot Client connected!');
 
-        const sessionData = (client.session as any).save();
-        const newSessionStr = typeof sessionData === 'string' ? sessionData : '';
-        if (newSessionStr && newSessionStr.length > 5) {
-          fs.writeFileSync(this.sessionFilePath, newSessionStr, 'utf-8');
+          const sessionData = (client.session as any).save();
+          const newSessionStr = typeof sessionData === 'string' ? sessionData : '';
+          if (newSessionStr && newSessionStr.length > 5) {
+            fs.writeFileSync(this.sessionFilePath, newSessionStr, 'utf-8');
+          }
         }
 
         this.client = client;

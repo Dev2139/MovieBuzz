@@ -107,8 +107,28 @@ export const proxyTelegramFileStream = async (req: Request, res: Response) => {
         }
       }
 
-      // Smooth fallback video stream if MTProto is temporarily reconnecting
-      return res.redirect('https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4');
+      // Stream fallback video directly so player never freezes at 0:00 / 0:00
+      const fallbackUrl = 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4';
+      const fallbackStream = await axios.get(fallbackUrl, {
+        headers: range ? { Range: range } : {},
+        responseType: 'stream',
+      }).catch(() => null);
+
+      if (fallbackStream) {
+        const headers: any = {
+          'Content-Type': 'video/mp4',
+          'Accept-Ranges': 'bytes',
+        };
+        if (fallbackStream.headers['content-range']) {
+          headers['Content-Range'] = String(fallbackStream.headers['content-range']);
+        }
+        if (fallbackStream.headers['content-length']) {
+          headers['Content-Length'] = String(fallbackStream.headers['content-length']);
+        }
+        res.writeHead(range ? 206 : 200, headers);
+        return fallbackStream.data.pipe(res);
+      }
+      return res.status(404).json({ message: 'Media stream unavailable' });
     }
 
     const contentType = isImage ? 'image/jpeg' : 'video/mp4';
