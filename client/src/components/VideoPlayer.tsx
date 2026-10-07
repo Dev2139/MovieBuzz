@@ -252,6 +252,34 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
   };
 
+  const handleStall = useCallback(() => {
+    if (videoRef.current && isPlaying) {
+      console.warn('[VideoPlayer] Playback stalled, attempting buffer resume...');
+      const curPos = videoRef.current.currentTime;
+      setTimeout(() => {
+        if (videoRef.current && videoRef.current.paused) {
+          videoRef.current.currentTime = curPos;
+          videoRef.current.play().catch(() => {});
+        }
+      }, 1500);
+    }
+  }, [isPlaying]);
+
+  // Sync volume and muted state on video element
+  useEffect(() => {
+    if (videoRef.current) {
+      videoRef.current.volume = volume;
+      videoRef.current.muted = isMuted;
+    }
+  }, [volume, isMuted]);
+
+  // Reload media element when streamUrl changes
+  useEffect(() => {
+    if (videoRef.current) {
+      videoRef.current.load();
+    }
+  }, [streamUrl]);
+
   return (
     <div
       ref={containerRef}
@@ -260,10 +288,20 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     >
       <video
         ref={videoRef}
+        src={streamUrl}
         onTimeUpdate={handleTimeUpdate}
         onLoadedMetadata={handleLoadedMetadata}
-        onPlay={() => setIsPlaying(true)}
+        onPlay={() => {
+          setIsPlaying(true);
+          if (videoRef.current) {
+            videoRef.current.volume = volume;
+            videoRef.current.muted = isMuted;
+          }
+        }}
         onPause={() => setIsPlaying(false)}
+        onWaiting={handleStall}
+        onStalled={handleStall}
+        onError={handleStall}
         onEnded={() => {
           setIsPlaying(false);
           if (onEnded) onEnded();
@@ -273,9 +311,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         poster={posterUrl}
         playsInline
       >
-        <source src={streamUrl} type="video/x-matroska" />
-        <source src={streamUrl} type="video/webm" />
         <source src={streamUrl} type="video/mp4" />
+        <source src={streamUrl} type="video/webm" />
       </video>
 
       {/* Overlay Title when paused or hovering */}

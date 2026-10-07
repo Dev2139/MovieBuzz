@@ -31,7 +31,7 @@ export const HomePage: React.FC = () => {
   });
 
   // Featured Content query for Hero
-  const { data: featuredData } = useQuery({
+  const { data: featuredData, isLoading: isFeaturedLoading } = useQuery({
     queryKey: ['featured-content'],
     queryFn: () => fetchContentList({ featured: 'true', limit: 5 }),
   });
@@ -54,22 +54,46 @@ export const HomePage: React.FC = () => {
     queryFn: () => fetchContentList({ type: 'series', sort: 'popular', limit: 10 }),
   });
 
+  // All Latest Content (Fallback query)
+  const { data: allContentData, isLoading: isAllLoading } = useQuery({
+    queryKey: ['all-latest-content'],
+    queryFn: () => fetchContentList({ limit: 20 }),
+  });
+
   // Genres List
   const { data: genresData } = useQuery({
     queryKey: ['genres-list'],
     queryFn: fetchGenres,
   });
 
-  const heroItem = featuredData?.items && featuredData.items.length > 0 ? featuredData.items[0] : null;
+  // Pick best available item for Hero Banner
+  const heroItem =
+    (featuredData?.items && featuredData.items.length > 0 ? featuredData.items[0] : null) ||
+    (trendingMoviesData?.items && trendingMoviesData.items.length > 0 ? trendingMoviesData.items[0] : null) ||
+    (trendingSeriesData?.items && trendingSeriesData.items.length > 0 ? trendingSeriesData.items[0] : null) ||
+    (popularMoviesData?.items && popularMoviesData.items.length > 0 ? popularMoviesData.items[0] : null) ||
+    (allContentData?.items && allContentData.items.length > 0 ? allContentData.items[0] : null);
+
+  const isLoading = isFeaturedLoading && isAllLoading;
 
   return (
     <div className="min-h-screen bg-dark-base text-white pb-16 space-y-8">
       {/* Hero Banner Section */}
       {heroItem ? (
         <HeroBanner item={heroItem} />
-      ) : (
-        <div className="h-96 w-full bg-dark-surface animate-pulse flex items-center justify-center text-gray-500">
+      ) : isLoading ? (
+        <div className="h-[500px] w-full bg-dark-surface animate-pulse flex items-center justify-center text-gray-400 font-medium">
           Loading Cinematic Catalog...
+        </div>
+      ) : (
+        <div className="h-[400px] w-full bg-gradient-to-br from-dark-card to-dark-surface border-b border-dark-border flex flex-col items-center justify-center text-center p-8 space-y-4">
+          <div className="w-16 h-16 bg-brand-500/20 text-brand-500 rounded-full flex items-center justify-center">
+            <Sparkles className="w-8 h-8" />
+          </div>
+          <h2 className="text-3xl font-extrabold text-white">Welcome to CineStream</h2>
+          <p className="text-gray-400 max-w-md text-sm">
+            Discover and stream licensed movies, TV series, and posts in ultra-high quality.
+          </p>
         </div>
       )}
 
@@ -178,12 +202,21 @@ export const HomePage: React.FC = () => {
       )}
 
       {/* Main Carousels */}
-      {trendingMoviesData?.items && (
+      {allContentData?.items && allContentData.items.length > 0 && (
+        <HorizontalCarousel
+          title="Latest Movies & Posts"
+          subtitle="Recently added cinema, TV episodes, and Telegram streams"
+          items={allContentData.items}
+          icon={<Sparkles className="w-5 h-5 text-brand-500" />}
+        />
+      )}
+
+      {trendingMoviesData?.items && trendingMoviesData.items.length > 0 && (
         <HorizontalCarousel
           title="Trending Movies"
           subtitle="Top streamed licensed movies this week"
           items={trendingMoviesData.items}
-          icon={<Flame className="w-5 h-5" />}
+          icon={<Flame className="w-5 h-5 text-brand-500" />}
         />
       )}
 

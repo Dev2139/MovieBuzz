@@ -71,9 +71,9 @@ export const proxyTelegramFileStream = async (req: Request, res: Response) => {
     const botToken = process.env.TELEGRAM_BOT_TOKEN;
     const range = req.headers.range;
 
-    console.log(`[ProxyStream] Incoming request for fileId: ${fileId.slice(0, 35)}... Range: ${range || 'none'}`);
+    console.log(`[ProxyStream] Request for fileId: ${fileId.slice(0, 30)}... Range: ${range || 'none'}`);
 
-    // 1. Check if it's a thumbnail photo or small file via Telegram Bot HTTP API getFile
+    // 1. Check if it's a thumbnail photo or image file
     const isImage = fileId.length > 50 && (fileId.startsWith('AAMC') || fileId.includes('thumb'));
     if (isImage && botToken) {
       const fileRes = await axios.get(`https://api.telegram.org/bot${botToken}/getFile?file_id=${fileId}`).catch(() => null);
@@ -84,7 +84,11 @@ export const proxyTelegramFileStream = async (req: Request, res: Response) => {
       }
     }
 
-    // 2. MTProto Range Chunk Streaming for Movies (handles > 20 MB files)
+    // Lookup messageId in DB if stored, to aid fast location refresh
+    const mediaDoc = await Media.findOne({ providerMediaId: fileId }).select('providerMessageId').lean().catch(() => null);
+    const messageId = mediaDoc?.providerMessageId;
+
+    // 2. Range Chunk Streaming for Movies
     let start = 0;
     let reqSize = 512 * 1024;
 
@@ -97,48 +101,50 @@ export const proxyTelegramFileStream = async (req: Request, res: Response) => {
       }
     }
 
-    // Align offset to 4KB boundary required by Telegram MTProto API
-    const alignedOffset = Math.floor(start / 4096) * 4096;
-    const limit = 512 * 1024; // 512 KB standard Telegram MTProto chunk limit
+    // Align offset to 512KB chunk boundary required by Telegram MTProto API
+    const chunkSize = 512 * 1024;
+    const alignedOffset = Math.floor(start / chunkSize) * chunkSize;
+    const limit = chunkSize;
 
-    const rawBuffer = await telegramStreamService.getChunk(fileId, alignedOffset, limit);
+    const rawBuffer = await telegramStreamService.getChunk(fileId, alignedOffset, limit, messageId);
 
     if (!rawBuffer) {
-      // Fallback to Bot API getFile if file happens to be small (< 20MB)
-      if (botToken) {
+      // Fallback only if initial segment load fails
+      if (start === 0 && botToken) {
         const fileRes = await axios.get(`https://api.telegram.org/bot${botToken}/getFile?file_id=${fileId}`).catch(() => null);
         if (fileRes && fileRes.data?.result?.file_path) {
           const filePath = fileRes.data.result.file_path;
           const telegramFileUrl = `https://api.telegram.org/file/bot${botToken}/${filePath}`;
           return res.redirect(telegramFileUrl);
         }
+
+        const fallbackUrl = 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4';
+        const fallbackStream = await axios.get(fallbackUrl, {
+          headers: range ? { Range: range } : {},
+          responseType: 'stream',
+        }).catch(() => null);
+
+        if (fallbackStream) {
+          const headers: any = {
+            'Content-Type': 'video/mp4',
+            'Accept-Ranges': 'bytes',
+          };
+          if (fallbackStream.headers['content-range']) {
+            headers['Content-Range'] = String(fallbackStream.headers['content-range']);
+          }
+          if (fallbackStream.headers['content-length']) {
+            headers['Content-Length'] = String(fallbackStream.headers['content-length']);
+          }
+          res.writeHead(range ? 206 : 200, headers);
+          return fallbackStream.data.pipe(res);
+        }
       }
 
-      // Stream fallback video directly so player never freezes at 0:00 / 0:00
-      const fallbackUrl = 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4';
-      const fallbackStream = await axios.get(fallbackUrl, {
-        headers: range ? { Range: range } : {},
-        responseType: 'stream',
-      }).catch(() => null);
-
-      if (fallbackStream) {
-        const headers: any = {
-          'Content-Type': 'video/mp4',
-          'Accept-Ranges': 'bytes',
-        };
-        if (fallbackStream.headers['content-range']) {
-          headers['Content-Range'] = String(fallbackStream.headers['content-range']);
-        }
-        if (fallbackStream.headers['content-length']) {
-          headers['Content-Length'] = String(fallbackStream.headers['content-length']);
-        }
-        res.writeHead(range ? 206 : 200, headers);
-        return fallbackStream.data.pipe(res);
-      }
-      return res.status(404).json({ message: 'Media stream unavailable' });
+      // For mid-stream chunk requests, return 503 retry status so browser HTML5 video player retries safely
+      return res.status(503).json({ message: 'Segment temporarily unavailable' });
     }
 
-    // Slice the exact byte range requested by the browser
+    // Slice exact byte range requested by the browser
     const sliceStart = start - alignedOffset;
     const sliceEnd = Math.min(sliceStart + reqSize, rawBuffer.length);
     const buffer = rawBuffer.subarray(sliceStart, sliceEnd);
@@ -146,12 +152,11 @@ export const proxyTelegramFileStream = async (req: Request, res: Response) => {
     const totalSize = (await telegramStreamService.getFileSize(fileId)) || 1500000000;
     const end = Math.min(start + buffer.length - 1, totalSize - 1);
 
-    // Determine content type (image vs MKV vs MP4)
     let contentType = 'video/mp4';
     if (isImage) {
       contentType = 'image/jpeg';
     } else if (rawBuffer.length >= 4 && rawBuffer[0] === 0x1a && rawBuffer[1] === 0x45 && rawBuffer[2] === 0xdf && rawBuffer[3] === 0xa3) {
-      contentType = 'video/x-matroska';
+      contentType = 'video/webm'; // EBML container (MKV/WebM)
     }
 
     if (range && !isImage) {
@@ -160,36 +165,49 @@ export const proxyTelegramFileStream = async (req: Request, res: Response) => {
         'Accept-Ranges': 'bytes',
         'Content-Length': buffer.length,
         'Content-Type': contentType,
+        'Cache-Control': 'public, max-age=3600',
       });
       return res.end(buffer);
     } else {
       res.writeHead(200, {
         'Content-Length': buffer.length,
         'Content-Type': contentType,
+        'Cache-Control': 'public, max-age=3600',
       });
       return res.end(buffer);
     }
   } catch (error: any) {
     console.error('proxyTelegramFileStream error:', error.message);
-    return res.redirect('https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4');
+    return res.status(500).json({ message: 'Stream error' });
   }
 };
 
 /**
- * Proxy file attachment download from Telegram MTProto
+ * Proxy file attachment download from Telegram MTProto in safe 512KB chunks
  */
 export const downloadTelegramFile = async (req: Request, res: Response) => {
   try {
-    const { fileId } = req.params;
-    const buffer = await telegramStreamService.getChunk(fileId, 0, 10 * 1024 * 1024);
+    const rawFileId = req.params.fileId;
+    const fileId = decodeURIComponent(rawFileId);
 
-    if (!buffer) {
-      return res.status(404).json({ message: 'Download chunk unavailable' });
+    const mediaDoc = await Media.findOne({ providerMediaId: fileId }).select('providerMessageId').lean().catch(() => null);
+    const messageId = mediaDoc?.providerMessageId;
+
+    const totalSize = (await telegramStreamService.getFileSize(fileId)) || 50 * 1024 * 1024;
+    const chunkSize = 512 * 1024;
+
+    res.setHeader('Content-Disposition', `attachment; filename="CineStream_${fileId.slice(-8)}.mp4"`);
+    res.setHeader('Content-Type', 'video/mp4');
+    if (totalSize > 0) {
+      res.setHeader('Content-Length', totalSize);
     }
 
-    res.setHeader('Content-Disposition', 'attachment; filename="CineStream_Movie.mp4"');
-    res.setHeader('Content-Type', 'video/mp4');
-    return res.end(buffer);
+    for (let offset = 0; offset < totalSize; offset += chunkSize) {
+      const chunk = await telegramStreamService.getChunk(fileId, offset, chunkSize, messageId);
+      if (!chunk || chunk.length === 0) break;
+      res.write(chunk);
+    }
+    return res.end();
   } catch (error: any) {
     console.error('downloadTelegramFile error:', error.message);
     return res.status(500).json({ message: 'Error downloading media' });

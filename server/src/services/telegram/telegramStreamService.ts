@@ -81,7 +81,7 @@ class TelegramStreamService {
   /**
    * Fetch recent chat/channel messages to refresh fileReferences & sizes for all videos
    */
-  async refreshLocations(): Promise<void> {
+  async refreshLocations(targetDocId?: string, messageId?: string): Promise<void> {
     try {
       const client = await this.getClient();
       if (!client) return;
@@ -89,27 +89,58 @@ class TelegramStreamService {
       const peer = await client.getEntity(this.channelId).catch(() => null);
       if (!peer) return;
 
-      const messages = await client.getMessages(peer as any, { limit: 50 });
       const now = Date.now();
 
-      for (const msg of messages) {
-        if (msg.media && (msg.media as any).document) {
-          const doc = (msg.media as any).document;
-          const docId = doc.id.toString();
-          const docSize = doc.size ? (doc.size.toNumber ? doc.size.toNumber() : Number(doc.size)) : 0;
-          this.locationCache.set(docId, {
-            dcId: doc.dcId,
-            size: docSize,
-            updatedAt: now,
-            inputLocation: new Api.InputDocumentFileLocation({
-              id: doc.id,
-              accessHash: doc.accessHash,
-              fileReference: doc.fileReference,
-              thumbSize: '',
-            }),
-          });
+      // If specific messageId is provided, fetch that exact message first
+      if (messageId) {
+        try {
+          const directMsgs = await client.getMessages(peer as any, { ids: [Number(messageId)] });
+          for (const msg of directMsgs) {
+            if (msg && msg.media && (msg.media as any).document) {
+              const doc = (msg.media as any).document;
+              const docId = doc.id.toString();
+              const docSize = doc.size ? (doc.size.toNumber ? doc.size.toNumber() : Number(doc.size)) : 0;
+              this.locationCache.set(docId, {
+                dcId: doc.dcId,
+                size: docSize,
+                updatedAt: now,
+                inputLocation: new Api.InputDocumentFileLocation({
+                  id: doc.id,
+                  accessHash: doc.accessHash,
+                  fileReference: doc.fileReference,
+                  thumbSize: '',
+                }),
+              });
+            }
+          }
+        } catch {
+          // ignore error and fallback to fetching recent channel messages
         }
       }
+
+      // Fetch channel messages if targetDocId is not cached yet
+      if (!targetDocId || !this.locationCache.has(targetDocId)) {
+        const messages = await client.getMessages(peer as any, { limit: 100 });
+        for (const msg of messages) {
+          if (msg && msg.media && (msg.media as any).document) {
+            const doc = (msg.media as any).document;
+            const docId = doc.id.toString();
+            const docSize = doc.size ? (doc.size.toNumber ? doc.size.toNumber() : Number(doc.size)) : 0;
+            this.locationCache.set(docId, {
+              dcId: doc.dcId,
+              size: docSize,
+              updatedAt: now,
+              inputLocation: new Api.InputDocumentFileLocation({
+                id: doc.id,
+                accessHash: doc.accessHash,
+                fileReference: doc.fileReference,
+                thumbSize: '',
+              }),
+            });
+          }
+        }
+      }
+
       console.log(`[TelegramStreamService] Refreshed ${this.locationCache.size} media file references from Telegram!`);
     } catch (err: any) {
       console.warn('[TelegramStreamService] refreshLocations note:', err.message);
@@ -125,7 +156,7 @@ class TelegramStreamService {
       const docIdStr = String(decoded.id);
       let cached = this.locationCache.get(docIdStr);
       if (!cached) {
-        await this.refreshLocations();
+        await this.refreshLocations(docIdStr);
         cached = this.locationCache.get(docIdStr);
       }
       return cached ? cached.size : 0;
@@ -138,10 +169,17 @@ class TelegramStreamService {
    * Decode Telegram file_id and fetch binary byte chunk directly via MTProto
    * Handles files of ANY size (GBs) with ZERO 20MB limits.
    */
-  async getChunk(fileId: string, offset = 0, limit = 512 * 1024): Promise<Buffer | null> {
+  async getChunk(fileId: string, offset = 0, limit = 512 * 1024, messageId?: string): Promise<Buffer | null> {
     try {
       const client = await this.getClient();
       if (!client) return null;
+
+      // 1. Enforce Telegram MTProto API alignment constraints:
+      // - limit must be <= 1 MB (1048576 bytes) and a multiple of 4096 bytes
+      // - offset must be a multiple of limit (offset % limit === 0)
+      let safeLimit = Math.min(limit, 1024 * 1024);
+      safeLimit = Math.max(4096, Math.floor(safeLimit / 4096) * 4096);
+      const safeOffset = Math.max(0, Math.floor(offset / safeLimit) * safeLimit);
 
       const decoded = decodeFileId(fileId);
       const docIdStr = String(decoded.id);
@@ -149,7 +187,7 @@ class TelegramStreamService {
       // Check if location is in cache
       let cached = this.locationCache.get(docIdStr);
       if (!cached || Date.now() - cached.updatedAt > 1800000) {
-        await this.refreshLocations();
+        await this.refreshLocations(docIdStr, messageId);
         cached = this.locationCache.get(docIdStr);
       }
 
@@ -178,42 +216,51 @@ class TelegramStreamService {
         }
       }
 
-      const sender = await client.getSender(dcId);
-
-      try {
-        const res: any = await sender.send(
-          new Api.upload.GetFile({
+      // Retry loop to handle expired file references or transient MTProto drops
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          const request = new Api.upload.GetFile({
             location: inputLocation,
-            offset: bigInt(offset) as any,
-            limit,
-          })
-        );
+            offset: bigInt(safeOffset) as any,
+            limit: safeLimit,
+          });
 
-        if (res && res.bytes) {
-          return Buffer.from(res.bytes);
-        }
-      } catch (fileRefErr: any) {
-        if (fileRefErr.message?.includes('FILE_REFERENCE_EXPIRED') || fileRefErr.code === 400) {
-          console.log(`[TelegramStreamService] File reference expired for ${fileId}, refreshing from Telegram...`);
-          this.locationCache.delete(docIdStr);
-          await this.refreshLocations();
+          // Try sending to target DC sender connection first, fallback to main client invoke
+          let res: any;
+          try {
+            const sender = await client.getSender(dcId);
+            res = await sender.send(request);
+          } catch {
+            res = await client.invoke(request);
+          }
 
-          const freshCached = this.locationCache.get(docIdStr);
-          if (freshCached) {
-            const freshSender = await client.getSender(freshCached.dcId);
-            const resRetry: any = await freshSender.send(
-              new Api.upload.GetFile({
-                location: freshCached.inputLocation,
-                offset: bigInt(offset) as any,
-                limit,
-              })
-            );
-            if (resRetry && resRetry.bytes) {
-              return Buffer.from(resRetry.bytes);
+          if (res && res.bytes) {
+            return Buffer.from(res.bytes);
+          }
+        } catch (fileRefErr: any) {
+          console.warn(`[TelegramStreamService] GetChunk attempt ${attempt} notice:`, fileRefErr.message);
+
+          if (
+            fileRefErr.message?.includes('FILE_REFERENCE') ||
+            fileRefErr.message?.includes('LOCATION_INVALID') ||
+            fileRefErr.code === 400
+          ) {
+            console.log(`[TelegramStreamService] Refreshing file reference for ${fileId}...`);
+            this.locationCache.delete(docIdStr);
+            await this.refreshLocations(docIdStr, messageId);
+
+            const freshCached = this.locationCache.get(docIdStr);
+            if (freshCached) {
+              inputLocation = freshCached.inputLocation;
+              dcId = freshCached.dcId;
+              continue;
             }
           }
+
+          if (attempt < 3) {
+            await new Promise((r) => setTimeout(r, 400 * attempt));
+          }
         }
-        throw fileRefErr;
       }
 
       return null;
@@ -225,3 +272,4 @@ class TelegramStreamService {
 }
 
 export const telegramStreamService = new TelegramStreamService();
+
