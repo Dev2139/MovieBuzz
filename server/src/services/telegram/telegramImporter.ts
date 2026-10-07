@@ -75,7 +75,7 @@ export class TelegramImporter {
       const cast = tmdbMeta?.cast || (parsed.cast && parsed.cast.length > 0 ? parsed.cast : ['Popular Cast']);
       const languages = tmdbMeta?.languages || [language];
       const releaseYear = tmdbMeta?.releaseYear || year;
-      const defaultStream = raw.streamUrl || 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4';
+      const defaultStream = raw.streamUrl || 'https://vjs.zencdn.net/v/oceans.mp4';
       const defaultDownload = raw.downloadUrl || defaultStream;
 
       // Check if it's a TV Series episode (e.g., S01E02)

@@ -46,7 +46,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
 
   const resolveStreamUrl = (rawUrl?: string) => {
-    if (!rawUrl) return 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4';
+    if (!rawUrl || rawUrl.includes('commondatastorage.googleapis.com')) {
+      return 'https://vjs.zencdn.net/v/oceans.mp4';
+    }
     const apiBase = import.meta.env.VITE_API_URL || 'https://moviebuzz-99fb.onrender.com/api';
     const backendOrigin = apiBase.replace(/\/api\/?$/, '');
 
@@ -370,8 +372,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         onWaiting={handleStall}
         onStalled={handleStall}
         onError={() => {
-          if (videoRef.current && !streamUrl.includes('sample/TearsOfSteel.mp4')) {
-            setStreamUrl('https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4');
+          if (videoRef.current && !streamUrl.includes('vjs.zencdn.net')) {
+            setStreamUrl('https://vjs.zencdn.net/v/oceans.mp4');
           }
         }}
         onEnded={() => {

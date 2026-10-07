@@ -74,8 +74,11 @@ export const proxyTelegramFileStream = async (req: Request, res: Response) => {
     const fileId = decodeURIComponent(rawFileId);
     const range = req.headers.range;
 
-    const serveFallbackStream = async () => {
-      const fallbackUrl = 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4';
+    const serveFallbackStream = async (targetUrl?: string) => {
+      let fallbackUrl = targetUrl;
+      if (!fallbackUrl || fallbackUrl.includes('commondatastorage.googleapis.com')) {
+        fallbackUrl = 'https://vjs.zencdn.net/v/oceans.mp4';
+      }
       const streamRes = await axios.get(fallbackUrl, {
         headers: range ? { Range: range } : {},
         responseType: 'stream',
@@ -86,7 +89,7 @@ export const proxyTelegramFileStream = async (req: Request, res: Response) => {
         const headers: any = {
           'Access-Control-Allow-Origin': '*',
           'Access-Control-Allow-Headers': '*',
-          'Content-Type': 'video/mp4',
+          'Content-Type': streamRes.headers['content-type'] || 'video/mp4',
           'Accept-Ranges': 'bytes',
         };
         if (streamRes.headers['content-range']) {
@@ -101,9 +104,22 @@ export const proxyTelegramFileStream = async (req: Request, res: Response) => {
       return res.status(503).json({ message: 'Media stream unavailable' });
     };
 
-    // MTProto Chunk Range Streaming
-    const mediaDoc = await Media.findOne({ providerMediaId: fileId }).select('providerMessageId').lean().catch(() => null);
+    // If fileId is a direct HTTP/HTTPS URL, serve directly!
+    if (fileId.startsWith('http://') || fileId.startsWith('https://')) {
+      return serveFallbackStream(fileId);
+    }
+
+    // Lookup media document from MongoDB
+    const mediaDoc = await Media.findOne({
+      $or: [{ providerMediaId: fileId }, { _id: fileId.match(/^[0-9a-fA-F]{24}$/) ? fileId : null }],
+    }).select('providerMessageId streamUrl').lean().catch(() => null);
+
     const messageId = mediaDoc?.providerMessageId;
+
+    // If streamUrl is a direct external MP4 URL, serve it directly without MTProto overhead
+    if (mediaDoc?.streamUrl && (mediaDoc.streamUrl.startsWith('http://') || mediaDoc.streamUrl.startsWith('https://')) && !mediaDoc.streamUrl.includes('/proxy-file/') && !mediaDoc.streamUrl.includes('commondatastorage.googleapis.com')) {
+      return serveFallbackStream(mediaDoc.streamUrl);
+    }
 
     let start = 0;
     let reqSize = 512 * 1024;
@@ -124,7 +140,7 @@ export const proxyTelegramFileStream = async (req: Request, res: Response) => {
     const rawBuffer = await telegramStreamService.getChunk(fileId, alignedOffset, limit, messageId);
 
     if (!rawBuffer) {
-      return serveFallbackStream();
+      return serveFallbackStream(mediaDoc?.streamUrl);
     }
 
     const sliceStart = start - alignedOffset;
@@ -163,7 +179,7 @@ export const proxyTelegramFileStream = async (req: Request, res: Response) => {
     }
   } catch (error: any) {
     console.error('proxyTelegramFileStream error:', error.message);
-    const fallbackUrl = 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4';
+    const fallbackUrl = 'https://vjs.zencdn.net/v/oceans.mp4';
     const streamRes = await axios.get(fallbackUrl, {
       headers: req.headers.range ? { Range: req.headers.range } : {},
       responseType: 'stream',
@@ -172,6 +188,8 @@ export const proxyTelegramFileStream = async (req: Request, res: Response) => {
 
     if (streamRes) {
       const headers: any = {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': '*',
         'Content-Type': 'video/mp4',
         'Accept-Ranges': 'bytes',
       };

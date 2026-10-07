@@ -171,7 +171,23 @@ class TelegramStreamService {
    */
   async getChunk(fileId: string, offset = 0, limit = 512 * 1024, messageId?: string): Promise<Buffer | null> {
     try {
-      const client = await this.getClient();
+      if (!fileId || fileId.startsWith('tg_media_') || fileId.startsWith('mock-') || fileId.length < 15) {
+        return null;
+      }
+
+      let decoded: any;
+      try {
+        decoded = decodeFileId(fileId);
+        if (!decoded || !decoded.id) return null;
+      } catch {
+        return null;
+      }
+
+      // Fast connection timeout to ensure HTTP video stream never hangs
+      const clientPromise = this.getClient();
+      const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000));
+      const client = await Promise.race([clientPromise, timeoutPromise]);
+
       if (!client) return null;
 
       // 1. Enforce Telegram MTProto API alignment constraints:
@@ -179,7 +195,6 @@ class TelegramStreamService {
       safeLimit = Math.max(4096, Math.floor(safeLimit / 4096) * 4096);
       const safeOffset = Math.max(0, Math.floor(offset / safeLimit) * safeLimit);
 
-      const decoded = decodeFileId(fileId);
       const docIdStr = String(decoded.id);
 
       let cached = this.locationCache.get(docIdStr);
