@@ -31,13 +31,13 @@ export const getContentList = async (req: Request, res: Response) => {
 
     let sortOptions: any = { createdAt: -1 };
     if (sort === 'popular') {
-      sortOptions = { popularity: -1, rating: -1 };
+      sortOptions = { createdAt: -1, popularity: -1 };
     } else if (sort === 'rating') {
-      sortOptions = { rating: -1 };
+      sortOptions = { rating: -1, createdAt: -1 };
     } else if (sort === 'title') {
       sortOptions = { title: 1 };
     } else if (sort === 'latest') {
-      sortOptions = { releaseYear: -1, createdAt: -1 };
+      sortOptions = { createdAt: -1, releaseYear: -1 };
     }
 
     const skip = (Number(page) - 1) * Number(limit);

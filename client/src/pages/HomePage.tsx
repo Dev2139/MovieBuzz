@@ -34,30 +34,35 @@ export const HomePage: React.FC = () => {
   const { data: featuredData, isLoading: isFeaturedLoading } = useQuery({
     queryKey: ['featured-content'],
     queryFn: () => fetchContentList({ featured: 'true', limit: 5 }),
+    refetchInterval: 15000,
   });
 
   // Trending Movies
   const { data: trendingMoviesData } = useQuery({
     queryKey: ['trending-movies'],
     queryFn: () => fetchContentList({ type: 'movie', sort: 'popular', limit: 10 }),
+    refetchInterval: 15000,
   });
 
   // Popular Movies
   const { data: popularMoviesData } = useQuery({
     queryKey: ['popular-movies'],
     queryFn: () => fetchContentList({ type: 'movie', sort: 'rating', limit: 10 }),
+    refetchInterval: 15000,
   });
 
   // Trending Series
   const { data: trendingSeriesData } = useQuery({
     queryKey: ['trending-series'],
     queryFn: () => fetchContentList({ type: 'series', sort: 'popular', limit: 10 }),
+    refetchInterval: 15000,
   });
 
   // All Latest Content (Fallback query)
   const { data: allContentData, isLoading: isAllLoading } = useQuery({
     queryKey: ['all-latest-content'],
     queryFn: () => fetchContentList({ limit: 20 }),
+    refetchInterval: 15000,
   });
 
   // Genres List

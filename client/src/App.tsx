@@ -20,8 +20,8 @@ import { AdminTelegramPage } from './pages/AdminTelegramPage';
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      refetchOnWindowFocus: false,
-      staleTime: 1000 * 60 * 5, // 5 minutes cache
+      refetchOnWindowFocus: true,
+      staleTime: 1000 * 5, // 5 seconds fresh cache
       retry: 1,
     },
   },

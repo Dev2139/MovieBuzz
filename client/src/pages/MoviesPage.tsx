@@ -31,6 +31,7 @@ export const MoviesPage: React.FC = () => {
         page,
         limit: 20,
       }),
+    refetchInterval: 15000,
   });
 
   const handleReset = () => {
