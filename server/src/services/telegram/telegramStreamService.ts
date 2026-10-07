@@ -184,7 +184,7 @@ class TelegramStreamService {
    * Decode Telegram file_id and fetch binary byte chunk directly via MTProto
    * Zero network latency pre-fetching for instant video startup
    */
-  async getChunk(fileId: string, offset = 0, limit = 512 * 1024, messageId?: string): Promise<Buffer | null> {
+  async getChunk(fileId: string, offset = 0, limit = 512 * 1024, messageId?: string, channelId?: string): Promise<Buffer | null> {
     try {
       if (!fileId || fileId.startsWith('mock-')) {
         return null;
@@ -218,7 +218,7 @@ class TelegramStreamService {
       const msgIdToFetch = messageId || (fileId.startsWith('tg_') ? fileId.replace(/^tg_(mtproto|media)_/, '') : undefined);
 
       if (!cached && msgIdToFetch && /^\d+$/.test(msgIdToFetch)) {
-        await this.refreshLocations(fileId, msgIdToFetch);
+        await this.refreshLocations(fileId, msgIdToFetch, channelId);
         cached = this.locationCache.get(docIdStr) || this.locationCache.get(fileId) || this.locationCache.get(`tg_mtproto_${msgIdToFetch}`);
       }
 

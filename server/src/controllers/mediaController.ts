@@ -112,12 +112,13 @@ export const proxyTelegramFileStream = async (req: Request, res: Response) => {
     // Lookup media document from MongoDB
     const mediaDoc = await Media.findOne({
       $or: [{ providerMediaId: fileId }, { _id: fileId.match(/^[0-9a-fA-F]{24}$/) ? fileId : null }],
-    }).select('providerMessageId streamUrl').lean().catch(() => null);
+    }).select('providerMessageId channelId streamUrl').lean().catch(() => null);
 
     const messageId = mediaDoc?.providerMessageId;
+    const channelId = mediaDoc?.channelId;
 
     // If streamUrl is a direct external MP4 URL, serve it directly without MTProto overhead
-    if (mediaDoc?.streamUrl && (mediaDoc.streamUrl.startsWith('http://') || mediaDoc.streamUrl.startsWith('https://')) && !mediaDoc.streamUrl.includes('/proxy-file/') && !mediaDoc.streamUrl.includes('commondatastorage.googleapis.com')) {
+    if (mediaDoc?.streamUrl && (mediaDoc.streamUrl.startsWith('http://') || mediaDoc.streamUrl.startsWith('https://')) && !mediaDoc.streamUrl.includes('/proxy-file/') && !mediaDoc.streamUrl.includes('commondatastorage.googleapis.com') && !mediaDoc.streamUrl.includes('vjs.zencdn.net')) {
       return serveFallbackStream(mediaDoc.streamUrl);
     }
 
@@ -137,7 +138,7 @@ export const proxyTelegramFileStream = async (req: Request, res: Response) => {
     const alignedOffset = Math.floor(start / chunkSize) * chunkSize;
     const limit = chunkSize;
 
-    const rawBuffer = await telegramStreamService.getChunk(fileId, alignedOffset, limit, messageId);
+    const rawBuffer = await telegramStreamService.getChunk(fileId, alignedOffset, limit, messageId, channelId);
 
     if (!rawBuffer) {
       return serveFallbackStream(mediaDoc?.streamUrl);

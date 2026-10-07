@@ -149,6 +149,7 @@ export class TelegramImporter {
               provider: 'telegram',
               providerMediaId: raw.mediaId,
               providerMessageId: raw.messageId,
+              channelId: raw.channelId,
               status: 'active',
             },
             { upsert: true }
@@ -192,6 +193,7 @@ export class TelegramImporter {
               provider: 'telegram',
               providerMediaId: raw.mediaId,
               providerMessageId: raw.messageId,
+              channelId: raw.channelId,
               status: 'active',
             },
             { upsert: true }
