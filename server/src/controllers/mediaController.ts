@@ -79,10 +79,11 @@ export const proxyTelegramFileStream = async (req: Request, res: Response) => {
     const botToken = process.env.TELEGRAM_BOT_TOKEN;
     const range = req.headers.range;
 
-    // 1. High-speed Direct Telegram Bot API CDN Redirect for instant video startup
-    if (botToken) {
+    // 1. High-speed Direct Telegram Bot API CDN Redirect (for images & small files < 20MB)
+    const isSmallFileOrImage = fileId.startsWith('AAMC') || fileId.includes('thumb');
+    if (botToken && isSmallFileOrImage) {
       try {
-        const fileRes = await axios.get(`https://api.telegram.org/bot${botToken}/getFile?file_id=${fileId}`, { timeout: 3500 }).catch(() => null);
+        const fileRes = await axios.get(`https://api.telegram.org/bot${botToken}/getFile?file_id=${fileId}`, { timeout: 2000 }).catch(() => null);
         if (fileRes && fileRes.data?.result?.file_path) {
           const filePath = fileRes.data.result.file_path;
           const telegramFileUrl = `https://api.telegram.org/file/bot${botToken}/${filePath}`;
