@@ -100,9 +100,23 @@ export const getContentBySlug = async (req: Request, res: Response) => {
       availableMedia = await Media.find({ contentId: item._id, status: 'active' }).catch(() => []);
     }
 
+    const host = req.get('host') || 'localhost:5000';
+    const protocol = (req.headers['x-forwarded-proto'] as string) || req.protocol || 'http';
+    const baseUrl = `${protocol}://${host}`;
+
+    const normalizedMedia = availableMedia.map((m) => {
+      const obj = m.toObject ? m.toObject() : { ...m };
+      if (obj.provider === 'telegram' && obj.providerMediaId) {
+        obj.streamUrl = `${baseUrl}/api/media/proxy-file/${encodeURIComponent(obj.providerMediaId)}`;
+      } else if (obj.streamUrl && obj.streamUrl.startsWith('http://localhost:5000')) {
+        obj.streamUrl = obj.streamUrl.replace('http://localhost:5000', baseUrl);
+      }
+      return obj;
+    });
+
     return res.json({
       content: item,
-      media: availableMedia,
+      media: normalizedMedia,
     });
   } catch (error: any) {
     console.warn('getContentBySlug notice:', error.message);

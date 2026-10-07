@@ -43,14 +43,35 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
+  const resolveStreamUrl = (rawUrl?: string) => {
+    if (!rawUrl) return 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4';
+    const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+    const backendOrigin = apiBase.replace(/\/api\/?$/, '');
+
+    if (rawUrl.startsWith('http://localhost:5000')) {
+      return rawUrl.replace('http://localhost:5000', backendOrigin);
+    }
+    if (rawUrl.startsWith('/api/')) {
+      return `${backendOrigin}${rawUrl}`;
+    }
+    return rawUrl;
+  };
+
   const [selectedQuality, setSelectedQuality] = useState<string>(
     mediaList && mediaList.length > 0 ? mediaList[0].quality : '1080p'
   );
   const [streamUrl, setStreamUrl] = useState<string>(
-    mediaList && mediaList.length > 0
-      ? mediaList[0].streamUrl
-      : 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4'
+    resolveStreamUrl(mediaList && mediaList.length > 0 ? mediaList[0].streamUrl : undefined)
   );
+
+  // Sync streamUrl state whenever mediaList prop finishes loading or changes
+  useEffect(() => {
+    if (mediaList && mediaList.length > 0) {
+      const found = mediaList.find((m) => m.quality === selectedQuality) || mediaList[0];
+      const resolved = resolveStreamUrl(found.streamUrl);
+      setStreamUrl(resolved);
+    }
+  }, [mediaList, selectedQuality]);
 
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [currentTime, setCurrentTime] = useState<number>(initialPosition);
@@ -71,7 +92,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     if (found) {
       setSelectedQuality(quality);
       const currentPos = videoRef.current?.currentTime || 0;
-      setStreamUrl(found.streamUrl);
+      setStreamUrl(resolveStreamUrl(found.streamUrl));
       setShowSettings(false);
 
       // Restore position after source switch
