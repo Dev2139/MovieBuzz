@@ -58,11 +58,12 @@ app.use('/api', searchRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/admin', adminRoutes);
 
-// Health check endpoint
-app.get('/api/health', (req, res) => {
+// Root & Health check endpoints
+app.get(['/', '/api', '/api/health'], (req, res) => {
   res.json({
     status: 'ok',
     service: 'CineStream Backend API',
+    message: '🎬 CineStream API is active and running',
     timestamp: new Date().toISOString(),
   });
 });
