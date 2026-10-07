@@ -7,7 +7,7 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        target: 'http://localhost:5000',
+        target: 'https://movie-buzz-kappa.vercel.app',
         changeOrigin: true,
       },
     },

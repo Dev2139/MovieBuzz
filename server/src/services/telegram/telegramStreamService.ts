@@ -61,7 +61,11 @@ class TelegramStreamService {
           const sessionData = (client.session as any).save();
           const newSessionStr = typeof sessionData === 'string' ? sessionData : '';
           if (newSessionStr && newSessionStr.length > 5) {
-            fs.writeFileSync(this.sessionFilePath, newSessionStr, 'utf-8');
+            try {
+              fs.writeFileSync(this.sessionFilePath, newSessionStr, 'utf-8');
+            } catch {
+              // Ignore filesystem write on read-only serverless environments like Vercel
+            }
           }
         }
 
