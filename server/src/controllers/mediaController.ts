@@ -84,6 +84,8 @@ export const proxyTelegramFileStream = async (req: Request, res: Response) => {
 
       if (streamRes) {
         const headers: any = {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Headers': '*',
           'Content-Type': 'video/mp4',
           'Accept-Ranges': 'bytes',
         };
@@ -139,6 +141,8 @@ export const proxyTelegramFileStream = async (req: Request, res: Response) => {
 
     if (range) {
       res.writeHead(206, {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': '*',
         'Content-Range': `bytes ${start}-${end}/${totalSize}`,
         'Accept-Ranges': 'bytes',
         'Content-Length': buffer.length,
@@ -148,6 +152,9 @@ export const proxyTelegramFileStream = async (req: Request, res: Response) => {
       return res.end(buffer);
     } else {
       res.writeHead(200, {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': '*',
+        'Accept-Ranges': 'bytes',
         'Content-Length': buffer.length,
         'Content-Type': contentType,
         'Cache-Control': 'public, max-age=3600',
