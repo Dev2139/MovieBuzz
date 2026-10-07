@@ -107,7 +107,7 @@ export const logout = async (req: Request, res: Response) => {
 
 export const getMe = async (req: AuthRequest, res: Response) => {
   if (!req.user) {
-    return res.status(401).json({ message: 'Not authenticated' });
+    return res.json({ user: null });
   }
   return res.json({
     user: {
