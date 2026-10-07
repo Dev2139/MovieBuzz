@@ -46,6 +46,25 @@ export const getContentList = async (req: Request, res: Response) => {
       Content.countDocuments(query),
     ]);
 
+    // Auto-enrich any items asynchronously if they still use placeholder artwork
+    const { tmdbService } = await import('../services/tmdb/tmdbService');
+    for (const item of items) {
+      if (!item.posterUrl || item.posterUrl.includes('unsplash')) {
+        tmdbService.fetchMetadata(item.title, item.releaseYear, item.type as any).then((meta) => {
+          if (meta) {
+            Content.findByIdAndUpdate(item._id, {
+              posterUrl: meta.posterUrl,
+              backdropUrl: meta.backdropUrl,
+              rating: meta.rating,
+              description: meta.description,
+              genres: meta.genres,
+              cast: meta.cast,
+            }).catch(() => {});
+          }
+        }).catch(() => {});
+      }
+    }
+
     return res.json({
       items,
       total,
