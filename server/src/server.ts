@@ -1,6 +1,14 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
+// Suppress background GramJS MTProto socket update loop timeouts
+process.on('unhandledRejection', (reason: any) => {
+  if (reason?.message?.includes('TIMEOUT') || reason?.message?.includes('AUTH_KEY') || reason?.message?.includes('DISCONNECT')) {
+    return;
+  }
+  console.warn('[Server] Unhandled Rejection:', reason);
+});
+
 import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
