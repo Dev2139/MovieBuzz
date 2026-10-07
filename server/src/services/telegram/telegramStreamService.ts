@@ -52,8 +52,19 @@ class TelegramStreamService {
         });
 
         if (savedSession && savedSession.length > 5) {
-          await client.connect();
-          console.log('[TelegramStreamService] MTProto Client connected via User Session!');
+          try {
+            await client.connect();
+            console.log('[TelegramStreamService] MTProto Client connected via User Session!');
+          } catch (sessionErr: any) {
+            console.warn('[TelegramStreamService] User Session failed/duplicated, connecting via Bot Token MTProto:', sessionErr.message);
+            const botClient = new TelegramClient(new StringSession(''), this.apiId, this.apiHash, {
+              connectionRetries: 5,
+            });
+            await botClient.start({ botAuthToken: this.botToken });
+            console.log('[TelegramStreamService] MTProto Bot Client connected successfully!');
+            this.client = botClient;
+            return botClient;
+          }
         } else {
           await client.start({ botAuthToken: this.botToken });
           console.log('[TelegramStreamService] MTProto Bot Client connected!');
@@ -184,8 +195,9 @@ class TelegramStreamService {
       }
 
       // Fast connection timeout to ensure HTTP video stream never hangs
+      const timeoutMs = this.client ? 3000 : 8000;
       const clientPromise = this.getClient();
-      const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000));
+      const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs));
       const client = await Promise.race([clientPromise, timeoutPromise]);
 
       if (!client) return null;
