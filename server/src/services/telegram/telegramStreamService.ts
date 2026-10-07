@@ -115,7 +115,7 @@ class TelegramStreamService {
               const doc = (msg.media as any).document;
               const docId = doc.id.toString();
               const docSize = doc.size ? (doc.size.toNumber ? doc.size.toNumber() : Number(doc.size)) : 0;
-              this.locationCache.set(docId, {
+              const loc: CachedLocation = {
                 dcId: doc.dcId,
                 size: docSize,
                 updatedAt: now,
@@ -125,7 +125,11 @@ class TelegramStreamService {
                   fileReference: doc.fileReference,
                   thumbSize: '',
                 }),
-              });
+              };
+              this.locationCache.set(docId, loc);
+              if (targetDocId) this.locationCache.set(targetDocId, loc);
+              this.locationCache.set(`tg_mtproto_${messageId}`, loc);
+              this.locationCache.set(`tg_media_${messageId}`, loc);
             }
           }
         } catch {
@@ -182,20 +186,12 @@ class TelegramStreamService {
    */
   async getChunk(fileId: string, offset = 0, limit = 512 * 1024, messageId?: string): Promise<Buffer | null> {
     try {
-      if (!fileId || fileId.startsWith('tg_media_') || fileId.startsWith('mock-') || fileId.length < 15) {
+      if (!fileId || fileId.startsWith('mock-')) {
         return null;
       }
 
-      let decoded: any;
-      try {
-        decoded = decodeFileId(fileId);
-        if (!decoded || !decoded.id) return null;
-      } catch {
-        return null;
-      }
-
-      // Fast connection timeout to ensure HTTP video stream never hangs
-      const timeoutMs = this.client ? 3000 : 8000;
+      // Connection timeout to ensure HTTP video stream never hangs
+      const timeoutMs = this.client ? 4000 : 9000;
       const clientPromise = this.getClient();
       const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs));
       const client = await Promise.race([clientPromise, timeoutPromise]);
@@ -207,39 +203,59 @@ class TelegramStreamService {
       safeLimit = Math.max(4096, Math.floor(safeLimit / 4096) * 4096);
       const safeOffset = Math.max(0, Math.floor(offset / safeLimit) * safeLimit);
 
-      const docIdStr = String(decoded.id);
+      let docIdStr = fileId;
+      let decoded: any = null;
+      try {
+        decoded = decodeFileId(fileId);
+        if (decoded && decoded.id) {
+          docIdStr = String(decoded.id);
+        }
+      } catch {
+        // fileId is a message tag like tg_mtproto_795
+      }
 
-      let cached = this.locationCache.get(docIdStr);
-      let inputLocation: any;
-      let dcId: number;
+      let cached = this.locationCache.get(docIdStr) || this.locationCache.get(fileId);
+      const msgIdToFetch = messageId || (fileId.startsWith('tg_') ? fileId.replace(/^tg_(mtproto|media)_/, '') : undefined);
 
-      if (cached) {
-        inputLocation = cached.inputLocation;
-        dcId = cached.dcId;
-      } else {
-        dcId = decoded.dcId || 4;
+      if (!cached && msgIdToFetch && /^\d+$/.test(msgIdToFetch)) {
+        await this.refreshLocations(fileId, msgIdToFetch);
+        cached = this.locationCache.get(docIdStr) || this.locationCache.get(fileId) || this.locationCache.get(`tg_mtproto_${msgIdToFetch}`);
+      }
+
+      if (!cached && decoded) {
+        const dcId = decoded.dcId || 4;
         const fileRefBuffer = decoded.fileReference
           ? (Buffer.isBuffer(decoded.fileReference)
               ? decoded.fileReference
               : Buffer.from(decoded.fileReference, 'hex'))
           : Buffer.alloc(0);
 
-        if (decoded.fileType === 'photo' || decoded.fileType === 'thumbnail') {
-          inputLocation = new Api.InputPhotoFileLocation({
-            id: bigInt(decoded.id) as any,
-            accessHash: bigInt(decoded.access_hash) as any,
-            fileReference: fileRefBuffer,
-            thumbSize: 'm',
-          });
-        } else {
-          inputLocation = new Api.InputDocumentFileLocation({
-            id: bigInt(decoded.id) as any,
-            accessHash: bigInt(decoded.access_hash) as any,
-            fileReference: fileRefBuffer,
-            thumbSize: '',
-          });
-        }
+        const inputLocation = decoded.fileType === 'photo' || decoded.fileType === 'thumbnail'
+          ? new Api.InputPhotoFileLocation({
+              id: bigInt(decoded.id) as any,
+              accessHash: bigInt(decoded.access_hash) as any,
+              fileReference: fileRefBuffer,
+              thumbSize: 'm',
+            })
+          : new Api.InputDocumentFileLocation({
+              id: bigInt(decoded.id) as any,
+              accessHash: bigInt(decoded.access_hash) as any,
+              fileReference: fileRefBuffer,
+              thumbSize: '',
+            });
+
+        cached = {
+          inputLocation,
+          dcId,
+          size: 1500000000,
+          updatedAt: Date.now(),
+        };
       }
+
+      if (!cached) return null;
+
+      let inputLocation = cached.inputLocation;
+      let dcId = cached.dcId;
 
       // Retry loop to handle expired file references or transient MTProto drops
       for (let attempt = 1; attempt <= 3; attempt++) {
