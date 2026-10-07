@@ -20,10 +20,10 @@ class TelegramStreamService {
   private isInitializing = false;
   private initPromise: Promise<TelegramClient | null> | null = null;
 
-  private apiId = Number(process.env.TELEGRAM_API_ID || 39243219);
-  private apiHash = process.env.TELEGRAM_API_HASH || '1d2a346250ff0e4861180d9cfff67cb0';
-  private botToken = process.env.TELEGRAM_BOT_TOKEN || '8932092666:AAEd0A1Zcc4Bcg_UU83NFUjLV50fc2kQiYY';
-  private channelId = process.env.TELEGRAM_CHANNEL_ID || '@devcinestreambot';
+  private apiId = Number(process.env.TELEGRAM_API_ID || 0);
+  private apiHash = process.env.TELEGRAM_API_HASH || '';
+  private botToken = process.env.TELEGRAM_BOT_TOKEN || '';
+  private channelId = process.env.TELEGRAM_CHANNEL_ID || '';
   private sessionFilePath = path.join(process.cwd(), '.bot_session');
 
   // Map of documentId string -> CachedLocation with fresh fileReference & size
