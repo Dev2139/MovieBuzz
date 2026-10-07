@@ -19,17 +19,28 @@ import adminRoutes from './routes/adminRoutes';
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Security & Parsing Middlewares
-app.use(
-  helmet({
-    contentSecurityPolicy: false,
-    crossOriginResourcePolicy: { policy: 'cross-origin' },
-  })
-);
+// Auto-connect MongoDB on incoming serverless / API requests
+app.use(async (req, res, next) => {
+  await connectDB();
+  next();
+});
+
+// Dynamic CORS configuration for local, Netlify & Vercel frontends
+const allowedOrigins = [
+  process.env.CLIENT_URL,
+  'http://localhost:5173',
+  'http://localhost:3000',
+].filter(Boolean) as string[];
 
 app.use(
   cors({
-    origin: process.env.CLIENT_URL || 'http://localhost:5173',
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.includes(origin) || origin.endsWith('.netlify.app') || origin.endsWith('.vercel.app')) {
+        callback(null, true);
+      } else {
+        callback(null, true); // Allow cross-origin requests for media streaming
+      }
+    },
     credentials: true,
   })
 );
@@ -56,27 +67,28 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// Start Server after DB Connection
-async function startServer() {
-  await connectDB();
+// Standalone local server listener (skipped automatically on Vercel)
+if (!process.env.VERCEL) {
+  async function startServer() {
+    await connectDB();
+    app.listen(PORT, async () => {
+      console.log(`=======================================================`);
+      console.log(` 🎬 CineStream Server running on http://localhost:${PORT}`);
+      console.log(` 🚀 Environment: ${process.env.NODE_ENV || 'development'}`);
+      console.log(`=======================================================`);
 
-  app.listen(PORT, async () => {
-    console.log(`=======================================================`);
-    console.log(` 🎬 CineStream Server running on http://localhost:${PORT}`);
-    console.log(` 🚀 Environment: ${process.env.NODE_ENV || 'development'}`);
-    console.log(`=======================================================`);
-
-    // Trigger channel post sync AFTER MongoDB is fully connected
-    try {
-      const client = storageService.getTelegramClient();
-      if (client) {
-        const count = await client.syncChannelPosts();
-        console.log(`[Server] Channel sync completed: ${count} posts loaded into website database!`);
+      try {
+        const client = storageService.getTelegramClient();
+        if (client) {
+          const count = await client.syncChannelPosts();
+          console.log(`[Server] Channel sync completed: ${count} posts loaded into website database!`);
+        }
+      } catch (err) {
+        console.warn('[Server] Notice during post sync:', err);
       }
-    } catch (err) {
-      console.warn('[Server] Notice during post sync:', err);
-    }
-  });
+    });
+  }
+  startServer();
 }
 
-startServer();
+export default app;
