@@ -148,3 +148,17 @@ export const getGenres = async (req: Request, res: Response) => {
     ],
   });
 };
+
+export const syncTelegramPosts = async (req: Request, res: Response) => {
+  try {
+    const { storageService } = await import('../services/telegram/telegramService');
+    const client = storageService.getTelegramClient();
+    if (client) {
+      const count = await client.syncChannelPosts();
+      return res.json({ message: 'Sync completed', importedCount: count });
+    }
+    return res.json({ message: 'Telegram client not configured', importedCount: 0 });
+  } catch (err: any) {
+    return res.status(500).json({ message: 'Sync error', error: err.message });
+  }
+};

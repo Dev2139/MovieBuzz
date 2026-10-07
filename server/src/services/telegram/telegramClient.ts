@@ -66,11 +66,15 @@ export class TelegramMediaProvider implements MediaProvider {
                   photoFileId = post.photo[post.photo.length - 1].file_id;
                 }
 
-                const streamUrl = videoFileId ? `http://localhost:5000/api/media/proxy-file/${videoFileId}` : undefined;
-                const downloadUrl = videoFileId ? `http://localhost:5000/api/media/download-file/${videoFileId}` : undefined;
-                const posterUrl = photoFileId ? `http://localhost:5000/api/media/proxy-file/${photoFileId}` : undefined;
+                const baseUrl = process.env.VERCEL_URL 
+                  ? `https://${process.env.VERCEL_URL}` 
+                  : (process.env.BACKEND_URL || 'http://localhost:5000');
 
-                await this.importer.autoPublishTelegramPost({
+                const streamUrl = videoFileId ? `${baseUrl}/api/media/proxy-file/${videoFileId}` : undefined;
+                const downloadUrl = videoFileId ? `${baseUrl}/api/media/download-file/${videoFileId}` : undefined;
+                const posterUrl = photoFileId ? `${baseUrl}/api/media/proxy-file/${photoFileId}` : undefined;
+
+                const published = await this.importer.autoPublishTelegramPost({
                   channelId: String(post.chat?.id || this.channelId),
                   messageId: String(post.message_id),
                   mediaId: videoFileId || `tg_media_${post.message_id}`,
@@ -79,7 +83,9 @@ export class TelegramMediaProvider implements MediaProvider {
                   downloadUrl,
                   posterUrl,
                 });
-                count++;
+                if (published) {
+                  count++;
+                }
               }
             }
           }

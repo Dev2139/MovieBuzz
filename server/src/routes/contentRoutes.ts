@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getContentList, getContentBySlug, getMovies, getSeries, getGenres } from '../controllers/contentController';
+import { getContentList, getContentBySlug, getMovies, getSeries, getGenres, syncTelegramPosts } from '../controllers/contentController';
 
 const router = Router();
 
@@ -10,5 +10,7 @@ router.get('/movies/:slug', getContentBySlug);
 router.get('/series', getSeries);
 router.get('/series/:slug', getContentBySlug);
 router.get('/genres', getGenres);
+router.get('/sync', syncTelegramPosts);
+router.get('/telegram/sync', syncTelegramPosts);
 
 export default router;
