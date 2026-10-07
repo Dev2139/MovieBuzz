@@ -380,3 +380,40 @@ export const publishTelegramImport = async (req: Request, res: Response) => {
     return res.status(500).json({ message: 'Error publishing Telegram import' });
   }
 };
+
+/**
+ * Bulk Enrich existing catalog with TMDB / IMDb real ratings, posters, backdrops & details
+ */
+export const enrichCatalogMetadata = async (req: Request, res: Response) => {
+  try {
+    const { tmdbService } = await import('../services/tmdb/tmdbService');
+    const allContent = await Content.find({ status: 'published' });
+    let enrichedCount = 0;
+
+    for (const item of allContent) {
+      const tmdbMeta = await tmdbService.fetchMetadata(item.title, item.releaseYear, item.type as any);
+      if (tmdbMeta) {
+        await Content.findByIdAndUpdate(item._id, {
+          title: tmdbMeta.title || item.title,
+          description: tmdbMeta.description || item.description,
+          posterUrl: tmdbMeta.posterUrl || item.posterUrl,
+          backdropUrl: tmdbMeta.backdropUrl || item.backdropUrl,
+          rating: tmdbMeta.rating || item.rating,
+          releaseYear: tmdbMeta.releaseYear || item.releaseYear,
+          genres: tmdbMeta.genres && tmdbMeta.genres.length > 0 ? tmdbMeta.genres : item.genres,
+          cast: tmdbMeta.cast && tmdbMeta.cast.length > 0 ? tmdbMeta.cast : item.cast,
+          languages: tmdbMeta.languages && tmdbMeta.languages.length > 0 ? tmdbMeta.languages : item.languages,
+        });
+        enrichedCount++;
+      }
+    }
+
+    return res.json({
+      message: `Enriched ${enrichedCount} items with official TMDB/IMDb ratings, posters & metadata!`,
+      enrichedCount,
+    });
+  } catch (error: any) {
+    console.error('enrichCatalogMetadata error:', error);
+    return res.status(500).json({ message: 'Error enriching catalog metadata' });
+  }
+};

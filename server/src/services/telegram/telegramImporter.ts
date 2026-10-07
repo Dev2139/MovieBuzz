@@ -4,6 +4,7 @@ import { Season } from '../../models/Season';
 import { Episode } from '../../models/Episode';
 import { Media } from '../../models/Media';
 import { parseTelegramCaption } from './telegramParser';
+import { tmdbService } from '../tmdb/tmdbService';
 
 export interface RawTelegramMessage {
   channelId: string;
@@ -49,7 +50,7 @@ export class TelegramImporter {
 
   /**
    * Auto-Publish Telegram channel post directly into the website catalog!
-   * Handles duplicate slugs and re-imports safely without MongoDB duplicate key errors.
+   * Automatically enriches with TMDB/IMDb ratings, posters, backdrops & plot summaries.
    */
   async autoPublishTelegramPost(raw: RawTelegramMessage) {
     try {
@@ -63,27 +64,37 @@ export class TelegramImporter {
       const language = parsed.language || 'English';
       const baseSlug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
 
-      const defaultPoster = raw.posterUrl || 'https://images.unsplash.com/photo-1542751371-adc38448a05e?w=800';
-      const defaultBackdrop = raw.backdropUrl || 'https://images.unsplash.com/photo-1509198397868-475647b2a1e5?w=1600';
+      // Fetch TMDB / OMDb Real Metadata & Ratings
+      const tmdbMeta = await tmdbService.fetchMetadata(title, year, parsed.season || parsed.episode ? 'series' : 'movie');
+
+      const defaultPoster = tmdbMeta?.posterUrl || raw.posterUrl || 'https://images.unsplash.com/photo-1542751371-adc38448a05e?w=800';
+      const defaultBackdrop = tmdbMeta?.backdropUrl || raw.backdropUrl || defaultPoster;
+      const description = tmdbMeta?.description || raw.caption;
+      const rating = tmdbMeta?.rating || 8.5;
+      const genres = tmdbMeta?.genres || (parsed.genres && parsed.genres.length > 0 ? parsed.genres : ['Action', 'Drama']);
+      const cast = tmdbMeta?.cast || (parsed.cast && parsed.cast.length > 0 ? parsed.cast : ['Popular Cast']);
+      const languages = tmdbMeta?.languages || [language];
+      const releaseYear = tmdbMeta?.releaseYear || year;
       const defaultStream = raw.streamUrl || 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4';
       const defaultDownload = raw.downloadUrl || defaultStream;
 
       // Check if it's a TV Series episode (e.g., S01E02)
       if (parsed.season || parsed.episode) {
-        let series = await Content.findOne({ $or: [{ title }, { slug: `${baseSlug}-${year}` }], type: 'series' });
+        let series = await Content.findOne({ $or: [{ title }, { slug: `${baseSlug}-${releaseYear}` }], type: 'series' });
         if (!series) {
           try {
             series = new Content({
-              title,
-              slug: `${baseSlug}-${year}`,
+              title: tmdbMeta?.title || title,
+              slug: `${baseSlug}-${releaseYear}`,
               type: 'series',
-              description: raw.caption,
+              description,
               posterUrl: defaultPoster,
               backdropUrl: defaultBackdrop,
-              releaseYear: year,
-              genres: parsed.genres && parsed.genres.length > 0 ? parsed.genres : ['Action', 'Drama', 'Sci-Fi'],
-              languages: [language],
-              rating: 8.5,
+              releaseYear,
+              genres,
+              languages,
+              cast,
+              rating,
               status: 'published',
             });
             await series.save();
@@ -103,7 +114,7 @@ export class TelegramImporter {
             seriesId: series._id,
             seasonNumber: seasonNum,
             title: `Season ${seasonNum}`,
-            releaseYear: year,
+            releaseYear,
           });
           await season.save().catch(() => {});
         }
@@ -147,21 +158,21 @@ export class TelegramImporter {
         return { type: 'series', series, season, episode: episodeDoc };
       } else {
         // Movie Post
-        let movie = await Content.findOne({ $or: [{ title }, { slug: `${baseSlug}-${year}` }], type: 'movie' });
+        let movie = await Content.findOne({ $or: [{ title }, { slug: `${baseSlug}-${releaseYear}` }], type: 'movie' });
         if (!movie) {
           try {
             movie = new Content({
-              title,
-              slug: `${baseSlug}-${year}`,
+              title: tmdbMeta?.title || title,
+              slug: `${baseSlug}-${releaseYear}`,
               type: 'movie',
-              description: raw.caption,
+              description,
               posterUrl: defaultPoster,
               backdropUrl: defaultBackdrop,
-              releaseYear: year,
-              genres: parsed.genres && parsed.genres.length > 0 ? parsed.genres : ['Crime', 'Drama', 'Thriller'],
-              cast: parsed.cast && parsed.cast.length > 0 ? parsed.cast : ['Ajay Devgn', 'Jaideep Ahlawat'],
-              languages: [language],
-              rating: 8.8,
+              releaseYear,
+              genres,
+              cast,
+              languages,
+              rating,
               status: 'published',
             });
             await movie.save();

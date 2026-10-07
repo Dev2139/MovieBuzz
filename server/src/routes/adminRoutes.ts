@@ -11,6 +11,7 @@ import {
   syncTelegramChannel,
   parseTelegramPost,
   publishTelegramImport,
+  enrichCatalogMetadata,
 } from '../controllers/adminController';
 import { authenticate, requireAdmin } from '../middleware/authMiddleware';
 
@@ -36,5 +37,6 @@ router.get('/telegram/imports', getTelegramImports);
 router.post('/telegram/sync', syncTelegramChannel);
 router.post('/telegram/parse', parseTelegramPost);
 router.post('/telegram/publish', publishTelegramImport);
+router.post('/enrich', enrichCatalogMetadata);
 
 export default router;
