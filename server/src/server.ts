@@ -19,9 +19,22 @@ import adminRoutes from './routes/adminRoutes';
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Auto-connect MongoDB on incoming serverless / API requests
+// Auto-connect MongoDB on incoming serverless / API requests & auto-sync posts if DB is empty
 app.use(async (req, res, next) => {
   await connectDB();
+  try {
+    const { Content } = await import('./models/Content');
+    const count = await Content.countDocuments().catch(() => 1);
+    if (count === 0) {
+      console.log('[Server] Empty MongoDB detected, auto-syncing Telegram channel posts...');
+      const client = storageService.getTelegramClient();
+      if (client) {
+        await client.syncChannelPosts().catch(() => {});
+      }
+    }
+  } catch {
+    // Ignore error
+  }
   next();
 });
 

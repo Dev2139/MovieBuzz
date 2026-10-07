@@ -7,10 +7,10 @@ export const getContentList = async (req: Request, res: Response) => {
   try {
     const { type, genre, language, year, sort, limit = 20, page = 1, featured } = req.query;
 
-    const query: any = { status: 'published' };
+    const query: any = { status: { $ne: 'draft' } };
 
     if (type && (type === 'movie' || type === 'series')) {
-      query.type = type;
+      query.type = new RegExp(`^${type}$`, 'i');
     }
 
     if (genre) {
