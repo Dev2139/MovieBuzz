@@ -65,7 +65,7 @@ export class TelegramImporter {
       const baseSlug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
 
       // Fetch TMDB / OMDb Real Metadata & Ratings
-      const tmdbMeta = await tmdbService.fetchMetadata(title, year, parsed.season || parsed.episode ? 'series' : 'movie');
+      const tmdbMeta = await tmdbService.fetchMetadata(title, year, parsed.season || parsed.episode ? 'series' : 'movie').catch(() => null);
 
       const defaultPoster = tmdbMeta?.posterUrl || raw.posterUrl || 'https://images.unsplash.com/photo-1542751371-adc38448a05e?w=800';
       const defaultBackdrop = tmdbMeta?.backdropUrl || raw.backdropUrl || defaultPoster;

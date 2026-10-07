@@ -87,7 +87,7 @@ app.get(['/', '/api', '/api/health'], (req, res) => {
 if (!process.env.VERCEL) {
   async function startServer() {
     await connectDB();
-    app.listen(PORT, async () => {
+    const server = app.listen(PORT, async () => {
       console.log(`=======================================================`);
       console.log(` 🎬 CineStream Server running on http://localhost:${PORT}`);
       console.log(` 🚀 Environment: ${process.env.NODE_ENV || 'development'}`);
@@ -97,10 +97,31 @@ if (!process.env.VERCEL) {
         const client = storageService.getTelegramClient();
         if (client) {
           const count = await client.syncChannelPosts();
-          console.log(`[Server] Channel sync completed: ${count} posts loaded into website database!`);
+          console.log(`[Server] Initial channel sync completed: ${count} posts loaded into website database!`);
         }
       } catch (err) {
         console.warn('[Server] Notice during post sync:', err);
+      }
+
+      // Continuous automatic background polling every 60 seconds (no manual restart needed!)
+      setInterval(async () => {
+        try {
+          const client = storageService.getTelegramClient();
+          if (client) {
+            await client.syncChannelPosts();
+          }
+        } catch {
+          // Ignore background sync error
+        }
+      }, 60000);
+    });
+
+    server.on('error', (err: any) => {
+      if (err.code === 'EADDRINUSE') {
+        console.error(`[Server Error] Port ${PORT} is already in use by another process.`);
+        console.error(`[Server Error] Please stop the existing process on port ${PORT} or change process.env.PORT.`);
+      } else {
+        console.error(`[Server Error]`, err);
       }
     });
   }
