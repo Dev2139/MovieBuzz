@@ -74,9 +74,12 @@ export class TelegramImporter {
       const genres = tmdbMeta?.genres || (parsed.genres && parsed.genres.length > 0 ? parsed.genres : ['Action', 'Drama']);
       const cast = tmdbMeta?.cast || (parsed.cast && parsed.cast.length > 0 ? parsed.cast : ['Popular Cast']);
       const languages = tmdbMeta?.languages || [language];
-      const releaseYear = tmdbMeta?.releaseYear || year;
-      const defaultStream = raw.streamUrl || 'https://vjs.zencdn.net/v/oceans.mp4';
-      const defaultDownload = raw.downloadUrl || defaultStream;
+      const baseUrl = process.env.VERCEL_URL 
+        ? `https://${process.env.VERCEL_URL}` 
+        : (process.env.BACKEND_URL || 'http://localhost:5000');
+
+      const defaultStream = raw.streamUrl || `${baseUrl}/api/media/proxy-file/${encodeURIComponent(raw.mediaId)}`;
+      const defaultDownload = raw.downloadUrl || `${baseUrl}/api/media/download-file/${encodeURIComponent(raw.mediaId)}`;
 
       // Check if it's a TV Series episode (e.g., S01E02)
       if (parsed.season || parsed.episode) {
