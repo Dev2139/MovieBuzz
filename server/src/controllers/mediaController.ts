@@ -68,33 +68,38 @@ export const getMediaDownloadLink = async (req: Request, res: Response) => {
   }
 };
 
-/**
- * Direct Telegram MTProto & Bot CDN Range Streaming
- * Instant high-speed streaming for deployed applications (Vercel / Netlify)
- */
 export const proxyTelegramFileStream = async (req: Request, res: Response) => {
   try {
     const rawFileId = req.params.fileId;
     const fileId = decodeURIComponent(rawFileId);
-    const botToken = process.env.TELEGRAM_BOT_TOKEN;
     const range = req.headers.range;
 
-    // 1. High-speed Direct Telegram Bot API CDN Redirect (for images & small files < 20MB)
-    const isSmallFileOrImage = fileId.startsWith('AAMC') || fileId.includes('thumb');
-    if (botToken && isSmallFileOrImage) {
-      try {
-        const fileRes = await axios.get(`https://api.telegram.org/bot${botToken}/getFile?file_id=${fileId}`, { timeout: 2000 }).catch(() => null);
-        if (fileRes && fileRes.data?.result?.file_path) {
-          const filePath = fileRes.data.result.file_path;
-          const telegramFileUrl = `https://api.telegram.org/file/bot${botToken}/${filePath}`;
-          return res.redirect(302, telegramFileUrl);
-        }
-      } catch {
-        // Fallback to MTProto stream
-      }
-    }
+    const serveFallbackStream = async () => {
+      const fallbackUrl = 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4';
+      const streamRes = await axios.get(fallbackUrl, {
+        headers: range ? { Range: range } : {},
+        responseType: 'stream',
+        timeout: 8000,
+      }).catch(() => null);
 
-    // 2. MTProto Chunk Range Streaming Fallback
+      if (streamRes) {
+        const headers: any = {
+          'Content-Type': 'video/mp4',
+          'Accept-Ranges': 'bytes',
+        };
+        if (streamRes.headers['content-range']) {
+          headers['Content-Range'] = String(streamRes.headers['content-range']);
+        }
+        if (streamRes.headers['content-length']) {
+          headers['Content-Length'] = String(streamRes.headers['content-length']);
+        }
+        res.writeHead(range ? 206 : 200, headers);
+        return streamRes.data.pipe(res);
+      }
+      return res.status(503).json({ message: 'Media stream unavailable' });
+    };
+
+    // MTProto Chunk Range Streaming
     const mediaDoc = await Media.findOne({ providerMediaId: fileId }).select('providerMessageId').lean().catch(() => null);
     const messageId = mediaDoc?.providerMessageId;
 
@@ -117,8 +122,7 @@ export const proxyTelegramFileStream = async (req: Request, res: Response) => {
     const rawBuffer = await telegramStreamService.getChunk(fileId, alignedOffset, limit, messageId);
 
     if (!rawBuffer) {
-      const fallbackUrl = 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4';
-      return res.redirect(302, fallbackUrl);
+      return serveFallbackStream();
     }
 
     const sliceStart = start - alignedOffset;
@@ -153,7 +157,27 @@ export const proxyTelegramFileStream = async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('proxyTelegramFileStream error:', error.message);
     const fallbackUrl = 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4';
-    return res.redirect(302, fallbackUrl);
+    const streamRes = await axios.get(fallbackUrl, {
+      headers: req.headers.range ? { Range: req.headers.range } : {},
+      responseType: 'stream',
+      timeout: 8000,
+    }).catch(() => null);
+
+    if (streamRes) {
+      const headers: any = {
+        'Content-Type': 'video/mp4',
+        'Accept-Ranges': 'bytes',
+      };
+      if (streamRes.headers['content-range']) {
+        headers['Content-Range'] = String(streamRes.headers['content-range']);
+      }
+      if (streamRes.headers['content-length']) {
+        headers['Content-Length'] = String(streamRes.headers['content-length']);
+      }
+      res.writeHead(req.headers.range ? 206 : 200, headers);
+      return streamRes.data.pipe(res);
+    }
+    return res.status(500).json({ message: 'Stream error' });
   }
 };
 

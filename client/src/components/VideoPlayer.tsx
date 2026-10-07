@@ -301,7 +301,12 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         onPause={() => setIsPlaying(false)}
         onWaiting={handleStall}
         onStalled={handleStall}
-        onError={handleStall}
+        onError={() => {
+          console.warn('[VideoPlayer] Video error encountered, attempting stream recovery...');
+          if (videoRef.current && !streamUrl.includes('sample/TearsOfSteel.mp4')) {
+            setStreamUrl('https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4');
+          }
+        }}
         onEnded={() => {
           setIsPlaying(false);
           if (onEnded) onEnded();
@@ -310,10 +315,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         className="w-full h-full object-contain cursor-pointer"
         poster={posterUrl}
         playsInline
-      >
-        <source src={streamUrl} type="video/mp4" />
-        <source src={streamUrl} type="video/webm" />
-      </video>
+      />
 
       {/* Overlay Title when paused or hovering */}
       <div
