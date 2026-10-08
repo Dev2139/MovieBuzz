@@ -105,6 +105,7 @@ export interface TelegramImportItem {
   detectedTitle: string;
   detectedSeason?: number;
   detectedEpisode?: number;
+  detectedEpisodeEnd?: number;
   detectedQuality?: string;
   detectedYear?: number;
   detectedLanguage?: string;

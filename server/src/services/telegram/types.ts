@@ -27,6 +27,7 @@ export interface ParsedTelegramMetadata {
   year?: number;
   season?: number;
   episode?: number;
+  episodeEnd?: number;
   quality: string;
   resolution: string;
   language: string;

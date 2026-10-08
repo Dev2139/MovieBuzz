@@ -5,9 +5,10 @@ import {
   syncTelegramChannelApi,
   parseTelegramPostApi,
   publishTelegramImportApi,
+  fetchSeries,
 } from '../services/api';
 import { TelegramImportItem } from '../types';
-import { Send, RefreshCw, CheckCircle, Eye, Shield, Edit3, X, Sparkles, Filter } from 'lucide-react';
+import { Send, RefreshCw, CheckCircle, Eye, Shield, Edit3, X, Sparkles, Filter, Layers } from 'lucide-react';
 
 export const AdminTelegramPage: React.FC = () => {
   const queryClient = useQueryClient();
@@ -18,19 +19,27 @@ export const AdminTelegramPage: React.FC = () => {
   // Form edit state for selected post mapping
   const [editTitle, setEditTitle] = useState('');
   const [targetType, setTargetType] = useState<'movie' | 'series'>('movie');
+  const [existingSeriesId, setExistingSeriesId] = useState<string>('');
   const [editSeasonNum, setEditSeasonNum] = useState<number>(1);
   const [editEpNum, setEditEpNum] = useState<number>(1);
+  const [editEpEndNum, setEditEpEndNum] = useState<number>(1);
   const [editQuality, setEditQuality] = useState('1080p');
   const [editPosterUrl, setEditPosterUrl] = useState('');
 
   // Caption tester
-  const [testCaption, setTestCaption] = useState('Cyberpunk: Neon City (2026) 1080p Dual Audio English Sci-Fi WEBRip');
+  const [testCaption, setTestCaption] = useState('Cyberpunk: Neon City (2026) S01 E01-E04 1080p Dual Audio English Sci-Fi WEBRip');
   const [parsedTestResult, setParsedTestResult] = useState<any | null>(null);
 
   // Fetch Import Queue Query
   const { data: importsData, isLoading } = useQuery({
     queryKey: ['telegram-imports', selectedStatusFilter],
     queryFn: () => fetchTelegramImports(selectedStatusFilter),
+  });
+
+  // Fetch Existing TV Series catalog for dropdown selection
+  const { data: existingSeriesData } = useQuery({
+    queryKey: ['existing-series-list'],
+    queryFn: () => fetchSeries({ limit: 100 }),
   });
 
   // Channel Sync Mutation
@@ -64,11 +73,13 @@ export const AdminTelegramPage: React.FC = () => {
   const handleSelectDoc = (doc: TelegramImportItem) => {
     setSelectedImportDoc(doc);
     setEditTitle(doc.detectedTitle || '');
-    setTargetType(doc.detectedSeason ? 'series' : 'movie');
+    setTargetType(doc.detectedSeason || doc.detectedEpisode ? 'series' : 'movie');
     setEditSeasonNum(doc.detectedSeason || 1);
     setEditEpNum(doc.detectedEpisode || 1);
+    setEditEpEndNum(doc.detectedEpisodeEnd || doc.detectedEpisode || 1);
     setEditQuality(doc.detectedQuality || '1080p');
     setEditPosterUrl('https://images.unsplash.com/photo-1542751371-adc38448a05e?w=800');
+    setExistingSeriesId('');
   };
 
   const handlePublishSubmit = (e: React.FormEvent) => {
@@ -80,8 +91,10 @@ export const AdminTelegramPage: React.FC = () => {
       action: 'PUBLISH',
       targetType,
       title: editTitle,
+      existingSeriesId: existingSeriesId || undefined,
       seasonNumber: editSeasonNum,
       episodeNumber: editEpNum,
+      episodeEndNumber: editEpEndNum,
       quality: editQuality,
       posterUrl: editPosterUrl,
     });
@@ -98,7 +111,7 @@ export const AdminTelegramPage: React.FC = () => {
   const importItems = importsData?.imports || [];
 
   return (
-    <div className="min-h-screen bg-dark-base text-white pt-24 pb-16 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto space-y-8">
+    <div className="min-h-screen bg-dark-base text-white pt-24 pb-16 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto space-y-8 select-none">
       {/* Top Banner Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-dark-border pb-6">
         <div className="flex items-center space-x-3">
@@ -107,7 +120,7 @@ export const AdminTelegramPage: React.FC = () => {
           </div>
           <div>
             <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">Telegram Import Dashboard</h1>
-            <p className="text-xs text-gray-400 mt-1">Review channel posts, correct metadata, map to media, and publish</p>
+            <p className="text-xs text-gray-400 mt-1">Review channel posts, map single or bulk episodes, and publish to catalog</p>
           </div>
         </div>
 
@@ -125,14 +138,14 @@ export const AdminTelegramPage: React.FC = () => {
       <div className="bg-dark-card border border-dark-border rounded-2xl p-5 space-y-3">
         <h3 className="font-bold text-sm text-white flex items-center space-x-2">
           <Sparkles className="w-4 h-4 text-blue-400" />
-          <span>Regex Caption Parser Test Bench</span>
+          <span>Regex Caption & Bulk Episode Parser Test Bench</span>
         </h3>
         <div className="flex gap-3">
           <input
             type="text"
             value={testCaption}
             onChange={(e) => setTestCaption(e.target.value)}
-            className="flex-1 bg-dark-surface border border-dark-border rounded-xl px-4 py-2 text-xs text-white focus:outline-none focus:border-blue-500"
+            className="flex-1 bg-dark-surface border border-dark-border rounded-xl px-4 py-2 text-xs text-white focus:outline-none focus:border-blue-500 font-mono"
           />
           <button
             onClick={() => parseTestMutation.mutate(testCaption)}
@@ -146,7 +159,10 @@ export const AdminTelegramPage: React.FC = () => {
           <div className="p-3 bg-dark-surface rounded-xl border border-dark-border text-xs font-mono text-emerald-400 space-y-1">
             <p>Title: {parsedTestResult.title}</p>
             <p>Year: {parsedTestResult.year || 'N/A'}</p>
-            <p>Season: {parsedTestResult.season || 'N/A'}, Episode: {parsedTestResult.episode || 'N/A'}</p>
+            <p>
+              Season: {parsedTestResult.season || 'N/A'}, Episode: {parsedTestResult.episode || 'N/A'}{' '}
+              {parsedTestResult.episodeEnd ? `through Ep ${parsedTestResult.episodeEnd} (Bulk)` : ''}
+            </p>
             <p>Quality: {parsedTestResult.quality} ({parsedTestResult.resolution})</p>
             <p>Language: {parsedTestResult.language}</p>
           </div>
@@ -202,8 +218,9 @@ export const AdminTelegramPage: React.FC = () => {
                     Quality: {doc.detectedQuality || '1080p'}
                   </span>
                   {doc.detectedSeason && (
-                    <span className="bg-dark-surface px-2 py-1 rounded border border-dark-border">
+                    <span className="bg-dark-surface px-2 py-1 rounded border border-dark-border text-cyan-300">
                       Season {doc.detectedSeason} Ep {doc.detectedEpisode}
+                      {doc.detectedEpisodeEnd ? `-${doc.detectedEpisodeEnd} (Bulk)` : ''}
                     </span>
                   )}
                   {doc.detectedLanguage && (
@@ -235,7 +252,7 @@ export const AdminTelegramPage: React.FC = () => {
       {/* Review & Publishing Modal */}
       {selectedImportDoc && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
-          <div className="relative w-full max-w-xl bg-dark-card border border-dark-border rounded-2xl p-6 text-white space-y-4 shadow-2xl">
+          <div className="relative w-full max-w-xl bg-dark-card border border-dark-border rounded-2xl p-6 text-white space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
             <button
               onClick={() => setSelectedImportDoc(null)}
               className="absolute top-4 right-4 text-gray-400 hover:text-white p-1"
@@ -268,13 +285,13 @@ export const AdminTelegramPage: React.FC = () => {
                       targetType === 'series' ? 'bg-blue-600 text-white border-blue-500' : 'bg-dark-surface border-dark-border text-gray-300'
                     }`}
                   >
-                    TV Series Episode
+                    TV Series Episode (Single or Bulk)
                   </button>
                 </div>
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-gray-400 uppercase mb-1">Title</label>
+                <label className="block text-xs font-semibold text-gray-400 uppercase mb-1">Title / Series Name</label>
                 <input
                   type="text"
                   required
@@ -285,25 +302,84 @@ export const AdminTelegramPage: React.FC = () => {
               </div>
 
               {targetType === 'series' && (
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-semibold text-gray-400 uppercase mb-1">Season Number</label>
-                    <input
-                      type="number"
-                      value={editSeasonNum}
-                      onChange={(e) => setEditSeasonNum(Number(e.target.value))}
-                      className="w-full bg-dark-surface border border-dark-border rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-                    />
+                <div className="space-y-3 p-3 bg-dark-surface rounded-xl border border-dark-border">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs font-semibold text-blue-400 uppercase flex items-center space-x-1">
+                      <Layers className="w-3.5 h-3.5" />
+                      <span>Target TV Series Assignment</span>
+                    </label>
+                    <span className="text-[10px] text-gray-400">Map to existing or new series</span>
                   </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-gray-400 uppercase mb-1">Episode Number</label>
-                    <input
-                      type="number"
-                      value={editEpNum}
-                      onChange={(e) => setEditEpNum(Number(e.target.value))}
-                      className="w-full bg-dark-surface border border-dark-border rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-                    />
+
+                  {existingSeriesData?.items && existingSeriesData.items.length > 0 && (
+                    <div>
+                      <label className="block text-[11px] text-gray-400 mb-1">Map to Existing Series Catalog (Optional)</label>
+                      <select
+                        value={existingSeriesId}
+                        onChange={(e) => {
+                          setExistingSeriesId(e.target.value);
+                          if (e.target.value) {
+                            const matched = existingSeriesData.items.find((s) => s._id === e.target.value);
+                            if (matched) setEditTitle(matched.title);
+                          }
+                        }}
+                        className="w-full bg-dark-card border border-dark-border rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500"
+                      >
+                        <option value="">-- Create New Series (Use Title above) --</option>
+                        {existingSeriesData.items.map((s) => (
+                          <option key={s._id} value={s._id}>
+                            {s.title} ({s.releaseYear})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-3 gap-3 pt-1">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-gray-300 mb-1">Season #</label>
+                      <input
+                        type="number"
+                        min={1}
+                        value={editSeasonNum}
+                        onChange={(e) => setEditSeasonNum(Number(e.target.value))}
+                        className="w-full bg-dark-card border border-dark-border rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-gray-300 mb-1">Start Ep #</label>
+                      <input
+                        type="number"
+                        min={1}
+                        value={editEpNum}
+                        onChange={(e) => {
+                          const val = Number(e.target.value);
+                          setEditEpNum(val);
+                          if (val > editEpEndNum) setEditEpEndNum(val);
+                        }}
+                        className="w-full bg-dark-card border border-dark-border rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-gray-300 mb-1">End Ep # (Bulk)</label>
+                      <input
+                        type="number"
+                        min={editEpNum}
+                        value={editEpEndNum}
+                        onChange={(e) => setEditEpEndNum(Number(e.target.value))}
+                        className="w-full bg-dark-card border border-dark-border rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500"
+                      />
+                    </div>
                   </div>
+
+                  {editEpEndNum > editEpNum && (
+                    <div className="p-2.5 bg-blue-500/10 border border-blue-500/30 rounded-lg text-[11px] text-blue-300 flex items-center space-x-2">
+                      <Sparkles className="w-4 h-4 text-blue-400 flex-none" />
+                      <span>
+                        Bulk Import Mode Enabled: This 1 video stream will be assigned to <strong>Episodes {editEpNum} through {editEpEndNum}</strong> automatically!
+                      </span>
+                    </div>
+                  )}
                 </div>
               )}
 

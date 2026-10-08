@@ -11,22 +11,32 @@ export function parseTelegramCaption(caption: string): ParsedTelegramMetadata {
   const lines = caption.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   const firstLine = lines[0] || '';
 
-  // 1. Detect Season & Episode
+  // 1. Detect Season & Episode (Single or Bulk Range e.g. E01-E04, Eps 1-4)
   let season: number | undefined;
   let episode: number | undefined;
+  let episodeEnd: number | undefined;
 
-  const sAndERegex = /S(\d{1,2})\s*E(\d{1,2})/i;
-  const sAndEMatch = caption.match(sAndERegex);
+  const rangeRegex = /(?:S(\d{1,2})\s*)?(?:E|Ep|Episode|Episodes)\s*(\d{1,2})\s*(?:-|to|\b)\s*(?:E|Ep|Episode)?\s*(\d{1,2})/i;
+  const rangeMatch = caption.match(rangeRegex);
 
-  if (sAndEMatch) {
-    season = parseInt(sAndEMatch[1], 10);
-    episode = parseInt(sAndEMatch[2], 10);
+  if (rangeMatch && parseInt(rangeMatch[3], 10) > parseInt(rangeMatch[2], 10)) {
+    if (rangeMatch[1]) season = parseInt(rangeMatch[1], 10);
+    episode = parseInt(rangeMatch[2], 10);
+    episodeEnd = parseInt(rangeMatch[3], 10);
   } else {
-    const seasonMatch = caption.match(/(?:Season|S)\s*(\d{1,2})/i);
-    if (seasonMatch) season = parseInt(seasonMatch[1], 10);
+    const sAndERegex = /S(\d{1,2})\s*E(\d{1,2})/i;
+    const sAndEMatch = caption.match(sAndERegex);
 
-    const epMatch = caption.match(/(?:Episode|Ep|E)\s*(\d{1,2})/i);
-    if (epMatch) episode = parseInt(epMatch[1], 10);
+    if (sAndEMatch) {
+      season = parseInt(sAndEMatch[1], 10);
+      episode = parseInt(sAndEMatch[2], 10);
+    } else {
+      const seasonMatch = caption.match(/(?:Season|S)\s*(\d{1,2})/i);
+      if (seasonMatch) season = parseInt(seasonMatch[1], 10);
+
+      const epMatch = caption.match(/(?:Episode|Ep|E)\s*(\d{1,2})/i);
+      if (epMatch) episode = parseInt(epMatch[1], 10);
+    }
   }
 
   // 2. Quality
@@ -103,6 +113,7 @@ export function parseTelegramCaption(caption: string): ParsedTelegramMetadata {
     year,
     season,
     episode,
+    episodeEnd,
     quality,
     resolution,
     language,

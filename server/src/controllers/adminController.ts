@@ -261,7 +261,21 @@ export const parseTelegramPost = async (req: Request, res: Response) => {
 
 export const publishTelegramImport = async (req: Request, res: Response) => {
   try {
-    const { importId, action, targetType, title, seasonNumber, episodeNumber, quality, posterUrl, backdropUrl, description, genres } = req.body;
+    const {
+      importId,
+      action,
+      targetType,
+      title,
+      existingSeriesId,
+      seasonNumber,
+      episodeNumber,
+      episodeEndNumber,
+      quality,
+      posterUrl,
+      backdropUrl,
+      description,
+      genres,
+    } = req.body;
 
     const importDoc = await TelegramImport.findById(importId);
     if (!importDoc) {
@@ -320,8 +334,12 @@ export const publishTelegramImport = async (req: Request, res: Response) => {
 
       return res.json({ message: 'Published movie to platform catalog', movie, media });
     } else {
-      // Series Episode Target
-      let series = await Content.findOne({ title: finalTitle, type: 'series' });
+      // Series Episode Target (Single or Bulk Episode Range e.g. E1 to E4)
+      let series = existingSeriesId ? await Content.findById(existingSeriesId) : null;
+      if (!series) {
+        series = await Content.findOne({ title: finalTitle, type: 'series' });
+      }
+
       if (!series) {
         series = new Content({
           title: finalTitle,
@@ -339,7 +357,8 @@ export const publishTelegramImport = async (req: Request, res: Response) => {
       }
 
       const sNum = seasonNumber || importDoc.detectedSeason || 1;
-      const eNum = episodeNumber || importDoc.detectedEpisode || 1;
+      const startEp = episodeNumber || importDoc.detectedEpisode || 1;
+      const endEp = Math.max(startEp, episodeEndNumber || importDoc.detectedEpisodeEnd || startEp);
 
       let season = await Season.findOne({ seriesId: series._id, seasonNumber: sNum });
       if (!season) {
@@ -352,40 +371,54 @@ export const publishTelegramImport = async (req: Request, res: Response) => {
         await season.save();
       }
 
-      let episode = await Episode.findOne({ seasonId: season._id, episodeNumber: eNum });
-      if (!episode) {
-        episode = new Episode({
-          seriesId: series._id,
-          seasonId: season._id,
-          episodeNumber: eNum,
-          title: `Episode ${eNum}`,
-          description: importDoc.originalCaption,
-          thumbnailUrl: posterUrl || 'https://images.unsplash.com/photo-1574375927938-d5a98e8ffe85?w=800',
-          duration: 2700,
-        });
-        await episode.save();
-      }
+      const createdEpisodes = [];
+      const createdMedias = [];
 
-      const media = new Media({
-        episodeId: episode._id,
-        quality: finalQuality as any,
-        resolution: finalQuality === '4K' ? '3840x2160' : '1920x1080',
-        fileSize: '950 MB',
-        streamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
-        downloadUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
-        provider: 'telegram',
-        providerMediaId: importDoc.mediaId,
-        providerMessageId: importDoc.messageId,
-        status: 'active',
-      });
-      await media.save();
+      for (let eNum = startEp; eNum <= endEp; eNum++) {
+        let episode = await Episode.findOne({ seasonId: season._id, episodeNumber: eNum });
+        if (!episode) {
+          episode = new Episode({
+            seriesId: series._id,
+            seasonId: season._id,
+            episodeNumber: eNum,
+            title: startEp !== endEp ? `Episode ${eNum} (Bulk File)` : `Episode ${eNum}`,
+            description: importDoc.originalCaption,
+            thumbnailUrl: posterUrl || series.posterUrl || 'https://images.unsplash.com/photo-1574375927938-d5a98e8ffe85?w=800',
+            duration: 2700,
+          });
+          await episode.save();
+        }
+
+        const media = await Media.findOneAndUpdate(
+          { episodeId: episode._id, quality: finalQuality },
+          {
+            resolution: finalQuality === '4K' ? '3840x2160' : '1920x1080',
+            fileSize: '950 MB',
+            streamUrl: `${baseUrl}/api/media/proxy-file/${encodeURIComponent(importDoc.mediaId)}`,
+            downloadUrl: `${baseUrl}/api/media/download-file/${encodeURIComponent(importDoc.mediaId)}`,
+            provider: 'telegram',
+            providerMediaId: importDoc.mediaId,
+            providerMessageId: importDoc.messageId,
+            status: 'active',
+          },
+          { upsert: true, new: true }
+        );
+
+        createdEpisodes.push(episode);
+        createdMedias.push(media);
+      }
 
       importDoc.status = 'IMPORTED';
       importDoc.mappedContentId = series._id;
-      importDoc.mappedEpisodeId = episode._id;
+      importDoc.mappedEpisodeId = createdEpisodes[0]?._id;
       await importDoc.save();
 
-      return res.json({ message: 'Published episode to platform catalog', series, season, episode, media });
+      const isBulk = createdEpisodes.length > 1;
+      const msg = isBulk
+        ? `Published Bulk Episode Range (E${startEp}-E${endEp}) to series "${series.title}"!`
+        : `Published Episode ${startEp} to series "${series.title}"!`;
+
+      return res.json({ message: msg, series, season, episodes: createdEpisodes, medias: createdMedias });
     }
   } catch (error) {
     console.error('publishTelegramImport error:', error);

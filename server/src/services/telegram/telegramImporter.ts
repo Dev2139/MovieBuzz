@@ -38,6 +38,7 @@ export class TelegramImporter {
       detectedTitle: parsed.title,
       detectedSeason: parsed.season,
       detectedEpisode: parsed.episode,
+      detectedEpisodeEnd: parsed.episodeEnd,
       detectedQuality: parsed.quality,
       detectedYear: parsed.year,
       detectedLanguage: parsed.language,

@@ -10,6 +10,7 @@ export interface ITelegramImport extends Document {
   detectedTitle: string;
   detectedSeason?: number;
   detectedEpisode?: number;
+  detectedEpisodeEnd?: number;
   detectedQuality?: string;
   detectedYear?: number;
   detectedLanguage?: string;
@@ -29,6 +30,7 @@ const TelegramImportSchema: Schema = new Schema(
     detectedTitle: { type: String, required: true },
     detectedSeason: { type: Number },
     detectedEpisode: { type: Number },
+    detectedEpisodeEnd: { type: Number },
     detectedQuality: { type: String, default: '1080p' },
     detectedYear: { type: Number },
     detectedLanguage: { type: String, default: 'English' },
