@@ -1,15 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { fetchUserHistory } from '../services/api';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { fetchUserHistory, deleteHistoryItemApi, clearUserHistoryApi } from '../services/api';
 import { useAuth } from '../context/AuthContext';
-import { getLocalPlaybackHistory, clearLocalPlaybackHistory } from '../utils/localStorage';
+import { getLocalPlaybackHistory, clearLocalPlaybackHistory, removeLocalPlaybackItem } from '../utils/localStorage';
 import { LocalPlaybackState } from '../types';
-import { History, Play, Trash2, Sparkles } from 'lucide-react';
+import { History, Play, Trash2, Sparkles, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 export const HistoryPage: React.FC = () => {
   const { user, openAuthModal } = useAuth();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [localHistory, setLocalHistory] = useState<LocalPlaybackState[]>([]);
 
   useEffect(() => {
@@ -24,13 +25,35 @@ export const HistoryPage: React.FC = () => {
     enabled: !!user,
   });
 
-  const handleClearLocal = () => {
-    clearLocalPlaybackHistory();
-    setLocalHistory([]);
+  const handleClearAll = async () => {
+    if (user) {
+      await clearUserHistoryApi().catch(() => {});
+      queryClient.invalidateQueries({ queryKey: ['user-history'] });
+      queryClient.invalidateQueries({ queryKey: ['continue-watching'] });
+    } else {
+      clearLocalPlaybackHistory();
+      setLocalHistory([]);
+    }
   };
 
+  const handleRemoveItem = async (e: React.MouseEvent, historyIdOrContentId: string, episodeId?: string) => {
+    e.stopPropagation();
+    if (user) {
+      await deleteHistoryItemApi(historyIdOrContentId).catch(() => {});
+      queryClient.invalidateQueries({ queryKey: ['user-history'] });
+      queryClient.invalidateQueries({ queryKey: ['continue-watching'] });
+    } else {
+      const updated = removeLocalPlaybackItem(historyIdOrContentId, episodeId);
+      setLocalHistory(updated);
+    }
+  };
+
+  const hasHistory = Boolean(
+    (user && authData?.history && authData.history.length > 0) || (!user && localHistory.length > 0)
+  );
+
   return (
-    <div className="min-h-screen bg-dark-base text-white pt-20 sm:pt-24 pb-24 md:pb-16 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto space-y-6">
+    <div className="min-h-screen bg-dark-base text-white pt-20 sm:pt-24 pb-24 md:pb-16 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto space-y-6 select-none">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-dark-border pb-4">
         <div className="flex items-center space-x-3">
           <div className="w-9 h-9 sm:w-10 sm:h-10 bg-brand-500/20 border border-brand-500/40 rounded-xl flex items-center justify-center text-brand-500">
@@ -44,24 +67,28 @@ export const HistoryPage: React.FC = () => {
           </div>
         </div>
 
-        {!user ? (
-          <div className="flex items-center space-x-2 sm:space-x-3">
+        <div className="flex items-center space-x-2 sm:space-x-3">
+          {hasHistory && (
             <button
-              onClick={handleClearLocal}
-              className="flex items-center space-x-1 text-xs text-red-400 hover:text-red-300 bg-red-500/10 border border-red-500/20 px-3 py-2 rounded-xl active:scale-95"
+              onClick={handleClearAll}
+              className="flex items-center space-x-1.5 text-xs text-red-400 hover:text-red-300 bg-red-500/10 border border-red-500/20 hover:border-red-500/40 px-3.5 py-2 rounded-xl active:scale-95 transition-all"
+              title="Clear all watch history"
             >
               <Trash2 className="w-4 h-4" />
-              <span>Clear Local History</span>
+              <span>Clear History</span>
             </button>
+          )}
+
+          {!user && (
             <button
               onClick={openAuthModal}
-              className="flex items-center space-x-2 bg-brand-500 hover:bg-brand-600 text-white px-3.5 py-2 rounded-xl text-xs font-semibold shadow-lg shadow-brand-500/20 active:scale-95"
+              className="flex items-center space-x-2 bg-brand-500 hover:bg-brand-600 text-white px-3.5 py-2 rounded-xl text-xs font-semibold shadow-lg shadow-brand-500/20 active:scale-95 transition-all"
             >
               <Sparkles className="w-4 h-4" />
               <span>Sync Account</span>
             </button>
-          </div>
-        ) : null}
+          )}
+        </div>
       </div>
 
       {user ? (
@@ -81,11 +108,20 @@ export const HistoryPage: React.FC = () => {
                 <div
                   key={item._id}
                   onClick={() => navigate(targetPath)}
-                  className="group bg-dark-card border border-dark-border/80 hover:border-gray-500 rounded-xl overflow-hidden cursor-pointer shadow-lg transition-all hover:scale-[1.02] active:scale-95"
+                  className="group relative bg-dark-card border border-dark-border/80 hover:border-gray-500 rounded-xl overflow-hidden cursor-pointer shadow-lg transition-all hover:scale-[1.02] active:scale-95"
                 >
+                  {/* Delete Item Overlay Button */}
+                  <button
+                    onClick={(e) => handleRemoveItem(e, item._id)}
+                    className="absolute top-2 right-2 p-1.5 bg-black/75 hover:bg-red-600 text-gray-300 hover:text-white rounded-full border border-white/20 transition-all z-20"
+                    title="Remove from history"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+
                   <div className="aspect-video w-full overflow-hidden bg-dark-surface relative">
                     <img
-                      src={item.contentId.backdropUrl}
+                      src={item.contentId.backdropUrl || item.contentId.posterUrl}
                       alt={item.contentId.title}
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                     />
@@ -125,8 +161,17 @@ export const HistoryPage: React.FC = () => {
               <div
                 key={`${item.contentId}_${item.episodeId}`}
                 onClick={() => navigate(targetPath)}
-                className="group bg-dark-card border border-dark-border/80 hover:border-gray-500 rounded-xl overflow-hidden cursor-pointer shadow-lg transition-all hover:scale-[1.02] active:scale-95"
+                className="group relative bg-dark-card border border-dark-border/80 hover:border-gray-500 rounded-xl overflow-hidden cursor-pointer shadow-lg transition-all hover:scale-[1.02] active:scale-95"
               >
+                {/* Delete Item Overlay Button */}
+                <button
+                  onClick={(e) => handleRemoveItem(e, item.contentId, item.episodeId)}
+                  className="absolute top-2 right-2 p-1.5 bg-black/75 hover:bg-red-600 text-gray-300 hover:text-white rounded-full border border-white/20 transition-all z-20"
+                  title="Remove from history"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+
                 <div className="aspect-video w-full overflow-hidden bg-dark-surface relative">
                   <img
                     src={item.posterUrl}

@@ -3,6 +3,8 @@ import {
   saveWatchHistory,
   getContinueWatching,
   getUserHistory,
+  deleteHistoryItem,
+  clearAllHistory,
   toggleFavorite,
   getFavorites,
   toggleWatchlist,
@@ -17,6 +19,8 @@ router.use(authenticate);
 
 router.post('/history', saveWatchHistory);
 router.get('/history', getUserHistory);
+router.delete('/history/:historyId', deleteHistoryItem);
+router.delete('/history', clearAllHistory);
 router.get('/continue-watching', getContinueWatching);
 
 router.get('/favorites', getFavorites);

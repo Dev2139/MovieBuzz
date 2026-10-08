@@ -110,6 +110,16 @@ export const saveWatchProgress = async (data: {
   return res.data;
 };
 
+export const deleteHistoryItemApi = async (historyId: string) => {
+  const res = await api.delete(`/users/history/${historyId}`);
+  return res.data;
+};
+
+export const clearUserHistoryApi = async () => {
+  const res = await api.delete('/users/history');
+  return res.data;
+};
+
 export const fetchUserFavorites = async () => {
   const res = await api.get<{ favorites: Content[] }>('/users/favorites');
   return res.data;

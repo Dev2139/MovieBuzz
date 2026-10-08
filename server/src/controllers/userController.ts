@@ -74,6 +74,29 @@ export const getUserHistory = async (req: AuthRequest, res: Response) => {
   }
 };
 
+export const deleteHistoryItem = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) return res.status(401).json({ message: 'Unauthorized' });
+    const { historyId } = req.params;
+
+    await WatchHistory.deleteOne({ _id: historyId, userId: req.user._id });
+    return res.json({ message: 'History item removed successfully' });
+  } catch (error) {
+    return res.status(500).json({ message: 'Error deleting history item' });
+  }
+};
+
+export const clearAllHistory = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) return res.status(401).json({ message: 'Unauthorized' });
+
+    await WatchHistory.deleteMany({ userId: req.user._id });
+    return res.json({ message: 'Watch history cleared successfully' });
+  } catch (error) {
+    return res.status(500).json({ message: 'Error clearing watch history' });
+  }
+};
+
 export const toggleFavorite = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) return res.status(401).json({ message: 'Unauthorized' });

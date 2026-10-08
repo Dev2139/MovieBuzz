@@ -50,6 +50,20 @@ export const clearLocalPlaybackHistory = (): void => {
   localStorage.removeItem(PLAYBACK_KEY);
 };
 
+export const removeLocalPlaybackItem = (contentId: string, episodeId?: string): LocalPlaybackState[] => {
+  try {
+    const history = getLocalPlaybackHistory();
+    const filtered = history.filter(
+      (h) => !(h.contentId === contentId && (!episodeId || h.episodeId === episodeId))
+    );
+    localStorage.setItem(PLAYBACK_KEY, JSON.stringify(filtered));
+    return filtered;
+  } catch (error) {
+    console.error('Failed to remove local playback item', error);
+    return getLocalPlaybackHistory();
+  }
+};
+
 // --- Anonymous Watchlist ---
 export const getLocalWatchlist = (): string[] => {
   try {
