@@ -36,6 +36,12 @@ export const WatchPage: React.FC = () => {
     enabled: !!user,
   });
 
+  // Related Movies & Catalog Query
+  const { data: relatedData } = useQuery({
+    queryKey: ['related-catalog', slug, seriesSlug],
+    queryFn: () => fetchContentList({ limit: 10 }),
+  });
+
   const [isPlaylistOpen, setIsPlaylistOpen] = useState(false);
 
   if (isMovieLoading || isSeriesLoading) {
@@ -95,12 +101,6 @@ export const WatchPage: React.FC = () => {
       initialPos = localSavedItem.position;
     }
   }
-
-  // Related Movies & Catalog Query
-  const { data: relatedData } = useQuery({
-    queryKey: ['related-catalog', slug, seriesSlug],
-    queryFn: () => fetchContentList({ limit: 10 }),
-  });
 
   return (
     <div className="min-h-screen bg-dark-base text-white pt-16 sm:pt-20 pb-20 md:pb-16 select-none">
