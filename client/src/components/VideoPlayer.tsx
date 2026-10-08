@@ -13,6 +13,7 @@ import {
   Check,
   Sun,
   Loader2,
+  Film,
 } from 'lucide-react';
 import { Media } from '../types';
 import { useAuth } from '../context/AuthContext';
@@ -119,11 +120,18 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }
   };
 
-  // Throttled position saver
-  const saveProgressThrottled = useCallback(
-    (pos: number, dur: number) => {
-      if (Math.abs(pos - lastSavedTimeRef.current) < 5) return;
-      lastSavedTimeRef.current = pos;
+  const hasAppliedInitialPosRef = useRef<boolean>(false);
+
+  // Reset initial position applied flag if stream or content changes
+  useEffect(() => {
+    hasAppliedInitialPosRef.current = false;
+  }, [streamUrl, contentId, episodeId]);
+
+  // Immediately save position without throttle (for unmount, page hide, reload, pause)
+  const saveCurrentPositionImmediately = useCallback(() => {
+    if (videoRef.current && videoRef.current.currentTime > 0) {
+      const pos = videoRef.current.currentTime;
+      const dur = videoRef.current.duration || duration;
 
       if (user) {
         saveWatchProgress({
@@ -145,9 +153,56 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           duration: Math.floor(dur),
         });
       }
+    }
+  }, [user, contentId, episodeId, contentSlug, contentType, contentTitle, posterUrl, duration]);
+
+  // Throttled position saver
+  const saveProgressThrottled = useCallback(
+    (pos: number, dur: number) => {
+      if (Math.abs(pos - lastSavedTimeRef.current) < 5) return;
+      lastSavedTimeRef.current = pos;
+      saveCurrentPositionImmediately();
     },
-    [user, contentId, episodeId, contentSlug, contentType, contentTitle, posterUrl]
+    [saveCurrentPositionImmediately]
   );
+
+  // Save on page reload, tab switch, unmount
+  useEffect(() => {
+    const handleUnload = () => {
+      saveCurrentPositionImmediately();
+    };
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'hidden') {
+        saveCurrentPositionImmediately();
+      }
+    };
+
+    window.addEventListener('beforeunload', handleUnload);
+    window.addEventListener('pagehide', handleUnload);
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    return () => {
+      saveCurrentPositionImmediately();
+      window.removeEventListener('beforeunload', handleUnload);
+      window.removeEventListener('pagehide', handleUnload);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [saveCurrentPositionImmediately]);
+
+  // Apply initial position whenever video is ready or initialPosition prop updates
+  useEffect(() => {
+    if (
+      !hasAppliedInitialPosRef.current &&
+      initialPosition > 0 &&
+      videoRef.current &&
+      videoRef.current.readyState >= 1
+    ) {
+      videoRef.current.currentTime = initialPosition;
+      setCurrentTime(initialPosition);
+      hasAppliedInitialPosRef.current = true;
+    }
+  }, [initialPosition, streamUrl]);
 
   const handleTimeUpdate = () => {
     if (videoRef.current) {
@@ -161,9 +216,12 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
   const handleLoadedMetadata = () => {
     if (videoRef.current) {
-      setDuration(videoRef.current.duration);
-      if (initialPosition > 0) {
+      const dur = videoRef.current.duration;
+      setDuration(dur);
+      if (!hasAppliedInitialPosRef.current && initialPosition > 0) {
         videoRef.current.currentTime = initialPosition;
+        setCurrentTime(initialPosition);
+        hasAppliedInitialPosRef.current = true;
       }
     }
     setIsBuffering(false);
@@ -421,16 +479,50 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         playsInline
       />
 
-      {/* Buffering Stream Spinner Overlay - Pure Animated Multi-Ring (No Text) */}
+      {/* Cinema 35mm Film Reel & Projector Stream Loader Overlay */}
       {isBuffering && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/75 backdrop-blur-sm z-20 pointer-events-none animate-fade-in">
-          <div className="relative flex items-center justify-center w-20 h-20">
-            {/* Outer glowing spinning ring */}
-            <div className="absolute inset-0 rounded-full border-4 border-t-brand-500 border-r-purple-500 border-b-cyan-400 border-l-transparent animate-spin drop-shadow-[0_0_15px_rgba(236,72,153,0.6)]" />
-            {/* Inner reverse rotating ring */}
-            <div className="absolute inset-2 rounded-full border-4 border-t-amber-400 border-r-pink-500 border-b-indigo-500 border-l-transparent animate-spin [animation-direction:reverse] [animation-duration:1.2s]" />
-            {/* Pulsing center core */}
-            <div className="w-5 h-5 bg-gradient-to-tr from-brand-500 to-cyan-400 rounded-full animate-pulse shadow-[0_0_20px_rgba(236,72,153,0.9)]" />
+        <div className="absolute inset-0 flex items-center justify-center bg-black/80 backdrop-blur-sm z-20 pointer-events-none animate-fade-in">
+          <div className="relative flex items-center justify-center w-24 h-24">
+            {/* Projector Light Glow Halo */}
+            <div className="absolute inset-0 rounded-full bg-gradient-to-tr from-brand-500/30 via-purple-500/20 to-cyan-400/30 animate-pulse blur-xl" />
+
+            {/* Main Spinning Cinema 35mm Film Reel */}
+            <div className="relative w-20 h-20 animate-spin [animation-duration:3s]">
+              <svg viewBox="0 0 100 100" className="w-full h-full text-brand-500 drop-shadow-[0_0_12px_rgba(236,72,153,0.9)]">
+                {/* Outer Film Reel Rim */}
+                <circle cx="50" cy="50" r="46" fill="none" stroke="currentColor" strokeWidth="5" />
+                <circle cx="50" cy="50" r="40" fill="none" stroke="rgba(255,255,255,0.2)" strokeWidth="1" />
+                {/* Center Hub */}
+                <circle cx="50" cy="50" r="14" fill="currentColor" />
+                {/* 5 Film Reel Spoke Holes */}
+                <circle cx="50" cy="24" r="9" fill="#000000" />
+                <circle cx="75" cy="42" r="9" fill="#000000" />
+                <circle cx="65" cy="71" r="9" fill="#000000" />
+                <circle cx="35" cy="71" r="9" fill="#000000" />
+                <circle cx="25" cy="42" r="9" fill="#000000" />
+                {/* 12 Outer Film Sprocket Perforations */}
+                {[0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330].map((deg) => (
+                  <rect
+                    key={deg}
+                    x="48.5"
+                    y="5"
+                    width="3"
+                    height="4"
+                    rx="1"
+                    fill="rgba(255,255,255,0.9)"
+                    transform={`rotate(${deg} 50 50)`}
+                  />
+                ))}
+              </svg>
+            </div>
+
+            {/* Inner Reverse-Spinning Film Core Icon */}
+            <div className="absolute w-9 h-9 animate-spin [animation-direction:reverse] [animation-duration:1.5s]">
+              <Film className="w-full h-full text-cyan-400 drop-shadow-[0_0_8px_rgba(34,211,238,0.9)]" />
+            </div>
+
+            {/* Center Projector Lens Ping Flare */}
+            <div className="absolute w-3 h-3 bg-white rounded-full animate-ping shadow-[0_0_15px_#ffffff]" />
           </div>
         </div>
       )}

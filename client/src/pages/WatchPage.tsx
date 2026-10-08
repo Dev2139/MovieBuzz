@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { fetchContentBySlug, fetchSeriesEpisodeByNumber } from '../services/api';
+import { fetchContentBySlug, fetchSeriesEpisodeByNumber, fetchUserHistory } from '../services/api';
 import { VideoPlayer } from '../components/VideoPlayer';
 import { ChevronLeft, ChevronRight, List, Film, Tv, Play, Sparkles } from 'lucide-react';
 import { getLocalPlaybackItem } from '../utils/localStorage';
+import { useAuth } from '../context/AuthContext';
 
 export const WatchPage: React.FC = () => {
+  const { user } = useAuth();
   const { slug, seriesSlug, season, episode } = useParams();
   const navigate = useNavigate();
 
@@ -25,6 +27,13 @@ export const WatchPage: React.FC = () => {
     queryKey: ['watch-series', seriesSlug, season, episode],
     queryFn: () => fetchSeriesEpisodeByNumber(seriesSlug!, Number(season!), Number(episode!)),
     enabled: isSeries,
+  });
+
+  // User History Query for authenticated saved playback position
+  const { data: userHistoryData } = useQuery({
+    queryKey: ['user-history', user?.id],
+    queryFn: fetchUserHistory,
+    enabled: !!user,
   });
 
   const [isPlaylistOpen, setIsPlaylistOpen] = useState(false);
@@ -66,9 +75,26 @@ export const WatchPage: React.FC = () => {
   const prevEp = playlist.find((e) => e.episodeNumber === currentEpNum - 1);
   const nextEp = playlist.find((e) => e.episodeNumber === currentEpNum + 1);
 
-  // Local saved position fallback if available
-  const localSavedItem = getLocalPlaybackItem(contentId, episodeId);
-  const initialPos = localSavedItem ? localSavedItem.position : 0;
+  // Saved position lookup (Cloud authenticated history first, fallback to local storage)
+  let initialPos = 0;
+  if (user && userHistoryData?.history && contentId) {
+    const match = userHistoryData.history.find(
+      (h: any) =>
+        h.contentId &&
+        (h.contentId._id === contentId || h.contentId === contentId) &&
+        (!episodeId || (h.episodeId && (h.episodeId._id === episodeId || h.episodeId === episodeId)))
+    );
+    if (match && match.progress > 0) {
+      initialPos = match.progress;
+    }
+  }
+
+  if (!initialPos && contentId) {
+    const localSavedItem = getLocalPlaybackItem(contentId, episodeId);
+    if (localSavedItem && localSavedItem.position > 0) {
+      initialPos = localSavedItem.position;
+    }
+  }
 
   return (
     <div className="min-h-screen bg-dark-base text-white pt-16 sm:pt-20 pb-20 md:pb-16 select-none">
