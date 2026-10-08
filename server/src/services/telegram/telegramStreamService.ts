@@ -306,6 +306,15 @@ class TelegramStreamService {
           try {
             res = await client.invoke(request);
           } catch (invokeErr: any) {
+            if (
+              invokeErr?.message?.includes('AUTH_KEY_DUPLICATED') ||
+              invokeErr?.message?.includes('406') ||
+              invokeErr?.message?.includes('DISCONNECT')
+            ) {
+              console.warn('[TelegramStreamService] MTProto socket reset triggered for reconnect...');
+              this.client = null;
+              this.initPromise = null;
+            }
             try {
               const sender = await client.getSender(dcId);
               res = await sender.send(request);
