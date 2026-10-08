@@ -3,13 +3,15 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192x192.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
     <link rel="manifest" href="/manifest.json" />
     <meta name="theme-color" content="#E50914" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="MovieBuzz" />
-    <link rel="apple-touch-icon" href="/favicon.svg" />
+    <meta name="application-name" content="MovieBuzz" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>MovieBuzz - Stream Movies & TV Series</title>
     <meta name="description" content="Watch movies and TV series with high quality streaming and fast downloads." />
@@ -17,6 +19,14 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <script>
+      window.__pwa_deferred_prompt = null;
+      window.addEventListener('beforeinstallprompt', function(e) {
+        e.preventDefault();
+        window.__pwa_deferred_prompt = e;
+        window.dispatchEvent(new CustomEvent('pwa_prompt_ready'));
+      });
+    </script>
   </head>
   <body class="bg-[#09090b] text-gray-100 antialiased font-sans">
     <div id="root"></div>

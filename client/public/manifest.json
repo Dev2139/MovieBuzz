@@ -1,19 +1,44 @@
 {
   "name": "MovieBuzz - Stream Movies & TV Series",
   "short_name": "MovieBuzz",
-  "description": "Watch movies and TV series with high quality streaming and fast downloads.",
+  "description": "Stream high quality movies and TV shows with instant loading, offline caching and direct downloads on any device.",
   "start_url": "/",
+  "scope": "/",
   "id": "/",
   "display": "standalone",
   "orientation": "any",
-  "background_color": "#0B0C10",
+  "background_color": "#09090b",
   "theme_color": "#E50914",
   "icons": [
     {
+      "src": "/icons/icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-maskable-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icons/icon-maskable-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
       "src": "/favicon.svg",
-      "sizes": "192x192 512x512",
+      "sizes": "any",
       "type": "image/svg+xml",
-      "purpose": "any maskable"
+      "purpose": "any"
     }
   ],
   "categories": ["entertainment", "movies", "video"]

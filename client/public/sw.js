@@ -1,9 +1,12 @@
-const CACHE_NAME = 'moviebuzz-pwa-v1';
+const CACHE_NAME = 'moviebuzz-pwa-v2';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
   '/manifest.json',
   '/favicon.svg',
+  '/icons/icon-192x192.png',
+  '/icons/icon-512x512.png',
+  '/icons/apple-touch-icon.png',
 ];
 
 // Install Event

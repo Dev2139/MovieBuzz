@@ -9,6 +9,8 @@ import { BottomNav } from './components/BottomNav';
 import { Footer } from './components/Footer';
 import { AuthModal } from './components/AuthModal';
 import { ScrollToTop } from './components/ScrollToTop';
+import { InstallModal } from './components/InstallModal';
+import { InstallBanner } from './components/InstallBanner';
 
 import { HomePage } from './pages/HomePage';
 import { MoviesPage } from './pages/MoviesPage';
@@ -88,6 +90,8 @@ export const App: React.FC = () => {
                 </main>
                 <Footer />
                 <BottomNav />
+                <InstallBanner />
+                <InstallModal />
                 <AuthModal />
               </div>
             </BrowserRouter>

@@ -185,6 +185,17 @@ export const Navbar: React.FC = () => {
 
         {/* Mobile Header Icons */}
         <div className="md:hidden flex items-center space-x-2">
+          {canInstall && !isInstalled && (
+            <button
+              onClick={promptInstall}
+              className="flex items-center space-x-1 bg-brand-500/20 text-brand-400 border border-brand-500/40 hover:bg-brand-500 hover:text-white px-2.5 py-1 rounded-xl text-xs font-bold transition-all"
+              title="Install App"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Install</span>
+            </button>
+          )}
+
           <button
             onClick={() => navigate('/search')}
             className="p-2 text-gray-300 hover:text-white bg-dark-surface/80 rounded-xl border border-dark-border/60"
