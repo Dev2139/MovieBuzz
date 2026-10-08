@@ -329,9 +329,90 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }
   };
 
-  // Container click handler with Double-Tap Skip (-10s / +10s)
+  const touchStartRef = useRef<{
+    x: number;
+    y: number;
+    brightness: number;
+    volume: number;
+    isGesture: boolean;
+  } | null>(null);
+
+  const gestureTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const [gestureHUD, setGestureHUD] = useState<{
+    type: 'brightness' | 'volume';
+    value: number;
+  } | null>(null);
+
+  const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    if ((e.target as HTMLElement).closest('button, input, .no-player-click')) return;
+
+    const touch = e.touches[0];
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+
+    touchStartRef.current = {
+      x: touch.clientX - rect.left,
+      y: touch.clientY - rect.top,
+      brightness,
+      volume: isMuted ? 0 : volume,
+      isGesture: false,
+    };
+  };
+
+  const handleTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (!touchStartRef.current || !containerRef.current) return;
+    if ((e.target as HTMLElement).closest('button, input, .no-player-click')) return;
+
+    const touch = e.touches[0];
+    const rect = containerRef.current.getBoundingClientRect();
+    const currentX = touch.clientX - rect.left;
+    const currentY = touch.clientY - rect.top;
+
+    const deltaY = touchStartRef.current.y - currentY; // positive when swiping up
+    const deltaX = Math.abs(currentX - touchStartRef.current.x);
+
+    if (Math.abs(deltaY) > 10 && Math.abs(deltaY) > deltaX) {
+      touchStartRef.current.isGesture = true;
+      const height = rect.height || 300;
+      const ratio = (deltaY / height) * 1.3;
+
+      if (touchStartRef.current.x < rect.width / 2) {
+        // Left side swipe: Brightness
+        const newB = Math.max(0.2, Math.min(1.2, touchStartRef.current.brightness + ratio));
+        setBrightness(newB);
+        setGestureHUD({ type: 'brightness', value: Math.round(newB * 100) });
+      } else {
+        // Right side swipe: Volume
+        const newV = Math.max(0, Math.min(1, touchStartRef.current.volume + ratio));
+        setVolume(newV);
+        if (newV > 0) setIsMuted(false);
+        setGestureHUD({ type: 'volume', value: Math.round(newV * 100) });
+      }
+
+      if (gestureTimeoutRef.current) clearTimeout(gestureTimeoutRef.current);
+      gestureTimeoutRef.current = setTimeout(() => {
+        setGestureHUD(null);
+      }, 800);
+    }
+  };
+
+  const handleTouchEnd = () => {
+    if (gestureTimeoutRef.current) clearTimeout(gestureTimeoutRef.current);
+    gestureTimeoutRef.current = setTimeout(() => {
+      setGestureHUD(null);
+    }, 700);
+  };
+
+  // Container click handler with Double-Tap Skip (-10s / +10s) and Single-Tap Toggle Controls
   const handleContainerClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if ((e.target as HTMLElement).closest('button, input, .no-player-click')) return;
+
+    // Skip click action if touch gesture swipe occurred
+    if (touchStartRef.current?.isGesture) {
+      touchStartRef.current = null;
+      return;
+    }
 
     const now = Date.now();
     const rect = containerRef.current?.getBoundingClientRect();
@@ -339,7 +420,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     const width = rect?.width || 1;
 
     if (now - lastClickRef.current.time < 300) {
-      // Double Tap Detected
+      // Double Tap Detected (-10s / +10s)
       if (singleClickTimerRef.current) clearTimeout(singleClickTimerRef.current);
 
       if (clickX < width / 2) {
@@ -359,9 +440,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       setTimeout(() => setSkipFeedback(null), 800);
       lastClickRef.current = { time: 0, x: 0 };
     } else {
+      // Single Tap: Toggle Controls overlay without pausing movie
       lastClickRef.current = { time: now, x: clickX };
       singleClickTimerRef.current = setTimeout(() => {
-        togglePlay();
+        setShowControls((prev) => !prev);
       }, 300);
     }
   };
@@ -445,6 +527,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       ref={containerRef}
       onMouseMove={handleMouseMove}
       onClick={handleContainerClick}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
       className="relative w-full aspect-video bg-black rounded-2xl overflow-hidden group shadow-2xl select-none"
     >
       <video
@@ -524,6 +609,33 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             {/* Center Projector Lens Ping Flare */}
             <div className="absolute w-3 h-3 bg-white rounded-full animate-ping shadow-[0_0_15px_#ffffff]" />
           </div>
+        </div>
+      )}
+
+      {/* Floating Touch Swipe Gesture HUD Badge (Active while sliding) */}
+      {gestureHUD && (
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-black/85 backdrop-blur-md border border-white/20 px-4 sm:px-6 py-3 rounded-2xl flex items-center space-x-3 text-white z-40 pointer-events-none shadow-2xl animate-fade-in">
+          {gestureHUD.type === 'brightness' ? (
+            <Sun className="w-6 h-6 text-amber-400 flex-none animate-pulse" />
+          ) : gestureHUD.value === 0 ? (
+            <VolumeX className="w-6 h-6 text-red-500 flex-none" />
+          ) : (
+            <Volume2 className="w-6 h-6 text-brand-500 flex-none animate-pulse" />
+          )}
+          <div className="flex flex-col space-y-1">
+            <span className="text-[10px] font-bold font-mono tracking-widest uppercase text-gray-400">
+              {gestureHUD.type}
+            </span>
+            <div className="w-24 sm:w-28 h-2 bg-gray-700/80 rounded-full overflow-hidden">
+              <div
+                className={`h-full transition-all duration-75 ${
+                  gestureHUD.type === 'brightness' ? 'bg-amber-400' : 'bg-brand-500'
+                }`}
+                style={{ width: `${Math.min(100, gestureHUD.value)}%` }}
+              />
+            </div>
+          </div>
+          <span className="text-xs font-mono font-bold text-white w-8 text-right">{gestureHUD.value}%</span>
         </div>
       )}
 
