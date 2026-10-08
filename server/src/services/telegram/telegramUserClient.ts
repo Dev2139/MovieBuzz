@@ -47,7 +47,12 @@ export class TelegramUserMTProtoClient {
 
       this.client = new TelegramClient(stringSession, this.apiId, this.apiHash, {
         connectionRetries: 1,
+        autoReconnect: false,
+        useWSS: false,
       });
+
+      // Disable GramJS update loop polling to prevent background TIMEOUT exceptions
+      (this.client as any)._updateLoop = () => Promise.resolve();
 
       await this.client.connect();
       const peerId = this.channelId.startsWith('-100') ? BigInt(this.channelId) : this.channelId;

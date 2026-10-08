@@ -97,6 +97,9 @@ class TelegramStreamService {
           useWSS: false,
         });
 
+        // Disable GramJS update loop polling to prevent background TIMEOUT exceptions
+        (client as any)._updateLoop = () => Promise.resolve();
+
         if (savedSession && savedSession.length > 5) {
           await client.connect();
           console.log('[TelegramStreamService] MTProto Client connected via User Session!');
@@ -209,7 +212,7 @@ class TelegramStreamService {
   /**
    * Get total file size in bytes for a fileId instantly
    */
-  async getFileSize(fileId: string): Promise<number> {
+  async getFileSize(fileId: string, messageId?: string): Promise<number> {
     try {
       let docIdStr = fileId;
       try {
@@ -217,7 +220,11 @@ class TelegramStreamService {
         if (decoded && decoded.id) docIdStr = String(decoded.id);
       } catch {}
 
-      const cached = this.locationCache.get(docIdStr) || this.locationCache.get(fileId);
+      let cached = this.locationCache.get(docIdStr) || this.locationCache.get(fileId);
+      if (!cached) {
+        await this.refreshLocations(fileId, messageId);
+        cached = this.locationCache.get(docIdStr) || this.locationCache.get(fileId);
+      }
       return cached?.size || 1500000000;
     } catch {
       return 1500000000;

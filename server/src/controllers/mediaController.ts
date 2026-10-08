@@ -75,8 +75,10 @@ export const proxyTelegramFileStream = async (req: Request, res: Response) => {
     const range = req.headers.range;
 
     // MTProto Chunk Range Streaming
-    const mediaDoc = await Media.findOne({ providerMediaId: fileId }).select('providerMessageId').lean().catch(() => null);
+    const mediaDoc = await Media.findOne({ $or: [{ providerMediaId: fileId }, { _id: fileId }] }).select('providerMessageId').lean().catch(() => null);
     const messageId = mediaDoc?.providerMessageId;
+
+    const totalSize = (await telegramStreamService.getFileSize(fileId, messageId)) || 1500000000;
 
     let start = 0;
     let reqSize = 512 * 1024;
@@ -85,9 +87,16 @@ export const proxyTelegramFileStream = async (req: Request, res: Response) => {
       const parts = range.replace(/bytes=/, '').split('-');
       start = parseInt(parts[0], 10) || 0;
       if (parts[1]) {
-        const end = parseInt(parts[1], 10);
-        reqSize = Math.min(end - start + 1, 1024 * 1024);
+        const requestedEnd = parseInt(parts[1], 10);
+        reqSize = Math.min(requestedEnd - start + 1, 1024 * 1024);
       }
+    }
+
+    if (start >= totalSize && totalSize > 0) {
+      res.writeHead(416, {
+        'Content-Range': `bytes */${totalSize}`,
+      });
+      return res.end();
     }
 
     const chunkSize = 512 * 1024;
@@ -104,7 +113,13 @@ export const proxyTelegramFileStream = async (req: Request, res: Response) => {
     const sliceEnd = Math.min(sliceStart + reqSize, rawBuffer.length);
     const buffer = rawBuffer.subarray(sliceStart, sliceEnd);
 
-    const totalSize = (await telegramStreamService.getFileSize(fileId)) || 1500000000;
+    if (buffer.length === 0) {
+      res.writeHead(416, {
+        'Content-Range': `bytes */${totalSize}`,
+      });
+      return res.end();
+    }
+
     const end = Math.min(start + buffer.length - 1, totalSize - 1);
 
     let contentType = 'video/mp4';
