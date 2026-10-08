@@ -74,10 +74,18 @@ export const proxyTelegramFileStream = async (req: Request, res: Response) => {
     const fileId = decodeURIComponent(rawFileId);
     const range = req.headers.range;
 
-    // MTProto Chunk Range Streaming
-    const mediaDoc = await Media.findOne({ $or: [{ providerMediaId: fileId }, { _id: fileId }] }).select('providerMessageId').lean().catch(() => null);
-    const messageId = mediaDoc?.providerMessageId;
+    // Always advertise Accept-Ranges so browser knows we support seeking
+    res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('Access-Control-Allow-Origin', '*');
 
+    // Pull associated media doc for messageId + stored streamUrl fallback
+    const mediaDoc = await Media.findOne({
+      $or: [{ providerMediaId: fileId }, { _id: fileId }],
+    }).select('providerMessageId streamUrl').lean().catch(() => null);
+    const messageId = (mediaDoc as any)?.providerMessageId;
+    const storedStreamUrl: string | undefined = (mediaDoc as any)?.streamUrl;
+
+    // --- TIER 1: MTProto chunk streaming ---
     const totalSize = (await telegramStreamService.getFileSize(fileId, messageId)) || 1500000000;
 
     let start = 0;
@@ -93,72 +101,92 @@ export const proxyTelegramFileStream = async (req: Request, res: Response) => {
     }
 
     if (start >= totalSize && totalSize > 0) {
-      res.writeHead(416, {
-        'Content-Range': `bytes */${totalSize}`,
-      });
+      res.writeHead(416, { 'Content-Range': `bytes */${totalSize}` });
       return res.end();
     }
 
     const chunkSize = 512 * 1024;
     const alignedOffset = Math.floor(start / chunkSize) * chunkSize;
-    const limit = chunkSize;
 
-    let rawBuffer = await telegramStreamService.getChunk(fileId, alignedOffset, limit, messageId);
+    const rawBuffer = await telegramStreamService.getChunk(fileId, alignedOffset, chunkSize, messageId);
 
-    // High Availability Fallback: If MTProto chunk is unavailable, stream directly via Telegram Bot API HTTP stream
-    if (!rawBuffer) {
-      try {
-        const fallbackUrl = await storageService.getProvider().getStreamUrl(fileId).catch(() => null);
-        if (fallbackUrl && fallbackUrl.startsWith('http') && !fallbackUrl.includes('/proxy-file/')) {
-          const httpRes = await axios.get(fallbackUrl, {
-            headers: range ? { Range: range } : {},
-            responseType: 'arraybuffer',
-            timeout: 15000,
-          });
-          res.writeHead(httpRes.status, httpRes.headers as any);
-          return res.end(httpRes.data);
-        }
-      } catch (fallbackErr: any) {
-        console.warn('[proxyTelegramFileStream] Fallback stream notice:', fallbackErr.message);
+    if (rawBuffer && rawBuffer.length > 0) {
+      // MTProto succeeded — slice to requested range and return
+      const sliceStart = start - alignedOffset;
+      const sliceEnd = Math.min(sliceStart + reqSize, rawBuffer.length);
+      const buffer = rawBuffer.subarray(sliceStart, sliceEnd);
+
+      if (buffer.length === 0) {
+        res.writeHead(416, { 'Content-Range': `bytes */${totalSize}` });
+        return res.end();
       }
-      return res.status(503).json({ message: 'Telegram media stream is currently unavailable' });
-    }
 
-    const sliceStart = start - alignedOffset;
-    const sliceEnd = Math.min(sliceStart + reqSize, rawBuffer.length);
-    const buffer = rawBuffer.subarray(sliceStart, sliceEnd);
+      const end = Math.min(start + buffer.length - 1, totalSize - 1);
+      let contentType = 'video/mp4';
+      if (rawBuffer[0] === 0x1a && rawBuffer[1] === 0x45 && rawBuffer[2] === 0xdf && rawBuffer[3] === 0xa3) {
+        contentType = 'video/webm';
+      }
 
-    if (buffer.length === 0) {
-      res.writeHead(416, {
-        'Content-Range': `bytes */${totalSize}`,
-      });
-      return res.end();
-    }
-
-    const end = Math.min(start + buffer.length - 1, totalSize - 1);
-
-    let contentType = 'video/mp4';
-    if (rawBuffer.length >= 4 && rawBuffer[0] === 0x1a && rawBuffer[1] === 0x45 && rawBuffer[2] === 0xdf && rawBuffer[3] === 0xa3) {
-      contentType = 'video/webm';
-    }
-
-    if (range) {
-      res.writeHead(206, {
-        'Content-Range': `bytes ${start}-${end}/${totalSize}`,
+      res.writeHead(range ? 206 : 200, {
+        ...(range ? { 'Content-Range': `bytes ${start}-${end}/${totalSize}` } : {}),
         'Accept-Ranges': 'bytes',
         'Content-Length': buffer.length,
         'Content-Type': contentType,
         'Cache-Control': 'public, max-age=3600',
       });
       return res.end(buffer);
-    } else {
-      res.writeHead(200, {
-        'Content-Length': buffer.length,
-        'Content-Type': contentType,
-        'Cache-Control': 'public, max-age=3600',
-      });
-      return res.end(buffer);
     }
+
+    // --- TIER 2: Telegram Bot API getFile + pipe (works for files <= 20MB) ---
+    const botToken = process.env.TELEGRAM_BOT_TOKEN;
+    if (botToken && fileId && fileId.length > 10 && !fileId.match(/^\d+$/)) {
+      try {
+        const fileInfoRes = await axios.get(
+          `https://api.telegram.org/bot${botToken}/getFile?file_id=${encodeURIComponent(fileId)}`,
+          { timeout: 10000 }
+        );
+        if (fileInfoRes.data?.ok && fileInfoRes.data?.result?.file_path) {
+          const tgUrl = `https://api.telegram.org/file/bot${botToken}/${fileInfoRes.data.result.file_path}`;
+          const tgRes = await axios.get(tgUrl, {
+            headers: range ? { Range: range } : {},
+            responseType: 'stream',
+            timeout: 30000,
+          });
+          res.writeHead(tgRes.status, {
+            ...tgRes.headers as any,
+            'Accept-Ranges': 'bytes',
+            'Cache-Control': 'public, max-age=3600',
+          });
+          tgRes.data.pipe(res);
+          return;
+        }
+      } catch (botApiErr: any) {
+        console.warn('[proxyTelegramFileStream] Bot API Tier-2 notice:', botApiErr.message);
+      }
+    }
+
+    // --- TIER 3: Pipe stored direct streamUrl if it's a real HTTP URL (not circular) ---
+    if (storedStreamUrl && storedStreamUrl.startsWith('http') && !storedStreamUrl.includes('/proxy-file/')) {
+      try {
+        const directRes = await axios.get(storedStreamUrl, {
+          headers: range ? { Range: range } : {},
+          responseType: 'stream',
+          timeout: 30000,
+        });
+        res.writeHead(directRes.status, {
+          ...directRes.headers as any,
+          'Accept-Ranges': 'bytes',
+          'Cache-Control': 'public, max-age=3600',
+        });
+        directRes.data.pipe(res);
+        return;
+      } catch (directErr: any) {
+        console.warn('[proxyTelegramFileStream] Direct URL Tier-3 notice:', directErr.message);
+      }
+    }
+
+    // All tiers failed — return a proper 503 with Accept-Ranges so browser doesn't hang
+    return res.status(503).json({ message: 'Media stream temporarily unavailable. Please try again shortly.' });
   } catch (error: any) {
     console.error('proxyTelegramFileStream error:', error.message);
     return res.status(500).json({ message: 'Telegram stream error' });

@@ -73,6 +73,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       const found = mediaList.find((m) => m.quality === selectedQuality) || mediaList[0];
       const resolved = resolveStreamUrl(found.streamUrl);
       setStreamUrl(resolved);
+      setStreamError(null); // clear error on quality/source change
     }
   }, [mediaList, selectedQuality]);
 
@@ -80,6 +81,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [isBuffering, setIsBuffering] = useState<boolean>(true);
   const [currentTime, setCurrentTime] = useState<number>(initialPosition);
   const [duration, setDuration] = useState<number>(0);
+  const [streamError, setStreamError] = useState<string | null>(null);
 
   // Audio Volume & Mute States
   const [volume, setVolume] = useState<number>(1);
@@ -552,8 +554,18 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           }
         }}
         onPause={() => setIsPlaying(false)}
-        onError={() => {
+        onError={(e) => {
+          const vid = e.currentTarget;
+          const errCode = vid.error?.code;
+          const errMsg = vid.error?.message || '';
+          let userMsg = 'Video failed to load.';
+          if (errCode === 2) userMsg = 'Network error — stream could not be fetched.';
+          else if (errCode === 3) userMsg = 'Decoding error — unsupported video format.';
+          else if (errCode === 4) userMsg = 'Source not supported — the stream URL is invalid or unavailable.';
+          else if (errMsg) userMsg = errMsg;
+          setStreamError(userMsg);
           setIsBuffering(false);
+          setIsPlaying(false);
         }}
         onEnded={() => {
           setIsPlaying(false);
@@ -564,8 +576,35 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         playsInline
       />
 
+      {/* Stream Error Overlay */}
+      {streamError && !isBuffering && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/90 backdrop-blur-sm z-20 pointer-events-auto animate-fade-in px-6 text-center">
+          <div className="w-16 h-16 rounded-full bg-red-500/20 border border-red-500/40 flex items-center justify-center mb-4">
+            <svg className="w-8 h-8 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.293 4.293a1 1 0 011.414 0L21 13.586V19a2 2 0 01-2 2H5a2 2 0 01-2-2v-5.414L10.293 4.293z" />
+            </svg>
+          </div>
+          <h3 className="text-white font-bold text-base mb-1">Stream Unavailable</h3>
+          <p className="text-gray-400 text-xs max-w-xs mb-4">{streamError}</p>
+          <button
+            onClick={() => {
+              setStreamError(null);
+              setIsBuffering(true);
+              if (videoRef.current) {
+                videoRef.current.load();
+                videoRef.current.play().catch(() => {});
+              }
+            }}
+            className="px-4 py-2 bg-brand-500 hover:bg-brand-600 text-white rounded-xl text-sm font-semibold transition-all active:scale-95 shadow-lg shadow-brand-500/25"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
       {/* Cinema 35mm Film Reel & Projector Stream Loader Overlay */}
       {isBuffering && (
+
         <div className="absolute inset-0 flex items-center justify-center bg-black/80 backdrop-blur-sm z-20 pointer-events-none animate-fade-in">
           <div className="relative flex items-center justify-center w-24 h-24">
             {/* Projector Light Glow Halo */}
