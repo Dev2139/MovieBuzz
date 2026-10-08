@@ -148,6 +148,7 @@ class TelegramStreamService {
       const now = Date.now();
 
       // If specific messageId is provided, fetch that exact message first
+      // Note: bots cannot call getMessages — caught silently below
       if (messageId) {
         try {
           const directMsgs = await client.getMessages(peer as any, { ids: [Number(messageId)] });
@@ -171,41 +172,55 @@ class TelegramStreamService {
               if (targetDocId) this.locationCache.set(targetDocId, locData);
             }
           }
-        } catch {
-          // ignore error and fallback to fetching recent channel messages
-        }
-      }
-
-      // Fetch channel messages if targetDocId is not cached yet
-      if (!targetDocId || !this.locationCache.has(targetDocId)) {
-        const messages = await client.getMessages(peer as any, { limit: 100 });
-        for (const msg of messages) {
-          if (msg && msg.media && (msg.media as any).document) {
-            const doc = (msg.media as any).document;
-            const docId = doc.id.toString();
-            const docSize = doc.size ? (doc.size.toNumber ? doc.size.toNumber() : Number(doc.size)) : 0;
-            const locData: CachedLocation = {
-              dcId: doc.dcId,
-              size: docSize,
-              updatedAt: now,
-              inputLocation: new Api.InputDocumentFileLocation({
-                id: doc.id,
-                accessHash: doc.accessHash,
-                fileReference: doc.fileReference,
-                thumbSize: '',
-              }),
-            };
-            this.locationCache.set(docId, locData);
-            if (msg.id && targetDocId && targetDocId.includes(String(msg.id))) {
-              this.locationCache.set(targetDocId, locData);
-            }
+        } catch (err: any) {
+          // BOT_METHOD_INVALID or other — skip silently, decodeFileId fallback handles streaming
+          if (err.message && !err.message.includes('BOT_METHOD_INVALID') && !err.message.includes('400')) {
+            console.warn('[TelegramStreamService] refreshLocations (messageId fetch) note:', err.message);
           }
         }
       }
 
-      console.log(`[TelegramStreamService] Refreshed ${this.locationCache.size} media file references from Telegram!`);
+      // Fetch channel messages if targetDocId is not cached yet
+      // Bots cannot use this method — catch and skip silently
+      if (!targetDocId || !this.locationCache.has(targetDocId)) {
+        try {
+          const messages = await client.getMessages(peer as any, { limit: 100 });
+          for (const msg of messages) {
+            if (msg && msg.media && (msg.media as any).document) {
+              const doc = (msg.media as any).document;
+              const docId = doc.id.toString();
+              const docSize = doc.size ? (doc.size.toNumber ? doc.size.toNumber() : Number(doc.size)) : 0;
+              const locData: CachedLocation = {
+                dcId: doc.dcId,
+                size: docSize,
+                updatedAt: now,
+                inputLocation: new Api.InputDocumentFileLocation({
+                  id: doc.id,
+                  accessHash: doc.accessHash,
+                  fileReference: doc.fileReference,
+                  thumbSize: '',
+                }),
+              };
+              this.locationCache.set(docId, locData);
+              if (msg.id && targetDocId && targetDocId.includes(String(msg.id))) {
+                this.locationCache.set(targetDocId, locData);
+              }
+            }
+          }
+          if (this.locationCache.size > 0) {
+            console.log(`[TelegramStreamService] Refreshed ${this.locationCache.size} media file references from Telegram!`);
+          }
+        } catch (err: any) {
+          // BOT_METHOD_INVALID is expected when running as bot — skip silently
+          if (err.message && !err.message.includes('BOT_METHOD_INVALID') && !err.message.includes('400')) {
+            console.warn('[TelegramStreamService] refreshLocations note:', err.message);
+          }
+        }
+      }
     } catch (err: any) {
-      console.warn('[TelegramStreamService] refreshLocations note:', err.message);
+      if (err.message && !err.message.includes('BOT_METHOD_INVALID') && !err.message.includes('400')) {
+        console.warn('[TelegramStreamService] refreshLocations outer note:', err.message);
+      }
     }
   }
 
