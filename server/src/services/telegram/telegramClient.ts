@@ -4,26 +4,35 @@ import { MediaProvider, ContentMediaDescriptor, MediaResource } from './types';
 import { MockMediaProvider } from './mockMediaProvider';
 import { TelegramImporter } from './telegramImporter';
 import { TelegramUserMTProtoClient } from './telegramUserClient';
+import { telegramStreamService } from './telegramStreamService';
 
 dotenv.config();
 
 export class TelegramMediaProvider implements MediaProvider {
-  private channelId: string;
-  private apiId: string;
-  private apiHash: string;
-  private botToken: string;
   private mockFallback: MockMediaProvider;
   private importer: TelegramImporter;
   private userMtprotoClient: TelegramUserMTProtoClient;
 
   constructor() {
-    this.channelId = process.env.TELEGRAM_CHANNEL_ID || '';
-    this.apiId = process.env.TELEGRAM_API_ID || '';
-    this.apiHash = process.env.TELEGRAM_API_HASH || '';
-    this.botToken = process.env.TELEGRAM_BOT_TOKEN || '';
     this.mockFallback = new MockMediaProvider();
     this.importer = new TelegramImporter();
     this.userMtprotoClient = new TelegramUserMTProtoClient();
+  }
+
+  private get channelId(): string {
+    return process.env.TELEGRAM_CHANNEL_ID || '';
+  }
+
+  private get apiId(): string {
+    return process.env.TELEGRAM_API_ID || '';
+  }
+
+  private get apiHash(): string {
+    return process.env.TELEGRAM_API_HASH || '';
+  }
+
+  private get botToken(): string {
+    return process.env.TELEGRAM_BOT_TOKEN || '';
   }
 
   public isConfigured(): boolean {
@@ -35,6 +44,8 @@ export class TelegramMediaProvider implements MediaProvider {
    * Links real Telegram video files and photo covers directly to stream/download endpoints.
    */
   async syncChannelPosts(): Promise<number> {
+    let count = 0;
+
     if (this.botToken) {
       try {
         console.log(`[TelegramClient] Polling Telegram Bot API for messages sent to @devcinestreambot or channel...`);
@@ -43,7 +54,6 @@ export class TelegramMediaProvider implements MediaProvider {
         });
 
         if (res.data && res.data.ok && Array.isArray(res.data.result)) {
-          let count = 0;
           for (const update of res.data.result) {
             const post = update.channel_post || update.message;
             if (post) {
@@ -70,9 +80,9 @@ export class TelegramMediaProvider implements MediaProvider {
                   ? `https://${process.env.VERCEL_URL}` 
                   : (process.env.BACKEND_URL || 'http://localhost:5000');
 
-                const streamUrl = videoFileId ? `${baseUrl}/api/media/proxy-file/${videoFileId}` : undefined;
-                const downloadUrl = videoFileId ? `${baseUrl}/api/media/download-file/${videoFileId}` : undefined;
-                const posterUrl = photoFileId ? `${baseUrl}/api/media/proxy-file/${photoFileId}` : undefined;
+                const streamUrl = videoFileId ? `${baseUrl}/api/media/proxy-file/${encodeURIComponent(videoFileId)}` : undefined;
+                const downloadUrl = videoFileId ? `${baseUrl}/api/media/download-file/${encodeURIComponent(videoFileId)}` : undefined;
+                const posterUrl = photoFileId ? `${baseUrl}/api/media/proxy-file/${encodeURIComponent(photoFileId)}` : undefined;
 
                 const published = await this.importer.autoPublishTelegramPost({
                   channelId: String(post.chat?.id || this.channelId),
@@ -89,11 +99,6 @@ export class TelegramMediaProvider implements MediaProvider {
               }
             }
           }
-
-          if (count > 0) {
-            console.log(`[TelegramClient] Processed & published ${count} real Telegram media posts to catalog!`);
-            return count;
-          }
         }
       } catch (err: any) {
         console.warn(`[TelegramClient] Bot API notice: ${err.message}`);
@@ -102,11 +107,61 @@ export class TelegramMediaProvider implements MediaProvider {
 
     // MTProto User API Fallback
     if (this.apiId && this.apiHash) {
-      const userCount = await this.userMtprotoClient.fetchPrivateChannelPosts();
-      if (userCount > 0) return userCount;
+      try {
+        const userCount = await this.userMtprotoClient.fetchPrivateChannelPosts();
+        if (userCount > 0) count += userCount;
+      } catch (err: any) {
+        console.warn(`[TelegramClient] MTProto user client sync notice: ${err.message}`);
+      }
+
+      try {
+        const mtClient = await telegramStreamService.getClient();
+        if (mtClient && this.channelId) {
+          const peer = await mtClient.getEntity(this.channelId).catch(() => null);
+          if (peer) {
+            const messages = await mtClient.getMessages(peer as any, { limit: 100 });
+            const baseUrl = process.env.VERCEL_URL 
+              ? `https://${process.env.VERCEL_URL}` 
+              : (process.env.BACKEND_URL || 'http://localhost:5000');
+
+            for (const msg of messages) {
+              if (msg && (msg.message || msg.media)) {
+                const caption = msg.message || '';
+                if (caption.length > 2) {
+                  let videoFileId = '';
+                  if (msg.media && (msg.media as any).document) {
+                    videoFileId = (msg.media as any).document.id.toString();
+                  }
+
+                  const streamUrl = videoFileId ? `${baseUrl}/api/media/proxy-file/${encodeURIComponent(videoFileId)}` : undefined;
+                  const downloadUrl = videoFileId ? `${baseUrl}/api/media/download-file/${encodeURIComponent(videoFileId)}` : undefined;
+
+                  const published = await this.importer.autoPublishTelegramPost({
+                    channelId: this.channelId,
+                    messageId: String(msg.id),
+                    mediaId: videoFileId || `tg_media_${msg.id}`,
+                    caption,
+                    streamUrl,
+                    downloadUrl,
+                  });
+                  if (published) {
+                    count++;
+                  }
+                }
+              }
+            }
+          }
+        }
+      } catch (mtErr: any) {
+        console.warn(`[TelegramClient] MTProto channel sync notice: ${mtErr.message}`);
+      }
     }
 
-    return 0;
+    if (count > 0) {
+      console.log(`[TelegramClient] Processed & published ${count} real Telegram media posts to catalog!`);
+    }
+
+    return count;
   }
 
   async getContent(): Promise<ContentMediaDescriptor[]> {
@@ -125,3 +180,4 @@ export class TelegramMediaProvider implements MediaProvider {
     return this.mockFallback.getDownloadUrl(mediaId);
   }
 }
+

@@ -44,7 +44,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
 
   const resolveStreamUrl = (rawUrl?: string) => {
-    if (!rawUrl) return 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4';
+    if (!rawUrl) return '';
     const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
     const backendOrigin = apiBase.replace(/\/api\/?$/, '');
 
@@ -323,10 +323,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         onWaiting={handleStall}
         onStalled={handleStall}
         onError={() => {
-          console.warn('[VideoPlayer] Video error encountered, attempting stream recovery...');
-          if (videoRef.current && !streamUrl.includes('sample/TearsOfSteel.mp4')) {
-            setStreamUrl('https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4');
-          }
+          console.warn('[VideoPlayer] Video playback error encountered.');
         }}
         onEnded={() => {
           setIsPlaying(false);

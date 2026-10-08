@@ -6,19 +6,27 @@ import { TelegramImporter } from './telegramImporter';
 dotenv.config();
 
 export class TelegramUserMTProtoClient {
-  private apiId: number;
-  private apiHash: string;
-  private channelId: string;
-  private sessionString: string;
   private client: TelegramClient | null = null;
   private importer: TelegramImporter;
 
   constructor() {
-    this.apiId = Number(process.env.TELEGRAM_API_ID || 0);
-    this.apiHash = process.env.TELEGRAM_API_HASH || '';
-    this.channelId = process.env.TELEGRAM_CHANNEL_ID || '';
-    this.sessionString = process.env.TELEGRAM_SESSION_STRING || '';
     this.importer = new TelegramImporter();
+  }
+
+  private get apiId(): number {
+    return Number(process.env.TELEGRAM_API_ID || 0);
+  }
+
+  private get apiHash(): string {
+    return process.env.TELEGRAM_API_HASH || '';
+  }
+
+  private get channelId(): string {
+    return process.env.TELEGRAM_CHANNEL_ID || '';
+  }
+
+  private get sessionString(): string {
+    return process.env.TELEGRAM_SESSION_STRING || '';
   }
 
   public isConfigured(): boolean {

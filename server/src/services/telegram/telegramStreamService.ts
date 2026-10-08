@@ -15,19 +15,55 @@ interface CachedLocation {
   updatedAt: number;
 }
 
+interface CachedChunk {
+  buffer: Buffer;
+  expiresAt: number;
+}
+
 class TelegramStreamService {
   private client: TelegramClient | null = null;
   private isInitializing = false;
   private initPromise: Promise<TelegramClient | null> | null = null;
 
-  private apiId = Number(process.env.TELEGRAM_API_ID || 0);
-  private apiHash = process.env.TELEGRAM_API_HASH || '';
-  private botToken = process.env.TELEGRAM_BOT_TOKEN || '';
-  private channelId = process.env.TELEGRAM_CHANNEL_ID || '';
   private sessionFilePath = path.join(process.cwd(), '.bot_session');
+
+  private get apiId(): number {
+    return Number(process.env.TELEGRAM_API_ID || 0);
+  }
+
+  private get apiHash(): string {
+    return process.env.TELEGRAM_API_HASH || '';
+  }
+
+  private get botToken(): string {
+    return process.env.TELEGRAM_BOT_TOKEN || '';
+  }
+
+  private get channelId(): string {
+    return process.env.TELEGRAM_CHANNEL_ID || '';
+  }
 
   // Map of documentId string -> CachedLocation with fresh fileReference & size
   private locationCache = new Map<string, CachedLocation>();
+  // RAM cache for recent 512KB video byte chunks
+  private chunkMemoryCache = new Map<string, CachedChunk>();
+
+  private getCachedChunk(key: string): Buffer | null {
+    const item = this.chunkMemoryCache.get(key);
+    if (item && Date.now() < item.expiresAt) {
+      return item.buffer;
+    }
+    if (item) this.chunkMemoryCache.delete(key);
+    return null;
+  }
+
+  private setCachedChunk(key: string, buffer: Buffer): void {
+    if (this.chunkMemoryCache.size > 150) {
+      const oldestKey = this.chunkMemoryCache.keys().next().value;
+      if (oldestKey) this.chunkMemoryCache.delete(oldestKey);
+    }
+    this.chunkMemoryCache.set(key, { buffer, expiresAt: Date.now() + 60000 });
+  }
 
   async getClient(): Promise<TelegramClient | null> {
     if (this.client && this.client.connected) {
@@ -40,6 +76,14 @@ class TelegramStreamService {
     this.isInitializing = true;
     this.initPromise = (async () => {
       try {
+        const apiId = this.apiId;
+        const apiHash = this.apiHash;
+
+        if (!apiId || !apiHash) {
+          console.warn('[TelegramStreamService] MTProto note: TELEGRAM_API_ID or TELEGRAM_API_HASH is not set in environment.');
+          return null;
+        }
+
         let savedSession = process.env.TELEGRAM_SESSION_STRING || '';
         if (!savedSession && fs.existsSync(this.sessionFilePath)) {
           savedSession = fs.readFileSync(this.sessionFilePath, 'utf-8').trim();
@@ -47,14 +91,16 @@ class TelegramStreamService {
 
         console.log('[TelegramStreamService] Connecting MTProto Client...');
         const stringSession = new StringSession(savedSession);
-        const client = new TelegramClient(stringSession, this.apiId, this.apiHash, {
+        const client = new TelegramClient(stringSession, apiId, apiHash, {
           connectionRetries: 5,
+          autoReconnect: true,
+          useWSS: false,
         });
 
         if (savedSession && savedSession.length > 5) {
           await client.connect();
           console.log('[TelegramStreamService] MTProto Client connected via User Session!');
-        } else {
+        } else if (this.botToken) {
           await client.start({ botAuthToken: this.botToken });
           console.log('[TelegramStreamService] MTProto Bot Client connected!');
 
@@ -64,9 +110,12 @@ class TelegramStreamService {
             try {
               fs.writeFileSync(this.sessionFilePath, newSessionStr, 'utf-8');
             } catch {
-              // Ignore filesystem write on read-only serverless environments like Vercel
+              // Ignore filesystem write on read-only serverless environments
             }
           }
+        } else {
+          console.warn('[TelegramStreamService] MTProto note: No valid session or bot token provided.');
+          return null;
         }
 
         this.client = client;
@@ -104,7 +153,7 @@ class TelegramStreamService {
               const doc = (msg.media as any).document;
               const docId = doc.id.toString();
               const docSize = doc.size ? (doc.size.toNumber ? doc.size.toNumber() : Number(doc.size)) : 0;
-              this.locationCache.set(docId, {
+              const locData: CachedLocation = {
                 dcId: doc.dcId,
                 size: docSize,
                 updatedAt: now,
@@ -114,7 +163,9 @@ class TelegramStreamService {
                   fileReference: doc.fileReference,
                   thumbSize: '',
                 }),
-              });
+              };
+              this.locationCache.set(docId, locData);
+              if (targetDocId) this.locationCache.set(targetDocId, locData);
             }
           }
         } catch {
@@ -130,7 +181,7 @@ class TelegramStreamService {
             const doc = (msg.media as any).document;
             const docId = doc.id.toString();
             const docSize = doc.size ? (doc.size.toNumber ? doc.size.toNumber() : Number(doc.size)) : 0;
-            this.locationCache.set(docId, {
+            const locData: CachedLocation = {
               dcId: doc.dcId,
               size: docSize,
               updatedAt: now,
@@ -140,7 +191,11 @@ class TelegramStreamService {
                 fileReference: doc.fileReference,
                 thumbSize: '',
               }),
-            });
+            };
+            this.locationCache.set(docId, locData);
+            if (msg.id && targetDocId && targetDocId.includes(String(msg.id))) {
+              this.locationCache.set(targetDocId, locData);
+            }
           }
         }
       }
@@ -156,9 +211,13 @@ class TelegramStreamService {
    */
   async getFileSize(fileId: string): Promise<number> {
     try {
-      const decoded = decodeFileId(fileId);
-      const docIdStr = String(decoded.id);
-      const cached = this.locationCache.get(docIdStr);
+      let docIdStr = fileId;
+      try {
+        const decoded = decodeFileId(fileId);
+        if (decoded && decoded.id) docIdStr = String(decoded.id);
+      } catch {}
+
+      const cached = this.locationCache.get(docIdStr) || this.locationCache.get(fileId);
       return cached?.size || 1500000000;
     } catch {
       return 1500000000;
@@ -166,30 +225,42 @@ class TelegramStreamService {
   }
 
   /**
-   * Decode Telegram file_id and fetch binary byte chunk directly via MTProto
-   * Zero network latency pre-fetching for instant video startup
+   * Internal worker to fetch byte chunk directly from MTProto
    */
-  async getChunk(fileId: string, offset = 0, limit = 512 * 1024, messageId?: string): Promise<Buffer | null> {
+  private async fetchAndCacheChunk(
+    fileId: string,
+    safeOffset: number,
+    safeLimit: number,
+    messageId?: string
+  ): Promise<Buffer | null> {
+    const cacheKey = `${fileId}:${safeOffset}:${safeLimit}`;
+    const existing = this.getCachedChunk(cacheKey);
+    if (existing) return existing;
+
     try {
       const client = await this.getClient();
       if (!client) return null;
 
-      // 1. Enforce Telegram MTProto API alignment constraints:
-      let safeLimit = Math.min(limit, 1024 * 1024);
-      safeLimit = Math.max(4096, Math.floor(safeLimit / 4096) * 4096);
-      const safeOffset = Math.max(0, Math.floor(offset / safeLimit) * safeLimit);
+      let decoded: any = null;
+      let docIdStr = fileId;
+      try {
+        decoded = decodeFileId(fileId);
+        if (decoded && decoded.id) docIdStr = String(decoded.id);
+      } catch {}
 
-      const decoded = decodeFileId(fileId);
-      const docIdStr = String(decoded.id);
+      let cached = this.locationCache.get(docIdStr) || this.locationCache.get(fileId);
+      if (!cached && !decoded) {
+        await this.refreshLocations(fileId, messageId);
+        cached = this.locationCache.get(docIdStr) || this.locationCache.get(fileId);
+      }
 
-      let cached = this.locationCache.get(docIdStr);
       let inputLocation: any;
       let dcId: number;
 
       if (cached) {
         inputLocation = cached.inputLocation;
         dcId = cached.dcId;
-      } else {
+      } else if (decoded) {
         dcId = decoded.dcId || 4;
         const fileRefBuffer = decoded.fileReference
           ? (Buffer.isBuffer(decoded.fileReference)
@@ -212,9 +283,10 @@ class TelegramStreamService {
             thumbSize: '',
           });
         }
+      } else {
+        return null;
       }
 
-      // Retry loop to handle expired file references or transient MTProto drops
       for (let attempt = 1; attempt <= 3; attempt++) {
         try {
           const request = new Api.upload.GetFile({
@@ -223,31 +295,34 @@ class TelegramStreamService {
             limit: safeLimit,
           });
 
-          // Try sending to target DC sender connection first, fallback to main client invoke
           let res: any;
           try {
-            const sender = await client.getSender(dcId);
-            res = await sender.send(request);
-          } catch {
             res = await client.invoke(request);
+          } catch (invokeErr: any) {
+            try {
+              const sender = await client.getSender(dcId);
+              res = await sender.send(request);
+            } catch {
+              throw invokeErr;
+            }
           }
 
           if (res && res.bytes) {
-            return Buffer.from(res.bytes);
+            const buf = Buffer.from(res.bytes);
+            this.setCachedChunk(cacheKey, buf);
+            return buf;
           }
         } catch (fileRefErr: any) {
-          console.warn(`[TelegramStreamService] GetChunk attempt ${attempt} notice:`, fileRefErr.message);
-
           if (
             fileRefErr.message?.includes('FILE_REFERENCE') ||
             fileRefErr.message?.includes('LOCATION_INVALID') ||
             fileRefErr.code === 400
           ) {
-            console.log(`[TelegramStreamService] Refreshing file reference for ${fileId}...`);
             this.locationCache.delete(docIdStr);
-            await this.refreshLocations(docIdStr, messageId);
+            this.locationCache.delete(fileId);
+            await this.refreshLocations(fileId, messageId);
 
-            const freshCached = this.locationCache.get(docIdStr);
+            const freshCached = this.locationCache.get(docIdStr) || this.locationCache.get(fileId);
             if (freshCached) {
               inputLocation = freshCached.inputLocation;
               dcId = freshCached.dcId;
@@ -256,12 +331,42 @@ class TelegramStreamService {
           }
 
           if (attempt < 3) {
-            await new Promise((r) => setTimeout(r, 400 * attempt));
+            await new Promise((r) => setTimeout(r, 200 * attempt));
           }
         }
       }
 
       return null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Decode Telegram file_id and fetch binary byte chunk directly via MTProto
+   * Zero network latency pre-fetching & RAM caching for instant video startup
+   */
+  async getChunk(fileId: string, offset = 0, limit = 512 * 1024, messageId?: string): Promise<Buffer | null> {
+    try {
+      let safeLimit = Math.min(limit, 1024 * 1024);
+      safeLimit = Math.max(4096, Math.floor(safeLimit / 4096) * 4096);
+      const safeOffset = Math.max(0, Math.floor(offset / safeLimit) * safeLimit);
+
+      const cacheKey = `${fileId}:${safeOffset}:${safeLimit}`;
+      const cachedBuf = this.getCachedChunk(cacheKey);
+
+      // Pre-fetch next chunk asynchronously in RAM background
+      const nextOffset = safeOffset + safeLimit;
+      const nextCacheKey = `${fileId}:${nextOffset}:${safeLimit}`;
+      if (!this.getCachedChunk(nextCacheKey)) {
+        this.fetchAndCacheChunk(fileId, nextOffset, safeLimit, messageId).catch(() => {});
+      }
+
+      if (cachedBuf) {
+        return cachedBuf;
+      }
+
+      return await this.fetchAndCacheChunk(fileId, safeOffset, safeLimit, messageId);
     } catch (err: any) {
       console.warn(`[TelegramStreamService] GetChunk note for fileId ${fileId}:`, err.message);
       return null;

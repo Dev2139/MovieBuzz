@@ -74,31 +74,6 @@ export const proxyTelegramFileStream = async (req: Request, res: Response) => {
     const fileId = decodeURIComponent(rawFileId);
     const range = req.headers.range;
 
-    const serveFallbackStream = async () => {
-      const fallbackUrl = 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4';
-      const streamRes = await axios.get(fallbackUrl, {
-        headers: range ? { Range: range } : {},
-        responseType: 'stream',
-        timeout: 8000,
-      }).catch(() => null);
-
-      if (streamRes) {
-        const headers: any = {
-          'Content-Type': 'video/mp4',
-          'Accept-Ranges': 'bytes',
-        };
-        if (streamRes.headers['content-range']) {
-          headers['Content-Range'] = String(streamRes.headers['content-range']);
-        }
-        if (streamRes.headers['content-length']) {
-          headers['Content-Length'] = String(streamRes.headers['content-length']);
-        }
-        res.writeHead(range ? 206 : 200, headers);
-        return streamRes.data.pipe(res);
-      }
-      return res.status(503).json({ message: 'Media stream unavailable' });
-    };
-
     // MTProto Chunk Range Streaming
     const mediaDoc = await Media.findOne({ providerMediaId: fileId }).select('providerMessageId').lean().catch(() => null);
     const messageId = mediaDoc?.providerMessageId;
@@ -122,7 +97,7 @@ export const proxyTelegramFileStream = async (req: Request, res: Response) => {
     const rawBuffer = await telegramStreamService.getChunk(fileId, alignedOffset, limit, messageId);
 
     if (!rawBuffer) {
-      return serveFallbackStream();
+      return res.status(503).json({ message: 'Telegram media stream is currently unavailable' });
     }
 
     const sliceStart = start - alignedOffset;
@@ -156,28 +131,7 @@ export const proxyTelegramFileStream = async (req: Request, res: Response) => {
     }
   } catch (error: any) {
     console.error('proxyTelegramFileStream error:', error.message);
-    const fallbackUrl = 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4';
-    const streamRes = await axios.get(fallbackUrl, {
-      headers: req.headers.range ? { Range: req.headers.range } : {},
-      responseType: 'stream',
-      timeout: 8000,
-    }).catch(() => null);
-
-    if (streamRes) {
-      const headers: any = {
-        'Content-Type': 'video/mp4',
-        'Accept-Ranges': 'bytes',
-      };
-      if (streamRes.headers['content-range']) {
-        headers['Content-Range'] = String(streamRes.headers['content-range']);
-      }
-      if (streamRes.headers['content-length']) {
-        headers['Content-Length'] = String(streamRes.headers['content-length']);
-      }
-      res.writeHead(req.headers.range ? 206 : 200, headers);
-      return streamRes.data.pipe(res);
-    }
-    return res.status(500).json({ message: 'Stream error' });
+    return res.status(500).json({ message: 'Telegram stream error' });
   }
 };
 

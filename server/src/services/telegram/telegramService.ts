@@ -6,22 +6,19 @@ import { TelegramMediaProvider } from './telegramClient';
 dotenv.config();
 
 class TelegramServiceManager {
-  private activeProvider: MediaProvider;
   private telegramClient: TelegramMediaProvider;
+  private mockProvider: MockMediaProvider;
 
   constructor() {
     this.telegramClient = new TelegramMediaProvider();
-    if (this.telegramClient.isConfigured()) {
-      console.log(`[StorageService] Initialized with TelegramMediaProvider for Channel: ${process.env.TELEGRAM_CHANNEL_ID}`);
-      this.activeProvider = this.telegramClient;
-    } else {
-      console.log('[StorageService] Initialized with MockMediaProvider');
-      this.activeProvider = new MockMediaProvider();
-    }
+    this.mockProvider = new MockMediaProvider();
   }
 
   public getProvider(): MediaProvider {
-    return this.activeProvider;
+    if (this.telegramClient.isConfigured()) {
+      return this.telegramClient;
+    }
+    return this.mockProvider;
   }
 
   public getTelegramClient(): TelegramMediaProvider {
@@ -30,3 +27,4 @@ class TelegramServiceManager {
 }
 
 export const storageService = new TelegramServiceManager();
+

@@ -61,6 +61,10 @@ export const createMovie = async (req: Request, res: Response) => {
 
     await movie.save();
 
+    const host = req.get('host') || 'localhost:5000';
+    const protocol = (req.headers['x-forwarded-proto'] as string) || req.protocol || 'http';
+    const baseUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : `${protocol}://${host}`;
+
     // Attach qualities if passed
     if (qualities && Array.isArray(qualities)) {
       for (const q of qualities) {
@@ -69,8 +73,8 @@ export const createMovie = async (req: Request, res: Response) => {
           quality: q.quality || '1080p',
           resolution: q.resolution || '1920x1080',
           fileSize: q.fileSize || '1.4 GB',
-          streamUrl: q.streamUrl || 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
-          downloadUrl: q.downloadUrl || 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+          streamUrl: q.streamUrl || `${baseUrl}/api/media/proxy-file/${encodeURIComponent(q.providerMediaId || '')}`,
+          downloadUrl: q.downloadUrl || `${baseUrl}/api/media/download-file/${encodeURIComponent(q.providerMediaId || '')}`,
           provider: q.provider || 'mock',
           providerMediaId: q.providerMediaId || `media-${Date.now()}`,
         });
@@ -170,6 +174,10 @@ export const createEpisode = async (req: Request, res: Response) => {
 
     await episode.save();
 
+    const host = req.get('host') || 'localhost:5000';
+    const protocol = (req.headers['x-forwarded-proto'] as string) || req.protocol || 'http';
+    const baseUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : `${protocol}://${host}`;
+
     if (qualities && Array.isArray(qualities)) {
       for (const q of qualities) {
         await Media.create({
@@ -177,8 +185,8 @@ export const createEpisode = async (req: Request, res: Response) => {
           quality: q.quality || '1080p',
           resolution: q.resolution || '1920x1080',
           fileSize: q.fileSize || '950 MB',
-          streamUrl: q.streamUrl || 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
-          downloadUrl: q.downloadUrl || 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
+          streamUrl: q.streamUrl || `${baseUrl}/api/media/proxy-file/${encodeURIComponent(q.providerMediaId || '')}`,
+          downloadUrl: q.downloadUrl || `${baseUrl}/api/media/download-file/${encodeURIComponent(q.providerMediaId || '')}`,
           provider: q.provider || 'mock',
           providerMediaId: q.providerMediaId || `ep-media-${Date.now()}`,
         });
@@ -270,6 +278,10 @@ export const publishTelegramImport = async (req: Request, res: Response) => {
     const finalQuality = quality || importDoc.detectedQuality || '1080p';
     const slug = finalTitle.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
 
+    const host = req.get('host') || 'localhost:5000';
+    const protocol = (req.headers['x-forwarded-proto'] as string) || req.protocol || 'http';
+    const baseUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : `${protocol}://${host}`;
+
     if (targetType === 'movie') {
       let movie = await Content.findOne({ title: finalTitle, type: 'movie' });
       if (!movie) {
@@ -293,8 +305,8 @@ export const publishTelegramImport = async (req: Request, res: Response) => {
         quality: finalQuality as any,
         resolution: finalQuality === '4K' ? '3840x2160' : '1920x1080',
         fileSize: '1.4 GB',
-        streamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
-        downloadUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+        streamUrl: `${baseUrl}/api/media/proxy-file/${encodeURIComponent(importDoc.mediaId)}`,
+        downloadUrl: `${baseUrl}/api/media/download-file/${encodeURIComponent(importDoc.mediaId)}`,
         provider: 'telegram',
         providerMediaId: importDoc.mediaId,
         providerMessageId: importDoc.messageId,
