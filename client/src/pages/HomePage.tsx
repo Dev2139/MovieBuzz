@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { fetchContentList, fetchContinueWatching, fetchGenres } from '../services/api';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { fetchContentList, fetchContinueWatching, fetchGenres, deleteHistoryItemApi } from '../services/api';
 import { HeroBanner } from '../components/HeroBanner';
 import { HorizontalCarousel } from '../components/HorizontalCarousel';
+import { ContinueWatchingCarousel, ContinueWatchingItem } from '../components/ContinueWatchingCarousel';
 import { SkeletonCard, SkeletonGrid } from '../components/SkeletonCard';
 import { useAuth } from '../context/AuthContext';
-import { getLocalPlaybackHistory } from '../utils/localStorage';
+import { getLocalPlaybackHistory, removeLocalPlaybackItem } from '../utils/localStorage';
 import { LocalPlaybackState } from '../types';
 import { Play, TrendingUp, Flame, Tv, Sparkles, Clock, Compass } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -22,11 +23,73 @@ export const HomePage: React.FC = () => {
     }
   }, [user]);
 
+  const queryClient = useQueryClient();
+
+  const handleRemoveContinueItem = async (item: ContinueWatchingItem, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (user) {
+      await deleteHistoryItemApi(item.id).catch(() => {});
+      queryClient.invalidateQueries({ queryKey: ['continue-watching'] });
+    } else {
+      const updated = removeLocalPlaybackItem(item.contentId, item.episodeId);
+      setLocalContinue(updated);
+    }
+  };
+
   // Authenticated Continue Watching query
   const { data: authContinueData } = useQuery({
     queryKey: ['continue-watching', user?.id],
     queryFn: fetchContinueWatching,
     enabled: !!user,
+  });
+
+  const authContinueItems: ContinueWatchingItem[] = (authContinueData?.continueWatching || [])
+    .filter((item) => item.contentId)
+    .map((item) => {
+      const content = item.contentId;
+      const progressPct = item.duration > 0 ? Math.round((item.progress / item.duration) * 100) : 0;
+      const targetPath =
+        content.type === 'movie'
+          ? `/watch/movie/${content.slug}`
+          : `/watch/series/${content.slug}/${item.episodeId?.seasonNumber || 1}/${item.episodeId?.episodeNumber || 1}`;
+
+      return {
+        id: item._id,
+        contentId: content._id,
+        episodeId: item.episodeId?._id,
+        title: content.title,
+        posterUrl: content.posterUrl || content.backdropUrl,
+        backdropUrl: content.backdropUrl,
+        type: content.type,
+        slug: content.slug,
+        seasonNumber: item.episodeId?.seasonNumber,
+        episodeNumber: item.episodeId?.episodeNumber,
+        progressPct,
+        rating: content.rating,
+        releaseYear: content.releaseYear,
+        targetPath,
+      };
+    });
+
+  const localContinueItems: ContinueWatchingItem[] = localContinue.map((item) => {
+    const targetPath =
+      item.contentType === 'movie'
+        ? `/watch/movie/${item.contentSlug}`
+        : `/watch/series/${item.seriesSlug || item.contentSlug}/${item.seasonNumber || 1}/${item.episodeNumber || 1}`;
+
+    return {
+      id: `${item.contentId}_${item.episodeId || ''}`,
+      contentId: item.contentId,
+      episodeId: item.episodeId,
+      title: item.title,
+      posterUrl: item.posterUrl,
+      type: item.contentType,
+      slug: item.contentSlug,
+      seasonNumber: item.seasonNumber,
+      episodeNumber: item.episodeNumber,
+      progressPct: item.percentage || 0,
+      targetPath,
+    };
   });
 
   // Featured Content query for Hero
@@ -104,105 +167,19 @@ export const HomePage: React.FC = () => {
 
       {/* Continue Watching Section (Authenticated OR Anonymous) */}
       {user ? (
-        authContinueData?.continueWatching && authContinueData.continueWatching.length > 0 && (
-          <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-3">
-            <div className="flex items-center space-x-2">
-              <Clock className="w-5 h-5 text-brand-500" />
-              <h2 className="text-lg sm:text-2xl font-bold text-white tracking-tight">Continue Watching</h2>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
-              {authContinueData.continueWatching.map((item) => {
-                if (!item.contentId) return null;
-                const progressPct = item.duration > 0 ? Math.round((item.progress / item.duration) * 100) : 0;
-                const targetPath =
-                  item.contentId.type === 'movie'
-                    ? `/watch/movie/${item.contentId.slug}`
-                    : `/watch/series/${item.contentId.slug}/1/1`;
-
-                return (
-                  <div
-                    key={item._id}
-                    onClick={() => navigate(targetPath)}
-                    className="group relative bg-dark-card border border-dark-border/80 hover:border-gray-500 rounded-xl overflow-hidden cursor-pointer shadow-lg transition-all hover:scale-[1.02] active:scale-95"
-                  >
-                    <div className="aspect-video w-full overflow-hidden bg-dark-surface relative">
-                      <img
-                        src={item.contentId.backdropUrl}
-                        alt={item.contentId.title}
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                      />
-                      <div className="absolute inset-0 bg-black/40 group-hover:bg-black/20 flex items-center justify-center transition-colors">
-                        <div className="w-10 h-10 bg-brand-500 rounded-full flex items-center justify-center text-white shadow-lg">
-                          <Play className="w-5 h-5 fill-white ml-0.5" />
-                        </div>
-                      </div>
-                      {/* Progress Bar */}
-                      <div className="absolute bottom-0 left-0 right-0 h-1.5 bg-gray-700">
-                        <div className="h-full bg-brand-500" style={{ width: `${progressPct}%` }} />
-                      </div>
-                    </div>
-                    <div className="p-3">
-                      <h4 className="font-bold text-white text-xs sm:text-sm line-clamp-1">{item.contentId.title}</h4>
-                      <p className="text-[11px] text-gray-400 mt-0.5">
-                        {item.episodeId ? `Episode ${item.episodeId.episodeNumber}` : `${progressPct}% watched`}
-                      </p>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </section>
+        authContinueItems.length > 0 && (
+          <ContinueWatchingCarousel
+            items={authContinueItems}
+            onRemoveItem={handleRemoveContinueItem}
+          />
         )
       ) : (
-        localContinue.length > 0 && (
-          <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2">
-                <Clock className="w-5 h-5 text-brand-500" />
-                <h2 className="text-lg sm:text-2xl font-bold text-white tracking-tight">Continue Watching</h2>
-              </div>
-              <span className="text-[10px] sm:text-xs text-gray-400 bg-dark-surface border border-dark-border px-2.5 py-0.5 rounded-full">
-                Saved in Browser
-              </span>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
-              {localContinue.map((item) => {
-                const targetPath =
-                  item.contentType === 'movie'
-                    ? `/watch/movie/${item.contentSlug}`
-                    : `/watch/series/${item.seriesSlug || item.contentSlug}/${item.seasonNumber || 1}/${item.episodeNumber || 1}`;
-
-                return (
-                  <div
-                    key={`${item.contentId}_${item.episodeId}`}
-                    onClick={() => navigate(targetPath)}
-                    className="group relative bg-dark-card border border-dark-border/80 hover:border-gray-500 rounded-xl overflow-hidden cursor-pointer shadow-lg transition-all hover:scale-[1.02] active:scale-95"
-                  >
-                    <div className="aspect-video w-full overflow-hidden bg-dark-surface relative">
-                      <img
-                        src={item.posterUrl}
-                        alt={item.title}
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                      />
-                      <div className="absolute inset-0 bg-black/40 group-hover:bg-black/20 flex items-center justify-center transition-colors">
-                        <div className="w-10 h-10 bg-brand-500 rounded-full flex items-center justify-center text-white shadow-lg">
-                          <Play className="w-5 h-5 fill-white ml-0.5" />
-                        </div>
-                      </div>
-                      <div className="absolute bottom-0 left-0 right-0 h-1.5 bg-gray-700">
-                        <div className="h-full bg-brand-500" style={{ width: `${item.percentage}%` }} />
-                      </div>
-                    </div>
-                    <div className="p-3">
-                      <h4 className="font-bold text-white text-xs sm:text-sm line-clamp-1">{item.title}</h4>
-                      <p className="text-[11px] text-gray-400 mt-0.5">{item.percentage}% completed</p>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </section>
+        localContinueItems.length > 0 && (
+          <ContinueWatchingCarousel
+            items={localContinueItems}
+            isAnonymous={true}
+            onRemoveItem={handleRemoveContinueItem}
+          />
         )
       )}
 
