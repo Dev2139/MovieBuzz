@@ -79,7 +79,13 @@ export const AdminTelegramPage: React.FC = () => {
     setEditEpEndNum(doc.detectedEpisodeEnd || doc.detectedEpisode || 1);
     setEditQuality(doc.detectedQuality || '1080p');
     setEditPosterUrl('https://images.unsplash.com/photo-1542751371-adc38448a05e?w=800');
-    setExistingSeriesId('');
+
+    // Auto-match existing series by title if available in DB
+    const seriesList = existingSeriesData?.items || [];
+    const matched = seriesList.find(
+      (s: any) => s.title.toLowerCase().trim() === (doc.detectedTitle || '').toLowerCase().trim()
+    );
+    setExistingSeriesId(matched ? matched._id : '');
   };
 
   const handlePublishSubmit = (e: React.FormEvent) => {

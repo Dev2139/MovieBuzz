@@ -11,12 +11,12 @@ export function parseTelegramCaption(caption: string): ParsedTelegramMetadata {
   const lines = caption.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   const firstLine = lines[0] || '';
 
-  // 1. Detect Season & Episode (Single or Bulk Range e.g. E01-E04, Eps 1-4)
+  // 1. Detect Season & Episode (Single or Bulk Range e.g. E01-E04, Eps 1-4, 1 to 8, 9 to 16)
   let season: number | undefined;
   let episode: number | undefined;
   let episodeEnd: number | undefined;
 
-  const rangeRegex = /(?:S(\d{1,2})\s*)?(?:E|Ep|Episode|Episodes)\s*(\d{1,2})\s*(?:-|to|\b)\s*(?:E|Ep|Episode)?\s*(\d{1,2})/i;
+  const rangeRegex = /(?:S(\d{1,2})\s*)?(?:E|Ep|Episode|Episodes|Eps)?\s*(\d{1,2})\s*(?:-|to)\s*(?:E|Ep|Episode|Episodes|Eps)?\s*(\d{1,2})/i;
   const rangeMatch = caption.match(rangeRegex);
 
   if (rangeMatch && parseInt(rangeMatch[3], 10) > parseInt(rangeMatch[2], 10)) {
@@ -95,6 +95,9 @@ export function parseTelegramCaption(caption: string): ParsedTelegramMetadata {
 
   // 7. Title Extraction from first line
   let title = firstLine;
+  if (rangeMatch && rangeMatch[0]) {
+    title = title.replace(rangeMatch[0], '');
+  }
   // Strip year
   title = title.replace(/\s*[\(\[]?\b(19\d{2}|20\d{2})\b[\)\]]?\s*/g, ' ');
   // Strip quality tags
