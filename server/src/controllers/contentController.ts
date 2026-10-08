@@ -181,6 +181,71 @@ export const syncTelegramPosts = async (req: Request, res: Response) => {
   }
 };
 
+/**
+ * Force-resync: resets the lastUpdateId so getUpdates starts from the beginning again.
+ * Use this when a post was sent before the server polled and was missed.
+ */
+export const forceResyncTelegramPosts = async (req: Request, res: Response) => {
+  try {
+    const { storageService } = await import('../services/telegram/telegramService');
+    const client = storageService.getTelegramClient();
+    if (!client) {
+      return res.json({ message: 'Telegram client not configured', importedCount: 0 });
+    }
+
+    // Reset the lastUpdateId to 0 so ALL unacknowledged updates are refetched
+    (client as any).lastUpdateId = 0;
+    const count = await client.syncChannelPosts();
+    return res.json({ message: 'Force resync completed', importedCount: count });
+  } catch (err: any) {
+    return res.status(500).json({ message: 'Force resync error', error: err.message });
+  }
+};
+
+/**
+ * Diagnostic: Shows what Telegram Bot API currently has in the update queue WITHOUT consuming them.
+ * Use this to debug why posts are not being picked up.
+ */
+export const diagnosticTelegramUpdates = async (req: Request, res: Response) => {
+  try {
+    const axios = (await import('axios')).default;
+    const botToken = process.env.TELEGRAM_BOT_TOKEN;
+    if (!botToken) {
+      return res.status(400).json({ message: 'TELEGRAM_BOT_TOKEN not set' });
+    }
+
+    // Use negative offset (-100) to peek at last updates without confirming them
+    const peekUrl = `https://api.telegram.org/bot${botToken}/getUpdates?offset=-100&limit=10`;
+    const peekRes = await axios.get(peekUrl, { timeout: 10000 });
+
+    const updates = peekRes.data?.result || [];
+    const summary = updates.map((u: any) => {
+      const post = u.channel_post || u.message;
+      return {
+        update_id: u.update_id,
+        type: u.channel_post ? 'channel_post' : u.message ? 'message' : 'other',
+        caption: post?.caption || post?.text || '(no text)',
+        has_video: Boolean(post?.video),
+        has_document: Boolean(post?.document),
+        file_id: post?.video?.file_id || post?.document?.file_id || null,
+        chat_id: post?.chat?.id,
+        date: post?.date ? new Date(post.date * 1000).toISOString() : null,
+      };
+    });
+
+    return res.json({
+      total: updates.length,
+      note: updates.length === 0
+        ? 'No updates in queue. If you sent a post before the last sync, it was already consumed. Please resend the video to the bot.'
+        : 'These updates are in queue but not yet processed.',
+      updates: summary,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ message: 'Diagnostic error', error: err.message });
+  }
+};
+
+
 export const handleTelegramWebhook = async (req: Request, res: Response) => {
   try {
     const { storageService } = await import('../services/telegram/telegramService');
@@ -193,5 +258,77 @@ export const handleTelegramWebhook = async (req: Request, res: Response) => {
   } catch (err: any) {
     console.warn('[Webhook] Telegram webhook processing notice:', err.message);
     return res.json({ ok: true, published: false });
+  }
+};
+
+/**
+ * Debug: Check TelegramImport history — shows all records regardless of status.
+ * Use to diagnose why posts were not imported.
+ */
+export const debugTelegramImports = async (req: Request, res: Response) => {
+  try {
+    const { TelegramImport } = await import('../models/TelegramImport');
+    const imports = await TelegramImport.find({}).sort({ createdAt: -1 }).limit(20).lean();
+    return res.json({
+      total: imports.length,
+      note: imports.length === 0
+        ? 'No import records found. Either no posts were ever sent to the bot, or they were silently skipped.'
+        : 'These are the last 20 import attempts.',
+      imports: imports.map((i: any) => ({
+        messageId: i.messageId,
+        status: i.status,
+        detectedTitle: i.detectedTitle,
+        detectedQuality: i.detectedQuality,
+        originalCaption: i.originalCaption?.slice(0, 100),
+        createdAt: i.createdAt,
+      })),
+    });
+  } catch (err: any) {
+    return res.status(500).json({ message: 'Debug error', error: err.message });
+  }
+};
+
+/**
+ * Manual Import: Directly process a Telegram video by providing its file_id and caption.
+ * Use this when getUpdates already consumed the update and the post wasn't auto-imported.
+ * POST /api/telegram/manual-import
+ * Body: { fileId: "TELEGRAM_FILE_ID", caption: "Movie Name (2026) 1080p", messageId?: "123" }
+ */
+export const manualTelegramImport = async (req: Request, res: Response) => {
+  try {
+    const { fileId, caption, messageId } = req.body;
+    if (!fileId || !caption) {
+      return res.status(400).json({ message: 'fileId and caption are required' });
+    }
+
+    const botToken = process.env.TELEGRAM_BOT_TOKEN;
+    const backendUrl = process.env.BACKEND_URL || 'https://moviebuzz-99fb.onrender.com';
+
+    const streamUrl = `${backendUrl}/api/media/proxy-file/${encodeURIComponent(fileId)}`;
+    const downloadUrl = `${backendUrl}/api/media/download-file/${encodeURIComponent(fileId)}`;
+
+    const { TelegramImporter } = await import('../services/telegram/telegramImporter');
+    const importer = new TelegramImporter();
+
+    const result = await importer.autoPublishTelegramPost({
+      channelId: process.env.TELEGRAM_CHANNEL_ID || 'manual',
+      messageId: messageId || `manual_${Date.now()}`,
+      mediaId: fileId,
+      caption,
+      streamUrl,
+      downloadUrl,
+    });
+
+    if (result) {
+      return res.json({ success: true, message: 'Content imported successfully!', result });
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: 'Import returned null — either the caption could not be parsed, or this post was already imported/ignored.',
+        tip: 'Check /api/telegram/debug-imports to see the import history.',
+      });
+    }
+  } catch (err: any) {
+    return res.status(500).json({ message: 'Manual import error', error: err.message });
   }
 };

@@ -98,66 +98,72 @@ export const updateContent = async (req: Request, res: Response) => {
       return res.status(404).json({ message: 'Content not found' });
     }
 
+    const updates: any = {};
+
     // Update Title & Slug
     if (title && title.trim() !== content.title) {
-      content.title = title.trim();
+      updates.title = title.trim();
       const slugBase = title.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-      content.slug = `${slugBase}-${releaseYear || content.releaseYear || 2026}`;
+      updates.slug = `${slugBase}-${releaseYear || content.releaseYear || 2026}`;
     }
 
     // Handle Type Conversion (Movie <-> Series)
-    if (type && (type === 'movie' || type === 'series') && type !== content.type) {
-      const oldType = content.type;
-      content.type = type;
+    const targetType = type ? String(type).toLowerCase().trim() : '';
+    if (targetType && (targetType === 'movie' || targetType === 'series')) {
+      const oldType = content.type ? String(content.type).toLowerCase().trim() : 'movie';
+      updates.type = targetType;
 
-      if (oldType === 'movie' && type === 'series') {
-        // Converting Movie -> Series: Ensure Season 1 and Episode 1 exist, link existing media
-        let season = await Season.findOne({ seriesId: content._id, seasonNumber: 1 });
-        if (!season) {
-          season = await Season.create({
-            seriesId: content._id,
-            seasonNumber: 1,
-            title: 'Season 1',
-            releaseYear: content.releaseYear || 2026,
-          });
-        }
+      if (oldType !== targetType) {
+        if (oldType === 'movie' && targetType === 'series') {
+          // Converting Movie -> Series: Ensure Season 1 and Episode 1 exist, link existing media
+          let season = await Season.findOne({ seriesId: content._id, seasonNumber: 1 });
+          if (!season) {
+            season = await Season.create({
+              seriesId: content._id,
+              seasonNumber: 1,
+              title: 'Season 1',
+              releaseYear: content.releaseYear || 2026,
+            });
+          }
 
-        let ep1 = await Episode.findOne({ seasonId: season._id, episodeNumber: 1 });
-        if (!ep1) {
-          ep1 = await Episode.create({
-            seriesId: content._id,
-            seasonId: season._id,
-            episodeNumber: 1,
-            title: 'Episode 1',
-            description: content.description,
-            thumbnailUrl: content.posterUrl,
-            duration: 2700,
-          });
-        }
+          let ep1 = await Episode.findOne({ seasonId: season._id, episodeNumber: 1 });
+          if (!ep1) {
+            ep1 = await Episode.create({
+              seriesId: content._id,
+              seasonId: season._id,
+              episodeNumber: 1,
+              title: 'Episode 1',
+              description: content.description,
+              thumbnailUrl: content.posterUrl,
+              duration: 2700,
+            });
+          }
 
-        await Media.updateMany({ contentId: content._id }, { episodeId: ep1._id });
-      } else if (oldType === 'series' && type === 'movie') {
-        // Converting Series -> Movie: Re-attach episode media to movie contentId
-        const episodes = await Episode.find({ seriesId: content._id });
-        const epIds = episodes.map((e) => e._id);
-        if (epIds.length > 0) {
-          await Media.updateMany({ episodeId: { $in: epIds } }, { contentId: content._id });
+          await Media.updateMany({ contentId: content._id }, { episodeId: ep1._id });
+        } else if (oldType === 'series' && targetType === 'movie') {
+          // Converting Series -> Movie: Re-attach episode media to movie contentId
+          const episodes = await Episode.find({ seriesId: content._id });
+          const epIds = episodes.map((e) => e._id);
+          if (epIds.length > 0) {
+            await Media.updateMany({ episodeId: { $in: epIds } }, { contentId: content._id });
+          }
         }
       }
     }
 
-    if (description !== undefined) content.description = description;
-    if (posterUrl !== undefined) content.posterUrl = posterUrl;
-    if (backdropUrl !== undefined) content.backdropUrl = backdropUrl;
-    if (genres !== undefined) content.genres = genres;
-    if (languages !== undefined) content.languages = languages;
-    if (releaseYear !== undefined) content.releaseYear = Number(releaseYear);
-    if (rating !== undefined) content.rating = Number(rating);
-    if (director !== undefined) content.director = director;
+    if (description !== undefined) updates.description = description;
+    if (posterUrl !== undefined) updates.posterUrl = posterUrl;
+    if (backdropUrl !== undefined) updates.backdropUrl = backdropUrl;
+    if (genres !== undefined) updates.genres = genres;
+    if (languages !== undefined) updates.languages = languages;
+    if (releaseYear !== undefined) updates.releaseYear = Number(releaseYear);
+    if (rating !== undefined) updates.rating = Number(rating);
+    if (director !== undefined) updates.director = director;
 
-    await content.save();
-    return res.json({ message: 'Content updated successfully', content });
+    const updatedContent = await Content.findByIdAndUpdate(id, { $set: updates }, { new: true });
+    return res.json({ message: 'Content updated successfully', content: updatedContent });
   } catch (error) {
+    console.error('updateContent error:', error);
     return res.status(500).json({ message: 'Error updating content' });
   }
 };
@@ -165,10 +171,28 @@ export const updateContent = async (req: Request, res: Response) => {
 export const deleteContent = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+    const target = await Content.findById(id);
+
     await Content.findByIdAndDelete(id);
     await Media.deleteMany({ contentId: id });
     await Season.deleteMany({ seriesId: id });
     await Episode.deleteMany({ seriesId: id });
+
+    // Permanently mark Telegram import status as DELETED so background sync never re-publishes it!
+    if (target) {
+      await TelegramImport.updateMany(
+        {
+          $or: [
+            { mappedContentId: id },
+            { detectedTitle: new RegExp(`^${target.title.replace(/[^a-z0-9]/gi, '\\$&')}$`, 'i') },
+          ],
+        },
+        { status: 'DELETED' }
+      );
+    } else {
+      await TelegramImport.updateMany({ mappedContentId: id }, { status: 'DELETED' });
+    }
+
     return res.json({ message: 'Content deleted successfully' });
   } catch (error) {
     return res.status(500).json({ message: 'Error deleting content' });

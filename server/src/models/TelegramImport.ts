@@ -1,6 +1,6 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
-export type ImportStatus = 'PENDING' | 'REVIEWED' | 'IMPORTED' | 'IGNORED' | 'ERROR';
+export type ImportStatus = 'PENDING' | 'REVIEWED' | 'IMPORTED' | 'IGNORED' | 'DELETED' | 'ERROR';
 
 export interface ITelegramImport extends Document {
   channelId: string;
@@ -36,7 +36,7 @@ const TelegramImportSchema: Schema = new Schema(
     detectedLanguage: { type: String, default: 'English' },
     status: {
       type: String,
-      enum: ['PENDING', 'REVIEWED', 'IMPORTED', 'IGNORED', 'ERROR'],
+      enum: ['PENDING', 'REVIEWED', 'IMPORTED', 'IGNORED', 'DELETED', 'ERROR'],
       default: 'PENDING',
       index: true,
     },

@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ToastProvider } from './context/ToastContext';
+import { PWAProvider } from './context/PWAContext';
 import { Navbar } from './components/Navbar';
 import { BottomNav } from './components/BottomNav';
 import { Footer } from './components/Footer';
@@ -46,49 +47,51 @@ export const App: React.FC = () => {
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <ToastProvider>
-          <BrowserRouter>
-            <ScrollToTop />
-            <div className="flex flex-col min-h-screen bg-dark-base relative">
-              <Navbar />
-              <main className="flex-1">
-                <Routes>
-                  <Route path="/" element={<HomePage />} />
-                  <Route path="/movies" element={<MoviesPage />} />
-                  <Route path="/series" element={<SeriesPage />} />
-                  <Route path="/movie/:slug" element={<ContentDetailPage />} />
-                  <Route path="/series/:slug" element={<ContentDetailPage />} />
-                  <Route path="/watch/movie/:slug" element={<WatchPage />} />
-                  <Route path="/watch/series/:seriesSlug/:season/:episode" element={<WatchPage />} />
-                  <Route path="/search" element={<SearchPage />} />
-                  <Route path="/watchlist" element={<WatchlistPage />} />
-                  <Route path="/history" element={<HistoryPage />} />
+          <PWAProvider>
+            <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+              <ScrollToTop />
+              <div className="flex flex-col min-h-screen bg-dark-base relative">
+                <Navbar />
+                <main className="flex-1">
+                  <Routes>
+                    <Route path="/" element={<HomePage />} />
+                    <Route path="/movies" element={<MoviesPage />} />
+                    <Route path="/series" element={<SeriesPage />} />
+                    <Route path="/movie/:slug" element={<ContentDetailPage />} />
+                    <Route path="/series/:slug" element={<ContentDetailPage />} />
+                    <Route path="/watch/movie/:slug" element={<WatchPage />} />
+                    <Route path="/watch/series/:seriesSlug/:season/:episode" element={<WatchPage />} />
+                    <Route path="/search" element={<SearchPage />} />
+                    <Route path="/watchlist" element={<WatchlistPage />} />
+                    <Route path="/history" element={<HistoryPage />} />
 
-                  {/* Admin Routes */}
-                  <Route
-                    path="/admin"
-                    element={
-                      <AdminRoute>
-                        <AdminDashboardPage />
-                      </AdminRoute>
-                    }
-                  />
-                  <Route
-                    path="/admin/telegram"
-                    element={
-                      <AdminRoute>
-                        <AdminTelegramPage />
-                      </AdminRoute>
-                    }
-                  />
+                    {/* Admin Routes */}
+                    <Route
+                      path="/admin"
+                      element={
+                        <AdminRoute>
+                          <AdminDashboardPage />
+                        </AdminRoute>
+                      }
+                    />
+                    <Route
+                      path="/admin/telegram"
+                      element={
+                        <AdminRoute>
+                          <AdminTelegramPage />
+                        </AdminRoute>
+                      }
+                    />
 
-                  <Route path="*" element={<Navigate to="/" replace />} />
-                </Routes>
-              </main>
-              <Footer />
-              <BottomNav />
-              <AuthModal />
-            </div>
-          </BrowserRouter>
+                    <Route path="*" element={<Navigate to="/" replace />} />
+                  </Routes>
+                </main>
+                <Footer />
+                <BottomNav />
+                <AuthModal />
+              </div>
+            </BrowserRouter>
+          </PWAProvider>
         </ToastProvider>
       </AuthProvider>
     </QueryClientProvider>

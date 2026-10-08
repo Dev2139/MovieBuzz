@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { Film, Search, Bookmark, History, Shield, LogOut, User as UserIcon, Menu, X, Sparkles } from 'lucide-react';
+import { usePWA } from '../context/PWAContext';
+import { Film, Search, Bookmark, History, Shield, LogOut, User as UserIcon, Menu, X, Sparkles, Smartphone, Download } from 'lucide-react';
 
 export const Navbar: React.FC = () => {
   const { user, logout, openAuthModal } = useAuth();
+  const { canInstall, isInstalled, promptInstall } = usePWA();
   const navigate = useNavigate();
   const location = useLocation();
   const [isScrolled, setIsScrolled] = useState(false);
@@ -86,14 +88,25 @@ export const Navbar: React.FC = () => {
         </nav>
 
         {/* Right Search & Profile Area (Desktop) */}
-        <div className="hidden md:flex items-center space-x-4">
+        <div className="hidden md:flex items-center space-x-3">
+          {canInstall && !isInstalled && (
+            <button
+              onClick={promptInstall}
+              className="flex items-center space-x-1.5 bg-gradient-to-r from-brand-500 to-red-600 hover:from-brand-600 hover:to-red-700 text-white text-xs font-extrabold px-3 py-1.5 rounded-full shadow-lg shadow-brand-500/25 transition-all transform hover:scale-105 active:scale-95 animate-pulse"
+              title="Install MovieBuzz App directly on your device"
+            >
+              <Smartphone className="w-3.5 h-3.5" />
+              <span>Install App</span>
+            </button>
+          )}
+
           <form onSubmit={handleSearchSubmit} className="relative">
             <input
               type="text"
               placeholder="Search movies, series..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="bg-dark-surface/90 border border-dark-border rounded-full pl-9 pr-4 py-1.5 text-xs text-white placeholder-gray-400 focus:outline-none focus:border-brand-500 w-48 focus:w-64 transition-all duration-300"
+              className="bg-dark-surface/90 border border-dark-border rounded-full pl-9 pr-4 py-1.5 text-xs text-white placeholder-gray-400 focus:outline-none focus:border-brand-500 w-44 focus:w-60 transition-all duration-300"
             />
             <Search className="absolute left-3 top-2 w-3.5 h-3.5 text-gray-400" />
           </form>
@@ -204,6 +217,19 @@ export const Navbar: React.FC = () => {
       {/* Mobile Drawer Slide-Down */}
       {isMobileMenuOpen && (
         <div className="md:hidden fixed inset-x-0 top-[57px] bg-dark-card/95 backdrop-blur-2xl border-b border-dark-border px-4 py-5 space-y-4 shadow-2xl animate-fade-in z-50">
+          {canInstall && !isInstalled && (
+            <button
+              onClick={() => {
+                promptInstall();
+                setIsMobileMenuOpen(false);
+              }}
+              className="w-full flex items-center justify-center space-x-2 py-3 bg-gradient-to-r from-brand-500 to-red-600 hover:from-brand-600 hover:to-red-700 text-white font-extrabold text-xs rounded-xl shadow-lg shadow-brand-500/25 animate-pulse"
+            >
+              <Smartphone className="w-4 h-4" />
+              <span>Install MovieBuzz App to Device</span>
+            </button>
+          )}
+
           <form onSubmit={handleSearchSubmit} className="relative">
             <input
               type="text"

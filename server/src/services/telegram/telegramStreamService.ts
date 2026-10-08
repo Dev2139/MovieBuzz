@@ -100,22 +100,22 @@ class TelegramStreamService {
         // Disable GramJS update loop polling to prevent background TIMEOUT exceptions
         (client as any)._updateLoop = () => Promise.resolve();
 
-        if (savedSession && savedSession.length > 5) {
-          await client.connect();
-          console.log('[TelegramStreamService] MTProto Client connected via User Session!');
-        } else if (this.botToken) {
-          await client.start({ botAuthToken: this.botToken });
-          console.log('[TelegramStreamService] MTProto Bot Client connected!');
-
-          const sessionData = (client.session as any).save();
-          const newSessionStr = typeof sessionData === 'string' ? sessionData : '';
-          if (newSessionStr && newSessionStr.length > 5) {
-            try {
-              fs.writeFileSync(this.sessionFilePath, newSessionStr, 'utf-8');
-            } catch {
-              // Ignore filesystem write on read-only serverless environments
+        if (this.botToken) {
+          try {
+            await client.start({ botAuthToken: this.botToken });
+            console.log('[TelegramStreamService] MTProto Bot Client connected successfully!');
+          } catch (botErr: any) {
+            console.warn('[TelegramStreamService] Bot auth fallback notice:', botErr.message);
+            if (savedSession && savedSession.length > 5) {
+              await client.connect();
+              console.log('[TelegramStreamService] MTProto Client connected via User Session!');
+            } else {
+              throw botErr;
             }
           }
+        } else if (savedSession && savedSession.length > 5) {
+          await client.connect();
+          console.log('[TelegramStreamService] MTProto Client connected via User Session!');
         } else {
           console.warn('[TelegramStreamService] MTProto note: No valid session or bot token provided.');
           return null;
@@ -148,6 +148,7 @@ class TelegramStreamService {
       const now = Date.now();
 
       // If specific messageId is provided, fetch that exact message first
+      // Note: bots cannot call getMessages — caught silently below
       if (messageId) {
         try {
           const directMsgs = await client.getMessages(peer as any, { ids: [Number(messageId)] });
@@ -171,41 +172,55 @@ class TelegramStreamService {
               if (targetDocId) this.locationCache.set(targetDocId, locData);
             }
           }
-        } catch {
-          // ignore error and fallback to fetching recent channel messages
-        }
-      }
-
-      // Fetch channel messages if targetDocId is not cached yet
-      if (!targetDocId || !this.locationCache.has(targetDocId)) {
-        const messages = await client.getMessages(peer as any, { limit: 100 });
-        for (const msg of messages) {
-          if (msg && msg.media && (msg.media as any).document) {
-            const doc = (msg.media as any).document;
-            const docId = doc.id.toString();
-            const docSize = doc.size ? (doc.size.toNumber ? doc.size.toNumber() : Number(doc.size)) : 0;
-            const locData: CachedLocation = {
-              dcId: doc.dcId,
-              size: docSize,
-              updatedAt: now,
-              inputLocation: new Api.InputDocumentFileLocation({
-                id: doc.id,
-                accessHash: doc.accessHash,
-                fileReference: doc.fileReference,
-                thumbSize: '',
-              }),
-            };
-            this.locationCache.set(docId, locData);
-            if (msg.id && targetDocId && targetDocId.includes(String(msg.id))) {
-              this.locationCache.set(targetDocId, locData);
-            }
+        } catch (err: any) {
+          // BOT_METHOD_INVALID or other — skip silently, decodeFileId fallback handles streaming
+          if (err.message && !err.message.includes('BOT_METHOD_INVALID') && !err.message.includes('400')) {
+            console.warn('[TelegramStreamService] refreshLocations (messageId fetch) note:', err.message);
           }
         }
       }
 
-      console.log(`[TelegramStreamService] Refreshed ${this.locationCache.size} media file references from Telegram!`);
+      // Fetch channel messages if targetDocId is not cached yet
+      // Bots cannot use this method — catch and skip silently
+      if (!targetDocId || !this.locationCache.has(targetDocId)) {
+        try {
+          const messages = await client.getMessages(peer as any, { limit: 100 });
+          for (const msg of messages) {
+            if (msg && msg.media && (msg.media as any).document) {
+              const doc = (msg.media as any).document;
+              const docId = doc.id.toString();
+              const docSize = doc.size ? (doc.size.toNumber ? doc.size.toNumber() : Number(doc.size)) : 0;
+              const locData: CachedLocation = {
+                dcId: doc.dcId,
+                size: docSize,
+                updatedAt: now,
+                inputLocation: new Api.InputDocumentFileLocation({
+                  id: doc.id,
+                  accessHash: doc.accessHash,
+                  fileReference: doc.fileReference,
+                  thumbSize: '',
+                }),
+              };
+              this.locationCache.set(docId, locData);
+              if (msg.id && targetDocId && targetDocId.includes(String(msg.id))) {
+                this.locationCache.set(targetDocId, locData);
+              }
+            }
+          }
+          if (this.locationCache.size > 0) {
+            console.log(`[TelegramStreamService] Refreshed ${this.locationCache.size} media file references from Telegram!`);
+          }
+        } catch (err: any) {
+          // BOT_METHOD_INVALID is expected when running as bot — skip silently
+          if (err.message && !err.message.includes('BOT_METHOD_INVALID') && !err.message.includes('400')) {
+            console.warn('[TelegramStreamService] refreshLocations note:', err.message);
+          }
+        }
+      }
     } catch (err: any) {
-      console.warn('[TelegramStreamService] refreshLocations note:', err.message);
+      if (err.message && !err.message.includes('BOT_METHOD_INVALID') && !err.message.includes('400')) {
+        console.warn('[TelegramStreamService] refreshLocations outer note:', err.message);
+      }
     }
   }
 
@@ -306,6 +321,15 @@ class TelegramStreamService {
           try {
             res = await client.invoke(request);
           } catch (invokeErr: any) {
+            if (
+              invokeErr?.message?.includes('AUTH_KEY_DUPLICATED') ||
+              invokeErr?.message?.includes('406') ||
+              invokeErr?.message?.includes('DISCONNECT')
+            ) {
+              console.warn('[TelegramStreamService] MTProto socket reset triggered for reconnect...');
+              this.client = null;
+              this.initPromise = null;
+            }
             try {
               const sender = await client.getSender(dcId);
               res = await sender.send(request);

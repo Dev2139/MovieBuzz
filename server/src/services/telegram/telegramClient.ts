@@ -112,7 +112,11 @@ export class TelegramMediaProvider implements MediaProvider {
           }
         }
       } catch (err: any) {
-        console.warn(`[TelegramClient] Bot API notice: ${err.message}`);
+        if (err.response?.status === 409) {
+          // Another server instance (e.g. Render/production) is polling getUpdates. Suppress 409 notice.
+        } else {
+          console.warn(`[TelegramClient] Bot API notice: ${err.message}`);
+        }
       }
     }
 
@@ -130,9 +134,18 @@ export class TelegramMediaProvider implements MediaProvider {
         if (mtClient && this.channelId) {
           const peer = await mtClient.getEntity(this.channelId).catch(() => null);
           if (peer) {
-            const messages = await mtClient.getMessages(peer as any, { limit: 100 });
-            const baseUrl = process.env.VERCEL_URL 
-              ? `https://${process.env.VERCEL_URL}` 
+            let messages: any[] = [];
+            try {
+              messages = await mtClient.getMessages(peer as any, { limit: 100 });
+            } catch (getMsgErr: any) {
+              // Bots cannot use messages.GetHistory via MTProto — skip silently
+              if (!getMsgErr.message?.includes('BOT_METHOD_INVALID')) {
+                console.warn(`[TelegramClient] MTProto getMessages notice: ${getMsgErr.message}`);
+              }
+            }
+
+            const baseUrl = process.env.VERCEL_URL
+              ? `https://${process.env.VERCEL_URL}`
               : (process.env.BACKEND_URL || 'http://localhost:5000');
 
             for (const msg of messages) {
@@ -164,7 +177,9 @@ export class TelegramMediaProvider implements MediaProvider {
           }
         }
       } catch (mtErr: any) {
-        console.warn(`[TelegramClient] MTProto channel sync notice: ${mtErr.message}`);
+        if (!mtErr.message?.includes('BOT_METHOD_INVALID')) {
+          console.warn(`[TelegramClient] MTProto channel sync notice: ${mtErr.message}`);
+        }
       }
     }
 
@@ -238,6 +253,16 @@ export class TelegramMediaProvider implements MediaProvider {
   }
 
   async getStreamUrl(mediaId: string): Promise<string> {
+    if (this.botToken && mediaId && mediaId.length > 10 && !mediaId.includes('http')) {
+      try {
+        const res = await axios.get(`https://api.telegram.org/bot${this.botToken}/getFile?file_id=${encodeURIComponent(mediaId)}`, { timeout: 8000 });
+        if (res.data && res.data.ok && res.data.result && res.data.result.file_path) {
+          return `https://api.telegram.org/file/bot${this.botToken}/${res.data.result.file_path}`;
+        }
+      } catch (err: any) {
+        console.warn(`[TelegramClient] getStreamUrl Bot API notice: ${err.message}`);
+      }
+    }
     return this.mockFallback.getStreamUrl(mediaId);
   }
 

@@ -1,14 +1,11 @@
 import dotenv from 'dotenv';
-import { TelegramClient } from 'telegram';
-import { StringSession } from 'telegram/sessions';
 import { TelegramImporter } from './telegramImporter';
+import { telegramStreamService } from './telegramStreamService';
 
 dotenv.config();
 
 export class TelegramUserMTProtoClient {
-  private client: TelegramClient | null = null;
   private importer: TelegramImporter;
-
   private sessionInvalid: boolean = false;
 
   constructor() {
@@ -36,7 +33,9 @@ export class TelegramUserMTProtoClient {
   }
 
   /**
-   * Connect to Telegram MTProto User API using your API_ID, API_HASH, and session string.
+   * Connect to Telegram MTProto User API using shared telegramStreamService client instance.
+   * NOTE: This only works with a real USER session string, not a bot token.
+   * Bots cannot use messages.GetHistory — skip silently if running as bot.
    */
   async fetchPrivateChannelPosts(): Promise<number> {
     if (!this.isConfigured()) {
@@ -44,26 +43,15 @@ export class TelegramUserMTProtoClient {
     }
 
     try {
-      console.log(`[TelegramUserClient] Connecting MTProto User API for Channel: ${this.channelId}...`);
-      const stringSession = new StringSession(this.sessionString);
+      const client = await telegramStreamService.getClient();
+      if (!client) return 0;
 
-      this.client = new TelegramClient(stringSession, this.apiId, this.apiHash, {
-        connectionRetries: 1,
-        autoReconnect: false,
-        useWSS: false,
-      });
-
-      // Disable GramJS update loop polling to prevent background TIMEOUT exceptions
-      (this.client as any)._updateLoop = () => Promise.resolve();
-
-      await this.client.connect();
       const peerId = this.channelId.startsWith('-100') ? BigInt(this.channelId) : this.channelId;
-
-      const messages = await this.client.getMessages(peerId as any, { limit: 20 });
+      const messages = await client.getMessages(peerId as any, { limit: 20 });
 
       let count = 0;
       for (const msg of messages) {
-        if (msg.message && msg.message.length > 5) {
+        if (msg && msg.message && msg.message.length > 5) {
           await this.importer.autoPublishTelegramPost({
             channelId: this.channelId,
             messageId: String(msg.id),
@@ -74,21 +62,20 @@ export class TelegramUserMTProtoClient {
         }
       }
 
-      console.log(`[TelegramUserClient] Processed ${count} channel posts!`);
       return count;
     } catch (error: any) {
       if (error.message?.includes('AUTH_KEY_DUPLICATED') || error.message?.includes('406')) {
-        console.warn(`[TelegramUserClient] MTProto Session string is duplicated/invalid (${error.message}). Disabling MTProto fallback.`);
+        console.warn(`[TelegramUserClient] MTProto Session string notice (${error.message}).`);
         this.sessionInvalid = true;
+      } else if (
+        error.message?.includes('BOT_METHOD_INVALID') ||
+        error.message?.includes('400')
+      ) {
+        // Bot tokens cannot call messages.GetHistory — skip silently, this is expected
       } else {
         console.warn(`[TelegramUserClient] MTProto note (${error.message}).`);
       }
       return 0;
-    } finally {
-      if (this.client) {
-        await this.client.disconnect().catch(() => {});
-        this.client = null;
-      }
     }
   }
 }
