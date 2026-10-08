@@ -13,6 +13,8 @@ export class TelegramMediaProvider implements MediaProvider {
   private importer: TelegramImporter;
   private userMtprotoClient: TelegramUserMTProtoClient;
 
+  private lastUpdateId: number = 0;
+
   constructor() {
     this.mockFallback = new MockMediaProvider();
     this.importer = new TelegramImporter();
@@ -49,16 +51,25 @@ export class TelegramMediaProvider implements MediaProvider {
     if (this.botToken) {
       try {
         console.log(`[TelegramClient] Polling Telegram Bot API for messages sent to @devcinestreambot or channel...`);
-        const res = await axios.get(`https://api.telegram.org/bot${this.botToken}/getUpdates`, {
+        const url = `https://api.telegram.org/bot${this.botToken}/getUpdates${this.lastUpdateId ? `?offset=${this.lastUpdateId + 1}` : ''}`;
+        const res = await axios.get(url, {
           timeout: 10000,
         });
 
         if (res.data && res.data.ok && Array.isArray(res.data.result)) {
           for (const update of res.data.result) {
+            if (update.update_id && update.update_id > this.lastUpdateId) {
+              this.lastUpdateId = update.update_id;
+            }
             const post = update.channel_post || update.message;
             if (post) {
-              const caption = post.caption || post.text || '';
-              if (caption.length > 3) {
+              let caption = post.caption || post.text || '';
+              if (!caption) {
+                if (post.video && post.video.file_name) caption = post.video.file_name;
+                else if (post.document && post.document.file_name) caption = post.document.file_name;
+              }
+
+              if (caption.length >= 2 || post.video || post.document) {
                 let videoFileId = '';
                 let photoFileId = '';
 
@@ -88,7 +99,7 @@ export class TelegramMediaProvider implements MediaProvider {
                   channelId: String(post.chat?.id || this.channelId),
                   messageId: String(post.message_id),
                   mediaId: videoFileId || `tg_media_${post.message_id}`,
-                  caption,
+                  caption: caption || `Telegram Post ${post.message_id}`,
                   streamUrl,
                   downloadUrl,
                   posterUrl,
@@ -162,6 +173,60 @@ export class TelegramMediaProvider implements MediaProvider {
     }
 
     return count;
+  }
+
+  /**
+   * Handle real-time Webhook payload sent directly by Telegram Bot API when new posts arrive!
+   */
+  async handleWebhookUpdate(update: any): Promise<boolean> {
+    const post = update?.channel_post || update?.message;
+    if (!post) return false;
+
+    let caption = post.caption || post.text || '';
+    if (!caption) {
+      if (post.video && post.video.file_name) caption = post.video.file_name;
+      else if (post.document && post.document.file_name) caption = post.document.file_name;
+    }
+
+    if (caption.length >= 2 || post.video || post.document) {
+      let videoFileId = '';
+      let photoFileId = '';
+
+      if (post.video) {
+        videoFileId = post.video.file_id;
+        if (post.video.thumbnail) photoFileId = post.video.thumbnail.file_id;
+        else if (post.video.thumb) photoFileId = post.video.thumb.file_id;
+      } else if (post.document) {
+        videoFileId = post.document.file_id;
+        if (post.document.thumbnail) photoFileId = post.document.thumbnail.file_id;
+        else if (post.document.thumb) photoFileId = post.document.thumb.file_id;
+      }
+
+      if (post.photo && post.photo.length > 0) {
+        photoFileId = post.photo[post.photo.length - 1].file_id;
+      }
+
+      const baseUrl = process.env.VERCEL_URL 
+        ? `https://${process.env.VERCEL_URL}` 
+        : (process.env.BACKEND_URL || 'http://localhost:5000');
+
+      const streamUrl = videoFileId ? `${baseUrl}/api/media/proxy-file/${videoFileId}` : undefined;
+      const downloadUrl = videoFileId ? `${baseUrl}/api/media/download-file/${videoFileId}` : undefined;
+      const posterUrl = photoFileId ? `${baseUrl}/api/media/proxy-file/${photoFileId}` : undefined;
+
+      const published = await this.importer.autoPublishTelegramPost({
+        channelId: String(post.chat?.id || this.channelId),
+        messageId: String(post.message_id),
+        mediaId: videoFileId || `tg_media_${post.message_id}`,
+        caption: caption || `Telegram Post ${post.message_id}`,
+        streamUrl,
+        downloadUrl,
+        posterUrl,
+      });
+
+      return Boolean(published);
+    }
+    return false;
   }
 
   async getContent(): Promise<ContentMediaDescriptor[]> {

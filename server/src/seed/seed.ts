@@ -11,9 +11,9 @@ import { TelegramImport } from '../models/TelegramImport';
 dotenv.config();
 
 const sampleStreams = {
-  mp4_1080p: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
-  mp4_720p: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
-  mp4_480p: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4',
+  mp4_1080p: 'https://vjs.zencdn.net/v/oceans.mp4',
+  mp4_720p: 'https://vjs.zencdn.net/v/oceans.mp4',
+  mp4_480p: 'https://vjs.zencdn.net/v/oceans.mp4',
 };
 
 async function seedDatabase() {

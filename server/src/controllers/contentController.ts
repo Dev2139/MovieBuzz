@@ -176,3 +176,18 @@ export const syncTelegramPosts = async (req: Request, res: Response) => {
     return res.status(500).json({ message: 'Sync error', error: err.message });
   }
 };
+
+export const handleTelegramWebhook = async (req: Request, res: Response) => {
+  try {
+    const { storageService } = await import('../services/telegram/telegramService');
+    const client = storageService.getTelegramClient();
+    if (client && req.body) {
+      const published = await client.handleWebhookUpdate(req.body);
+      return res.json({ ok: true, published });
+    }
+    return res.json({ ok: true, published: false });
+  } catch (err: any) {
+    console.warn('[Webhook] Telegram webhook processing notice:', err.message);
+    return res.json({ ok: true, published: false });
+  }
+};

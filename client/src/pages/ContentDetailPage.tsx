@@ -9,15 +9,16 @@ import {
   toggleWatchlistApi,
   toggleFavoriteApi,
 } from '../services/api';
-import { Play, Download, Star, Calendar, Globe, Users, Film, Plus, Check, Heart, X } from 'lucide-react';
+import { Play, Download, Star, Calendar, Globe, Users, Film, Plus, Check, Heart, X, Sparkles } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
 import { getLocalWatchlist, toggleLocalWatchlist, getLocalFavorites, toggleLocalFavorites } from '../utils/localStorage';
-import { Season, Episode } from '../types';
 
 export const ContentDetailPage: React.FC = () => {
   const { slug } = useParams<{ slug: string }>();
   const navigate = useNavigate();
-  const { user, openAuthModal } = useAuth();
+  const { user } = useAuth();
+  const { showToast } = useToast();
 
   const [selectedSeasonId, setSelectedSeasonId] = useState<string>('');
   const [downloadModalMediaId, setDownloadModalMediaId] = useState<string | null>(null);
@@ -70,22 +71,46 @@ export const ContentDetailPage: React.FC = () => {
   const handleWatchlistToggle = async () => {
     if (!content) return;
     if (user) {
-      const res = await toggleWatchlistApi(content._id);
-      setInWatchlist(res.inWatchlist);
+      try {
+        const res = await toggleWatchlistApi(content._id);
+        setInWatchlist(res.inWatchlist);
+        showToast(
+          res.inWatchlist ? `Added "${content.title}" to Watchlist` : `Removed "${content.title}" from Watchlist`,
+          'success'
+        );
+      } catch (err) {
+        showToast('Failed to update watchlist', 'error');
+      }
     } else {
       const res = toggleLocalWatchlist(content._id);
       setInWatchlist(res);
+      showToast(
+        res ? `Saved "${content.title}" to Watchlist` : `Removed "${content.title}" from Watchlist`,
+        'success'
+      );
     }
   };
 
   const handleFavoriteToggle = async () => {
     if (!content) return;
     if (user) {
-      const res = await toggleFavoriteApi(content._id);
-      setIsFavorite(res.isFavorite);
+      try {
+        const res = await toggleFavoriteApi(content._id);
+        setIsFavorite(res.isFavorite);
+        showToast(
+          res.isFavorite ? `Marked "${content.title}" as Favorite` : `Removed "${content.title}" from Favorites`,
+          'success'
+        );
+      } catch (err) {
+        showToast('Failed to update favorites', 'error');
+      }
     } else {
       const res = toggleLocalFavorites(content._id);
       setIsFavorite(res);
+      showToast(
+        res ? `Marked "${content.title}" as Favorite` : `Removed "${content.title}" from Favorites`,
+        'success'
+      );
     }
   };
 
@@ -95,71 +120,74 @@ export const ContentDetailPage: React.FC = () => {
       setDownloadLinkInfo(res);
       setDownloadModalMediaId(mediaId);
     } catch {
-      alert('Error initiating download link');
+      showToast('Error initiating download link', 'error');
     }
   };
 
   if (isLoading || !content) {
     return (
-      <div className="min-h-screen bg-dark-base flex items-center justify-center text-gray-400">
-        Loading details...
+      <div className="min-h-screen bg-dark-base flex flex-col items-center justify-center text-gray-400 space-y-3">
+        <Sparkles className="w-8 h-8 text-brand-500 animate-spin" />
+        <p className="text-xs font-semibold">Loading Title Details...</p>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-dark-base text-white pb-20">
+    <div className="min-h-screen bg-dark-base text-white pb-24 md:pb-16 select-none">
       {/* Backdrop Banner Header */}
-      <div className="relative w-full h-[65vh] min-h-[480px] max-h-[700px] bg-dark-surface">
+      <div className="relative w-full h-[48vh] sm:h-[65vh] max-h-[650px] min-h-[360px] bg-dark-surface">
         <img
           src={content.backdropUrl}
           alt={content.title}
           className="w-full h-full object-cover opacity-50 filter brightness-90"
         />
-        <div className="absolute inset-0 bg-gradient-to-t from-dark-base via-dark-base/50 to-transparent" />
+        <div className="absolute inset-0 bg-gradient-to-t from-dark-base via-dark-base/60 to-transparent" />
         <div className="absolute inset-0 bg-gradient-to-r from-dark-base via-dark-base/70 to-transparent w-full md:w-3/4" />
       </div>
 
       {/* Main Content Details Container */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 -mt-64 relative z-10 space-y-12">
-        <div className="flex flex-col md:flex-row gap-8 items-start">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 -mt-36 sm:-mt-56 relative z-10 space-y-8 sm:space-y-12">
+        <div className="flex flex-col md:flex-row gap-6 sm:gap-8 items-start">
           {/* Poster Card */}
-          <div className="flex-none w-56 sm:w-64 md:w-72 aspect-[2/3] rounded-2xl overflow-hidden bg-dark-card border-2 border-dark-border shadow-2xl mx-auto md:mx-0">
+          <div className="flex-none w-44 sm:w-64 md:w-72 aspect-[2/3] rounded-2xl overflow-hidden bg-dark-card border-2 border-dark-border shadow-2xl mx-auto md:mx-0">
             <img src={content.posterUrl} alt={content.title} className="w-full h-full object-cover" />
           </div>
 
           {/* Details Info */}
-          <div className="flex-1 space-y-4">
-            <div className="flex items-center space-x-2">
-              <span className="bg-brand-500 text-white font-extrabold text-xs uppercase px-2.5 py-1 rounded">
+          <div className="flex-1 space-y-3 sm:space-y-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="bg-brand-500 text-white font-extrabold text-[10px] sm:text-xs uppercase px-2 py-0.5 rounded">
                 {content.type}
               </span>
-              <span className="bg-dark-card border border-dark-border text-amber-400 text-xs font-bold px-2.5 py-1 rounded flex items-center space-x-1">
-                <Star className="w-3.5 h-3.5 fill-amber-400" />
+              <span className="bg-dark-card border border-dark-border text-amber-400 text-[10px] sm:text-xs font-bold px-2 py-0.5 rounded flex items-center space-x-1">
+                <Star className="w-3 h-3 fill-amber-400" />
                 <span>{content.rating?.toFixed(1) || '8.5'}</span>
               </span>
-              <span className="text-gray-400 text-xs font-medium flex items-center space-x-1">
-                <Calendar className="w-3.5 h-3.5" />
+              <span className="text-gray-400 text-[10px] sm:text-xs font-medium flex items-center space-x-1">
+                <Calendar className="w-3 h-3" />
                 <span>{content.releaseYear}</span>
               </span>
             </div>
 
-            <h1 className="text-3xl sm:text-5xl font-black text-white tracking-tight">{content.title}</h1>
+            <h1 className="text-2xl sm:text-4xl md:text-5xl font-black text-white tracking-tight leading-tight">
+              {content.title}
+            </h1>
 
-            <div className="flex flex-wrap gap-2 text-xs font-semibold">
+            <div className="flex flex-wrap gap-1.5 sm:gap-2 text-[10px] sm:text-xs font-semibold">
               {content.genres?.map((g) => (
-                <span key={g} className="bg-dark-card border border-dark-border text-gray-300 px-3 py-1 rounded-lg">
+                <span key={g} className="bg-dark-card border border-dark-border text-gray-300 px-2.5 py-1 rounded-lg">
                   {g}
                 </span>
               ))}
             </div>
 
-            <p className="text-gray-300 text-sm sm:text-base leading-relaxed max-w-3xl">
+            <p className="text-gray-300 text-xs sm:text-base leading-relaxed max-w-3xl">
               {content.description}
             </p>
 
             {/* Additional Metadata */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs text-gray-300 pt-2 border-t border-dark-border/60 max-w-xl">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] sm:text-xs text-gray-300 pt-2 border-t border-dark-border/60 max-w-xl">
               <div className="flex items-center space-x-2">
                 <Globe className="w-4 h-4 text-brand-500" />
                 <span>Languages: {content.languages?.join(', ')}</span>
@@ -179,13 +207,13 @@ export const ContentDetailPage: React.FC = () => {
             </div>
 
             {/* Main Action Buttons */}
-            <div className="flex flex-wrap items-center gap-3 pt-4">
+            <div className="flex flex-wrap items-center gap-2.5 sm:gap-3 pt-3">
               {content.type === 'movie' ? (
                 <button
                   onClick={() => navigate(`/watch/movie/${content.slug}`)}
-                  className="flex items-center space-x-2.5 bg-brand-500 hover:bg-brand-600 text-white font-bold px-7 py-3 rounded-xl shadow-xl shadow-brand-500/30 transition-all hover:scale-105"
+                  className="flex items-center space-x-2 bg-brand-500 hover:bg-brand-600 text-white font-bold px-6 sm:px-7 py-2.5 sm:py-3 rounded-xl shadow-xl shadow-brand-500/30 transition-all active:scale-95 text-xs sm:text-sm"
                 >
-                  <Play className="w-5 h-5 fill-white" />
+                  <Play className="w-4 h-4 sm:w-5 sm:h-5 fill-white" />
                   <span>Watch Movie Now</span>
                 </button>
               ) : (
@@ -198,16 +226,16 @@ export const ContentDetailPage: React.FC = () => {
                       navigate(`/watch/series/${content.slug}/1/1`);
                     }
                   }}
-                  className="flex items-center space-x-2.5 bg-brand-500 hover:bg-brand-600 text-white font-bold px-7 py-3 rounded-xl shadow-xl shadow-brand-500/30 transition-all hover:scale-105"
+                  className="flex items-center space-x-2 bg-brand-500 hover:bg-brand-600 text-white font-bold px-6 sm:px-7 py-2.5 sm:py-3 rounded-xl shadow-xl shadow-brand-500/30 transition-all active:scale-95 text-xs sm:text-sm"
                 >
-                  <Play className="w-5 h-5 fill-white" />
+                  <Play className="w-4 h-4 sm:w-5 sm:h-5 fill-white" />
                   <span>Start Series (S1 E1)</span>
                 </button>
               )}
 
               <button
                 onClick={handleWatchlistToggle}
-                className={`flex items-center space-x-2 px-5 py-3 rounded-xl border text-sm font-semibold transition-all ${
+                className={`flex items-center space-x-1.5 px-4 py-2.5 sm:py-3 rounded-xl border text-xs sm:text-sm font-semibold transition-all active:scale-95 ${
                   inWatchlist
                     ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400'
                     : 'bg-dark-card border-dark-border text-gray-200 hover:bg-dark-hover'
@@ -219,7 +247,7 @@ export const ContentDetailPage: React.FC = () => {
 
               <button
                 onClick={handleFavoriteToggle}
-                className={`flex items-center space-x-2 px-5 py-3 rounded-xl border text-sm font-semibold transition-all ${
+                className={`flex items-center space-x-1.5 px-4 py-2.5 sm:py-3 rounded-xl border text-xs sm:text-sm font-semibold transition-all active:scale-95 ${
                   isFavorite
                     ? 'bg-red-500/20 border-red-500 text-red-500'
                     : 'bg-dark-card border-dark-border text-gray-200 hover:bg-dark-hover'
@@ -232,26 +260,26 @@ export const ContentDetailPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Section for Movies: Qualities & Download Options */}
+        {/* Download Options for Movies */}
         {content.type === 'movie' && mediaList.length > 0 && (
-          <div className="bg-dark-card border border-dark-border rounded-2xl p-6 space-y-4">
+          <div className="bg-dark-card border border-dark-border rounded-2xl p-4 sm:p-6 space-y-3 sm:space-y-4">
             <div className="flex items-center space-x-2">
               <Download className="w-5 h-5 text-brand-500" />
-              <h3 className="text-xl font-bold text-white">Download Authorized Copies</h3>
+              <h3 className="text-lg sm:text-xl font-bold text-white">Download Authorized Copies</h3>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               {mediaList.map((m) => (
                 <div
                   key={m._id}
-                  className="flex items-center justify-between p-4 bg-dark-surface border border-dark-border rounded-xl"
+                  className="flex items-center justify-between p-3.5 bg-dark-surface border border-dark-border rounded-xl"
                 >
                   <div>
-                    <span className="font-bold text-white text-base">{m.quality}</span>
-                    <p className="text-xs text-gray-400">{m.resolution} • {m.fileSize}</p>
+                    <span className="font-bold text-white text-sm sm:text-base">{m.quality}</span>
+                    <p className="text-[11px] text-gray-400">{m.resolution} • {m.fileSize}</p>
                   </div>
                   <button
                     onClick={() => handleDownloadClick(m._id)}
-                    className="flex items-center space-x-1.5 px-4 py-2 bg-brand-500/20 hover:bg-brand-500 text-brand-500 hover:text-white border border-brand-500/40 rounded-xl text-xs font-bold transition-colors"
+                    className="flex items-center space-x-1.5 px-3 py-1.5 bg-brand-500/20 hover:bg-brand-500 text-brand-500 hover:text-white border border-brand-500/40 rounded-xl text-xs font-bold transition-all active:scale-95"
                   >
                     <Download className="w-3.5 h-3.5" />
                     <span>Download</span>
@@ -262,18 +290,18 @@ export const ContentDetailPage: React.FC = () => {
           </div>
         )}
 
-        {/* Section for Series: Season Selector & Episodes List */}
+        {/* Series: Season Selector & Episode Cards */}
         {content.type === 'series' && (
-          <div className="space-y-6">
-            <div className="flex items-center justify-between border-b border-dark-border pb-4">
-              <h3 className="text-2xl font-bold text-white">Seasons & Episodes</h3>
+          <div className="space-y-4 sm:space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-dark-border pb-3 gap-3">
+              <h3 className="text-xl sm:text-2xl font-bold text-white">Seasons & Episodes</h3>
               {seasons.length > 0 && (
-                <div className="flex space-x-2 overflow-x-auto scrollbar-none">
+                <div className="flex space-x-2 overflow-x-auto scrollbar-none pb-1">
                   {seasons.map((s) => (
                     <button
                       key={s._id}
                       onClick={() => setSelectedSeasonId(s._id)}
-                      className={`px-5 py-2 rounded-xl text-sm font-bold transition-all ${
+                      className={`px-4 py-1.5 rounded-xl text-xs sm:text-sm font-bold whitespace-nowrap transition-all active:scale-95 ${
                         activeSeasonId === s._id
                           ? 'bg-brand-500 text-white shadow-lg shadow-brand-500/30'
                           : 'bg-dark-card border border-dark-border text-gray-300 hover:bg-dark-hover'
@@ -288,7 +316,7 @@ export const ContentDetailPage: React.FC = () => {
 
             {/* Episodes List */}
             {episodes.length > 0 ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
                 {episodes.map((ep) => (
                   <div
                     key={ep._id}
@@ -297,7 +325,7 @@ export const ContentDetailPage: React.FC = () => {
                       const sNum = seasonObj ? seasonObj.seasonNumber : 1;
                       navigate(`/watch/series/${content.slug}/${sNum}/${ep.episodeNumber}`);
                     }}
-                    className="group bg-dark-card border border-dark-border hover:border-gray-500 rounded-xl overflow-hidden cursor-pointer p-3 space-y-3 transition-all hover:scale-[1.02] shadow-lg"
+                    className="group bg-dark-card border border-dark-border hover:border-gray-500 rounded-xl overflow-hidden cursor-pointer p-3 space-y-2 sm:space-y-3 transition-all hover:scale-[1.02] active:scale-95 shadow-lg"
                   >
                     <div className="aspect-video w-full rounded-lg overflow-hidden bg-dark-surface relative">
                       <img
@@ -306,24 +334,24 @@ export const ContentDetailPage: React.FC = () => {
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                       />
                       <div className="absolute inset-0 bg-black/40 group-hover:bg-black/20 flex items-center justify-center">
-                        <div className="w-10 h-10 bg-brand-500 rounded-full flex items-center justify-center text-white shadow-lg">
-                          <Play className="w-5 h-5 fill-white ml-0.5" />
+                        <div className="w-9 h-9 bg-brand-500 rounded-full flex items-center justify-center text-white shadow-lg">
+                          <Play className="w-4 h-4 fill-white ml-0.5" />
                         </div>
                       </div>
                     </div>
                     <div>
-                      <div className="flex items-center justify-between text-xs text-brand-500 font-bold">
+                      <div className="flex items-center justify-between text-[11px] text-brand-500 font-bold">
                         <span>Episode {ep.episodeNumber}</span>
                         <span className="text-gray-400 font-normal">{Math.floor(ep.duration / 60)} mins</span>
                       </div>
-                      <h4 className="font-bold text-white text-sm line-clamp-1 mt-0.5">{ep.title}</h4>
-                      <p className="text-xs text-gray-400 line-clamp-2 mt-1">{ep.description}</p>
+                      <h4 className="font-bold text-white text-xs sm:text-sm line-clamp-1 mt-0.5">{ep.title}</h4>
+                      <p className="text-[11px] text-gray-400 line-clamp-2 mt-0.5">{ep.description}</p>
                     </div>
                   </div>
                 ))}
               </div>
             ) : (
-              <div className="py-12 text-center text-gray-400 bg-dark-card border border-dark-border rounded-xl">
+              <div className="py-10 text-center text-gray-400 bg-dark-card border border-dark-border rounded-xl text-xs">
                 No episodes currently listed for this season.
               </div>
             )}
@@ -334,7 +362,7 @@ export const ContentDetailPage: React.FC = () => {
       {/* Download Modal Dialog */}
       {downloadModalMediaId && downloadLinkInfo && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
-          <div className="relative w-full max-w-md bg-dark-card border border-dark-border rounded-2xl p-6 text-white space-y-4">
+          <div className="relative w-full max-w-md bg-dark-card border border-dark-border rounded-2xl p-5 text-white space-y-4">
             <button
               onClick={() => setDownloadModalMediaId(null)}
               className="absolute top-4 right-4 text-gray-400 hover:text-white p-1"
@@ -346,7 +374,7 @@ export const ContentDetailPage: React.FC = () => {
                 <Download className="w-5 h-5" />
               </div>
               <div>
-                <h3 className="font-bold text-lg">Authorized Download Link</h3>
+                <h3 className="font-bold text-base">Authorized Download Link</h3>
                 <p className="text-xs text-gray-400">{downloadLinkInfo.quality} • {downloadLinkInfo.fileSize}</p>
               </div>
             </div>
@@ -358,7 +386,7 @@ export const ContentDetailPage: React.FC = () => {
               target="_blank"
               rel="noopener noreferrer"
               download
-              className="block w-full text-center py-3 bg-brand-500 hover:bg-brand-600 text-white font-bold rounded-xl shadow-lg shadow-brand-500/30 transition-all"
+              className="block w-full text-center py-3 bg-brand-500 hover:bg-brand-600 text-white font-bold text-xs rounded-xl shadow-lg shadow-brand-500/30 transition-all active:scale-95"
             >
               Start Direct Download ({downloadLinkInfo.fileSize})
             </a>

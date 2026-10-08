@@ -9,6 +9,8 @@ export class TelegramUserMTProtoClient {
   private client: TelegramClient | null = null;
   private importer: TelegramImporter;
 
+  private sessionInvalid: boolean = false;
+
   constructor() {
     this.importer = new TelegramImporter();
   }
@@ -30,7 +32,7 @@ export class TelegramUserMTProtoClient {
   }
 
   public isConfigured(): boolean {
-    return Boolean(this.apiId && this.apiHash && this.channelId && this.sessionString);
+    return Boolean(!this.sessionInvalid && this.apiId && this.apiHash && this.channelId && this.sessionString);
   }
 
   /**
@@ -75,11 +77,17 @@ export class TelegramUserMTProtoClient {
       console.log(`[TelegramUserClient] Processed ${count} channel posts!`);
       return count;
     } catch (error: any) {
-      console.warn(`[TelegramUserClient] MTProto note (${error.message}).`);
+      if (error.message?.includes('AUTH_KEY_DUPLICATED') || error.message?.includes('406')) {
+        console.warn(`[TelegramUserClient] MTProto Session string is duplicated/invalid (${error.message}). Disabling MTProto fallback.`);
+        this.sessionInvalid = true;
+      } else {
+        console.warn(`[TelegramUserClient] MTProto note (${error.message}).`);
+      }
       return 0;
     } finally {
       if (this.client) {
         await this.client.disconnect().catch(() => {});
+        this.client = null;
       }
     }
   }

@@ -13,6 +13,7 @@ export interface IMedia extends Document {
   provider: 'mock' | 'telegram' | 's3' | 'r2' | 'bunny';
   providerMediaId: string;
   providerMessageId?: string;
+  channelId?: string;
   streamUrl: string;
   downloadUrl: string;
   status: 'active' | 'processing' | 'archived';
@@ -32,6 +33,7 @@ const MediaSchema: Schema = new Schema(
     provider: { type: String, enum: ['mock', 'telegram', 's3', 'r2', 'bunny'], default: 'mock' },
     providerMediaId: { type: String, required: true },
     providerMessageId: { type: String },
+    channelId: { type: String },
     streamUrl: { type: String, required: true },
     downloadUrl: { type: String, required: true },
     status: { type: String, enum: ['active', 'processing', 'archived'], default: 'active' },
