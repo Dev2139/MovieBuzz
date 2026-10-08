@@ -7,6 +7,7 @@ import {
   createSeriesApi,
   fetchContentList,
   deleteContentApi,
+  updateContentApi,
 } from '../services/api';
 import {
   Film,
@@ -19,6 +20,8 @@ import {
   Send,
   Layers,
   Sparkles,
+  Edit2,
+  X,
 } from 'lucide-react';
 
 export const AdminDashboardPage: React.FC = () => {
@@ -88,6 +91,53 @@ export const AdminDashboardPage: React.FC = () => {
       queryClient.invalidateQueries({ queryKey: ['admin-catalog'] });
     },
   });
+
+  // Edit Content State & Mutation
+  const [editingItem, setEditingItem] = useState<any | null>(null);
+  const [editTitle, setEditTitle] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [editPosterUrl, setEditPosterUrl] = useState('');
+  const [editBackdropUrl, setEditBackdropUrl] = useState('');
+  const [editReleaseYear, setEditReleaseYear] = useState<number>(2026);
+  const [editRating, setEditRating] = useState<number>(8.5);
+
+  const updateMutation = useMutation({
+    mutationFn: updateContentApi,
+    onSuccess: (data) => {
+      alert(`Updated successfully! "${data.content?.title || 'Item'}" is now live across the site.`);
+      setEditingItem(null);
+      queryClient.invalidateQueries({ queryKey: ['admin-stats'] });
+      queryClient.invalidateQueries({ queryKey: ['admin-catalog'] });
+      queryClient.invalidateQueries({ queryKey: ['existing-series-list'] });
+      queryClient.invalidateQueries();
+    },
+  });
+
+  const handleEditOpen = (item: any) => {
+    setEditingItem(item);
+    setEditTitle(item.title || '');
+    setEditDescription(item.description || '');
+    setEditPosterUrl(item.posterUrl || '');
+    setEditBackdropUrl(item.backdropUrl || '');
+    setEditReleaseYear(item.releaseYear || 2026);
+    setEditRating(item.rating || 8.5);
+  };
+
+  const handleEditSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingItem) return;
+    updateMutation.mutate({
+      id: editingItem._id,
+      data: {
+        title: editTitle,
+        description: editDescription,
+        posterUrl: editPosterUrl,
+        backdropUrl: editBackdropUrl,
+        releaseYear: editReleaseYear,
+        rating: editRating,
+      },
+    });
+  };
 
   const handleMovieSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -404,19 +454,135 @@ export const AdminDashboardPage: React.FC = () => {
                   </div>
                 </div>
 
-                <button
-                  onClick={() => {
-                    if (confirm(`Are you sure you want to delete ${item.title}?`)) {
-                      deleteMutation.mutate(item._id);
-                    }
-                  }}
-                  className="p-2 text-red-400 hover:text-white hover:bg-red-500/20 rounded-lg transition-colors"
-                  title="Delete Item"
-                >
-                  <Trash2 className="w-5 h-5" />
-                </button>
+                <div className="flex items-center space-x-2">
+                  <button
+                    onClick={() => handleEditOpen(item)}
+                    className="p-2 text-blue-400 hover:text-white hover:bg-blue-500/20 rounded-lg transition-colors flex items-center space-x-1"
+                    title="Edit Name & Details"
+                  >
+                    <Edit2 className="w-4 h-4" />
+                    <span className="text-xs font-semibold">Edit</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      if (confirm(`Are you sure you want to delete ${item.title}?`)) {
+                        deleteMutation.mutate(item._id);
+                      }
+                    }}
+                    className="p-2 text-red-400 hover:text-white hover:bg-red-500/20 rounded-lg transition-colors"
+                    title="Delete Item"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* Edit Content Modal */}
+      {editingItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
+          <div className="relative w-full max-w-lg bg-dark-card border border-dark-border rounded-2xl p-6 text-white space-y-4 shadow-2xl">
+            <button
+              onClick={() => setEditingItem(null)}
+              className="absolute top-4 right-4 text-gray-400 hover:text-white p-1"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="flex items-center space-x-2 border-b border-dark-border pb-3">
+              <Edit2 className="w-5 h-5 text-brand-500" />
+              <h3 className="font-bold text-lg text-white">Edit {editingItem.type === 'series' ? 'Series' : 'Movie'} Details</h3>
+            </div>
+
+            <form onSubmit={handleEditSubmit} className="space-y-4 pt-1">
+              <div>
+                <label className="block text-xs font-semibold text-gray-400 uppercase mb-1">
+                  Title / Name (Visible to All Users)
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={editTitle}
+                  onChange={(e) => setEditTitle(e.target.value)}
+                  className="w-full bg-dark-surface border border-dark-border rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-brand-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-400 uppercase mb-1">Description</label>
+                <textarea
+                  rows={3}
+                  value={editDescription}
+                  onChange={(e) => setEditDescription(e.target.value)}
+                  className="w-full bg-dark-surface border border-dark-border rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-brand-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-400 uppercase mb-1">Release Year</label>
+                  <input
+                    type="number"
+                    value={editReleaseYear}
+                    onChange={(e) => setEditReleaseYear(Number(e.target.value))}
+                    className="w-full bg-dark-surface border border-dark-border rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-brand-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-400 uppercase mb-1">Rating</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="1"
+                    max="10"
+                    value={editRating}
+                    onChange={(e) => setEditRating(Number(e.target.value))}
+                    className="w-full bg-dark-surface border border-dark-border rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-brand-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-400 uppercase mb-1">Poster Image URL</label>
+                <input
+                  type="text"
+                  value={editPosterUrl}
+                  onChange={(e) => setEditPosterUrl(e.target.value)}
+                  className="w-full bg-dark-surface border border-dark-border rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-brand-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-400 uppercase mb-1">Backdrop Image URL</label>
+                <input
+                  type="text"
+                  value={editBackdropUrl}
+                  onChange={(e) => setEditBackdropUrl(e.target.value)}
+                  className="w-full bg-dark-surface border border-dark-border rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-brand-500"
+                />
+              </div>
+
+              <div className="flex space-x-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingItem(null)}
+                  className="flex-1 py-2.5 bg-dark-surface hover:bg-dark-hover text-gray-300 font-semibold text-xs rounded-xl border border-dark-border"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={updateMutation.isPending}
+                  className="flex-1 py-2.5 bg-brand-500 hover:bg-brand-600 text-white font-bold text-xs rounded-xl shadow shadow-brand-500/25"
+                >
+                  {updateMutation.isPending ? 'Saving...' : 'Save & Publish Name Change'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

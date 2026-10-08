@@ -91,8 +91,30 @@ export const createMovie = async (req: Request, res: Response) => {
 export const updateContent = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const updated = await Content.findByIdAndUpdate(id, req.body, { new: true });
-    return res.json({ content: updated });
+    const { title, description, posterUrl, backdropUrl, genres, languages, releaseYear, rating, director } = req.body;
+
+    const content = await Content.findById(id);
+    if (!content) {
+      return res.status(404).json({ message: 'Content not found' });
+    }
+
+    if (title && title.trim() !== content.title) {
+      content.title = title.trim();
+      const slugBase = title.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+      content.slug = `${slugBase}-${releaseYear || content.releaseYear || 2026}`;
+    }
+
+    if (description !== undefined) content.description = description;
+    if (posterUrl !== undefined) content.posterUrl = posterUrl;
+    if (backdropUrl !== undefined) content.backdropUrl = backdropUrl;
+    if (genres !== undefined) content.genres = genres;
+    if (languages !== undefined) content.languages = languages;
+    if (releaseYear !== undefined) content.releaseYear = Number(releaseYear);
+    if (rating !== undefined) content.rating = Number(rating);
+    if (director !== undefined) content.director = director;
+
+    await content.save();
+    return res.json({ message: 'Content updated successfully', content });
   } catch (error) {
     return res.status(500).json({ message: 'Error updating content' });
   }

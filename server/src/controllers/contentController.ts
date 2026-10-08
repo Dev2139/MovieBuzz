@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import mongoose from 'mongoose';
 import { Content } from '../models/Content';
 import { Media } from '../models/Media';
 import { tmdbService } from '../services/tmdb/tmdbService';
@@ -85,7 +86,10 @@ export const getContentList = async (req: Request, res: Response) => {
 export const getContentBySlug = async (req: Request, res: Response) => {
   try {
     const { slug } = req.params;
-    const item = await Content.findOne({ slug, status: 'published' });
+    let item = await Content.findOne({ slug, status: 'published' });
+    if (!item && mongoose.Types.ObjectId.isValid(slug)) {
+      item = await Content.findOne({ _id: slug, status: 'published' });
+    }
 
     if (!item) {
       return res.status(404).json({ message: 'Content not found' });

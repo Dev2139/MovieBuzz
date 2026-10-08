@@ -180,6 +180,11 @@ export const deleteContentApi = async (contentId: string) => {
   return res.data;
 };
 
+export const updateContentApi = async ({ id, data }: { id: string; data: any }) => {
+  const res = await api.put(`/admin/content/${id}`, data);
+  return res.data;
+};
+
 // Telegram Import APIs
 export const fetchTelegramImports = async (status?: string) => {
   const res = await api.get<{ imports: TelegramImportItem[] }>('/admin/telegram/imports', { params: { status } });
