@@ -7,9 +7,12 @@ import {
   Maximize,
   Minimize,
   RotateCcw,
+  RotateCw,
   Settings,
   Tv,
   Check,
+  Sun,
+  Loader2,
 } from 'lucide-react';
 import { Media } from '../types';
 import { useAuth } from '../context/AuthContext';
@@ -64,7 +67,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     resolveStreamUrl(mediaList && mediaList.length > 0 ? mediaList[0].streamUrl : undefined)
   );
 
-  // Sync streamUrl state whenever mediaList prop finishes loading or changes
   useEffect(() => {
     if (mediaList && mediaList.length > 0) {
       const found = mediaList.find((m) => m.quality === selectedQuality) || mediaList[0];
@@ -74,17 +76,29 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   }, [mediaList, selectedQuality]);
 
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
+  const [isBuffering, setIsBuffering] = useState<boolean>(true);
   const [currentTime, setCurrentTime] = useState<number>(initialPosition);
   const [duration, setDuration] = useState<number>(0);
+
+  // Audio Volume & Mute States
   const [volume, setVolume] = useState<number>(1);
   const [isMuted, setIsMuted] = useState<boolean>(false);
+
+  // Brightness Control (0.2 to 1.2)
+  const [brightness, setBrightness] = useState<number>(1);
+
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [showControls, setShowControls] = useState<boolean>(true);
   const [showSettings, setShowSettings] = useState<boolean>(false);
 
+  // Double click skip feedback indicator
+  const [skipFeedback, setSkipFeedback] = useState<{ side: 'left' | 'right'; text: string; id: number } | null>(null);
+
   const controlsTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSavedTimeRef = useRef<number>(0);
+  const lastClickRef = useRef<{ time: number; x: number }>({ time: 0, x: 0 });
+  const singleClickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Sync quality change
   const handleQualityChange = (quality: string) => {
@@ -94,8 +108,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       const currentPos = videoRef.current?.currentTime || 0;
       setStreamUrl(resolveStreamUrl(found.streamUrl));
       setShowSettings(false);
+      setIsBuffering(true);
 
-      // Restore position after source switch
       setTimeout(() => {
         if (videoRef.current) {
           videoRef.current.currentTime = currentPos;
@@ -105,7 +119,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }
   };
 
-  // Throttled position saver (saves every 5 seconds)
+  // Throttled position saver
   const saveProgressThrottled = useCallback(
     (pos: number, dur: number) => {
       if (Math.abs(pos - lastSavedTimeRef.current) < 5) return;
@@ -135,19 +149,16 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     [user, contentId, episodeId, contentSlug, contentType, contentTitle, posterUrl]
   );
 
-  // Video Time Update listener
   const handleTimeUpdate = () => {
     if (videoRef.current) {
       const cur = videoRef.current.currentTime;
       const dur = videoRef.current.duration || duration;
       setCurrentTime(cur);
       if (dur > 0) setDuration(dur);
-
       saveProgressThrottled(cur, dur);
     }
   };
 
-  // Initial position jump on metadata load
   const handleLoadedMetadata = () => {
     if (videoRef.current) {
       setDuration(videoRef.current.duration);
@@ -155,6 +166,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         videoRef.current.currentTime = initialPosition;
       }
     }
+    setIsBuffering(false);
   };
 
   const togglePlay = () => {
@@ -192,6 +204,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newTime = parseFloat(e.target.value);
     setCurrentTime(newTime);
+    setIsBuffering(true);
     if (videoRef.current) {
       videoRef.current.currentTime = newTime;
     }
@@ -205,16 +218,48 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     setShowSettings(false);
   };
 
-  const toggleFullscreen = () => {
+  // Fullscreen + Auto-Landscape Mobile Orientation
+  const toggleFullscreen = async () => {
     if (!containerRef.current) return;
-    if (!document.fullscreenElement) {
-      containerRef.current.requestFullscreen().catch(() => {});
-      setIsFullscreen(true);
-    } else {
-      document.exitFullscreen().catch(() => {});
-      setIsFullscreen(false);
+    try {
+      if (!document.fullscreenElement) {
+        if (containerRef.current.requestFullscreen) {
+          await containerRef.current.requestFullscreen();
+        }
+        setIsFullscreen(true);
+        if (window.screen && window.screen.orientation && (window.screen.orientation as any).lock) {
+          await (window.screen.orientation as any).lock('landscape').catch(() => {});
+        }
+      } else {
+        if (document.exitFullscreen) {
+          await document.exitFullscreen().catch(() => {});
+        }
+        if (window.screen && window.screen.orientation && (window.screen.orientation as any).unlock) {
+          try {
+            (window.screen.orientation as any).unlock();
+          } catch {}
+        }
+        setIsFullscreen(false);
+      }
+    } catch {
+      setIsFullscreen(!isFullscreen);
     }
   };
+
+  // Listen to fullscreen changes to reset orientation
+  useEffect(() => {
+    const handleFsChange = () => {
+      const isFs = Boolean(document.fullscreenElement);
+      setIsFullscreen(isFs);
+      if (!isFs && window.screen && window.screen.orientation && (window.screen.orientation as any).unlock) {
+        try {
+          (window.screen.orientation as any).unlock();
+        } catch {}
+      }
+    };
+    document.addEventListener('fullscreenchange', handleFsChange);
+    return () => document.removeEventListener('fullscreenchange', handleFsChange);
+  }, []);
 
   const togglePictureInPicture = async () => {
     if (videoRef.current) {
@@ -226,7 +271,44 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }
   };
 
-  // Auto hide controls after mouse idle
+  // Container click handler with Double-Tap Skip (-10s / +10s)
+  const handleContainerClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if ((e.target as HTMLElement).closest('button, input, .no-player-click')) return;
+
+    const now = Date.now();
+    const rect = containerRef.current?.getBoundingClientRect();
+    const clickX = e.clientX - (rect?.left || 0);
+    const width = rect?.width || 1;
+
+    if (now - lastClickRef.current.time < 300) {
+      // Double Tap Detected
+      if (singleClickTimerRef.current) clearTimeout(singleClickTimerRef.current);
+
+      if (clickX < width / 2) {
+        // Rewind -10s
+        if (videoRef.current) {
+          videoRef.current.currentTime = Math.max(0, videoRef.current.currentTime - 10);
+        }
+        setSkipFeedback({ side: 'left', text: '-10s', id: Date.now() });
+      } else {
+        // Fast-Forward +10s
+        if (videoRef.current) {
+          videoRef.current.currentTime = Math.min(duration, videoRef.current.currentTime + 10);
+        }
+        setSkipFeedback({ side: 'right', text: '+10s', id: Date.now() });
+      }
+
+      setTimeout(() => setSkipFeedback(null), 800);
+      lastClickRef.current = { time: 0, x: 0 };
+    } else {
+      lastClickRef.current = { time: now, x: clickX };
+      singleClickTimerRef.current = setTimeout(() => {
+        togglePlay();
+      }, 300);
+    }
+  };
+
+  // Auto-hide controls
   const handleMouseMove = () => {
     setShowControls(true);
     if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
@@ -235,7 +317,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }, 3500);
   };
 
-  // Keyboard shortcuts (space = play, F = fullscreen, M = mute, Left/Right = seek 10s)
+  // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement).tagName)) return;
@@ -274,8 +356,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   };
 
   const handleStall = useCallback(() => {
+    setIsBuffering(true);
     if (videoRef.current && isPlaying) {
-      console.warn('[VideoPlayer] Playback stalled, attempting buffer resume...');
       const curPos = videoRef.current.currentTime;
       setTimeout(() => {
         if (videoRef.current && videoRef.current.paused) {
@@ -286,7 +368,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }
   }, [isPlaying]);
 
-  // Sync volume and muted state on video element
   useEffect(() => {
     if (videoRef.current) {
       videoRef.current.volume = volume;
@@ -294,10 +375,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }
   }, [volume, isMuted]);
 
-  // Reload media element when streamUrl changes
   useEffect(() => {
     if (videoRef.current) {
       videoRef.current.load();
+      setIsBuffering(true);
     }
   }, [streamUrl]);
 
@@ -305,6 +386,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     <div
       ref={containerRef}
       onMouseMove={handleMouseMove}
+      onClick={handleContainerClick}
       className="relative w-full aspect-video bg-black rounded-2xl overflow-hidden group shadow-2xl select-none"
     >
       <video
@@ -312,59 +394,132 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         src={streamUrl}
         onTimeUpdate={handleTimeUpdate}
         onLoadedMetadata={handleLoadedMetadata}
+        onLoadStart={() => setIsBuffering(true)}
+        onWaiting={handleStall}
+        onStalled={handleStall}
+        onSeeking={() => setIsBuffering(true)}
+        onSeeked={() => setIsBuffering(false)}
+        onCanPlay={() => setIsBuffering(false)}
         onPlay={() => {
           setIsPlaying(true);
+          setIsBuffering(false);
           if (videoRef.current) {
             videoRef.current.volume = volume;
             videoRef.current.muted = isMuted;
           }
         }}
         onPause={() => setIsPlaying(false)}
-        onWaiting={handleStall}
-        onStalled={handleStall}
         onError={() => {
-          console.warn('[VideoPlayer] Video playback error encountered.');
+          setIsBuffering(false);
         }}
         onEnded={() => {
           setIsPlaying(false);
           if (onEnded) onEnded();
         }}
-        onClick={togglePlay}
-        className="w-full h-full object-contain cursor-pointer"
-        poster={posterUrl}
+        style={{ filter: `brightness(${brightness})` }}
+        className="w-full h-full object-contain cursor-pointer transition-[filter] duration-150"
         playsInline
       />
 
+      {/* Buffering Stream Spinner Overlay */}
+      {isBuffering && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 backdrop-blur-[2px] z-20 pointer-events-none space-y-3 animate-fade-in">
+          <Loader2 className="w-12 h-12 text-brand-500 animate-spin drop-shadow-2xl" />
+          <span className="text-xs font-bold text-gray-200 uppercase tracking-widest animate-pulse">
+            Loading Telegram Stream...
+          </span>
+        </div>
+      )}
+
+      {/* Double Tap Skip Feedback Indicators */}
+      {skipFeedback?.side === 'left' && (
+        <div className="absolute left-8 sm:left-16 top-1/2 -translate-y-1/2 flex flex-col items-center justify-center w-20 h-20 bg-black/80 backdrop-blur-md rounded-full border border-white/20 text-white z-30 pointer-events-none shadow-2xl animate-bounce">
+          <RotateCcw className="w-7 h-7 text-brand-500" />
+          <span className="text-xs font-black font-mono mt-0.5">{skipFeedback.text}</span>
+        </div>
+      )}
+      {skipFeedback?.side === 'right' && (
+        <div className="absolute right-8 sm:right-16 top-1/2 -translate-y-1/2 flex flex-col items-center justify-center w-20 h-20 bg-black/80 backdrop-blur-md rounded-full border border-white/20 text-white z-30 pointer-events-none shadow-2xl animate-bounce">
+          <RotateCw className="w-7 h-7 text-brand-500" />
+          <span className="text-xs font-black font-mono mt-0.5">{skipFeedback.text}</span>
+        </div>
+      )}
+
+      {/* Parallel Side Vertical Sliders (Left: Brightness, Right: Volume) */}
+      <div
+        className={`absolute top-1/2 -translate-y-1/2 left-3 sm:left-6 right-3 sm:right-6 flex justify-between items-center pointer-events-none transition-opacity duration-300 z-30 ${
+          showControls ? 'opacity-100' : 'opacity-0'
+        }`}
+      >
+        {/* Left Side: Brightness Slider */}
+        <div className="pointer-events-auto no-player-click flex flex-col items-center bg-black/70 backdrop-blur-md p-2.5 rounded-2xl border border-white/10 space-y-2.5 shadow-2xl">
+          <Sun className="w-4 h-4 text-amber-400" />
+          <input
+            type="range"
+            min={0.2}
+            max={1.2}
+            step={0.05}
+            value={brightness}
+            onChange={(e) => setBrightness(parseFloat(e.target.value))}
+            className="w-1.5 h-20 sm:h-28 accent-amber-400 bg-gray-700/80 rounded-lg appearance-none cursor-pointer [writing-mode:vertical-lr] [direction:rtl]"
+            title={`Brightness: ${Math.round(brightness * 100)}%`}
+          />
+          <span className="text-[10px] font-mono font-bold text-amber-400">{Math.round(brightness * 100)}%</span>
+        </div>
+
+        {/* Right Side: Volume Slider */}
+        <div className="pointer-events-auto no-player-click flex flex-col items-center bg-black/70 backdrop-blur-md p-2.5 rounded-2xl border border-white/10 space-y-2.5 shadow-2xl">
+          <button onClick={toggleMute} className="hover:text-brand-500 transition-colors">
+            {isMuted || volume === 0 ? (
+              <VolumeX className="w-4 h-4 text-red-500" />
+            ) : (
+              <Volume2 className="w-4 h-4 text-brand-500" />
+            )}
+          </button>
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.05}
+            value={isMuted ? 0 : volume}
+            onChange={handleVolumeChange}
+            className="w-1.5 h-20 sm:h-28 accent-brand-500 bg-gray-700/80 rounded-lg appearance-none cursor-pointer [writing-mode:vertical-lr] [direction:rtl]"
+            title={`Volume: ${Math.round((isMuted ? 0 : volume) * 100)}%`}
+          />
+          <span className="text-[10px] font-mono font-bold text-brand-500">{Math.round((isMuted ? 0 : volume) * 100)}%</span>
+        </div>
+      </div>
+
       {/* Overlay Title when paused or hovering */}
       <div
-        className={`absolute top-0 left-0 right-0 p-6 bg-gradient-to-b from-black/80 via-black/40 to-transparent transition-opacity duration-300 pointer-events-none flex items-center justify-between ${
+        className={`absolute top-0 left-0 right-0 p-4 sm:p-6 bg-gradient-to-b from-black/90 via-black/40 to-transparent transition-opacity duration-300 pointer-events-none flex items-center justify-between z-20 ${
           showControls ? 'opacity-100' : 'opacity-0'
         }`}
       >
         <div>
-          <h3 className="text-white font-bold text-lg sm:text-xl drop-shadow">{contentTitle}</h3>
-          <p className="text-xs text-brand-500 font-semibold uppercase tracking-wider">{selectedQuality} Streaming</p>
+          <h3 className="text-white font-bold text-sm sm:text-xl drop-shadow truncate max-w-xs sm:max-w-md">{contentTitle}</h3>
+          <p className="text-[11px] text-brand-500 font-semibold uppercase tracking-wider">{selectedQuality} Streaming</p>
         </div>
       </div>
 
       {/* Center Big Play Button when paused */}
-      {!isPlaying && (
+      {!isPlaying && !isBuffering && (
         <button
           onClick={togglePlay}
-          className="absolute inset-0 m-auto w-20 h-20 bg-brand-500/90 hover:bg-brand-500 rounded-full flex items-center justify-center text-white shadow-2xl transition-transform hover:scale-110"
+          className="no-player-click absolute inset-0 m-auto w-16 h-16 sm:w-20 sm:h-20 bg-brand-500/90 hover:bg-brand-500 rounded-full flex items-center justify-center text-white shadow-2xl transition-transform hover:scale-110 z-20"
         >
-          <Play className="w-10 h-10 fill-white ml-1" />
+          <Play className="w-8 h-8 sm:w-10 sm:h-10 fill-white ml-1" />
         </button>
       )}
 
       {/* Player Controls Bar */}
       <div
-        className={`absolute bottom-0 left-0 right-0 p-4 sm:p-6 bg-gradient-to-t from-black/90 via-black/60 to-transparent transition-opacity duration-300 space-y-3 ${
+        className={`absolute bottom-0 left-0 right-0 p-4 sm:p-6 bg-gradient-to-t from-black/95 via-black/70 to-transparent transition-opacity duration-300 space-y-3 z-30 ${
           showControls ? 'opacity-100' : 'opacity-0'
         }`}
       >
         {/* Scrub Bar */}
-        <div className="relative flex items-center">
+        <div className="relative flex items-center no-player-click">
           <input
             type="range"
             min={0}
@@ -372,45 +527,31 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             step={0.1}
             value={currentTime}
             onChange={handleSeek}
-            className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-brand-500 hover:h-2.5 transition-all"
+            className="w-full h-1.5 bg-gray-700/80 rounded-lg appearance-none cursor-pointer accent-brand-500 hover:h-2.5 transition-all"
           />
         </div>
 
         {/* Action Controls */}
-        <div className="flex items-center justify-between text-white">
-          <div className="flex items-center space-x-4">
+        <div className="flex items-center justify-between text-white no-player-click">
+          <div className="flex items-center space-x-3 sm:space-x-4">
             <button onClick={togglePlay} className="hover:text-brand-500 transition-colors">
-              {isPlaying ? <Pause className="w-6 h-6" /> : <Play className="w-6 h-6 fill-white" />}
+              {isPlaying ? <Pause className="w-5 h-5 sm:w-6 sm:h-6" /> : <Play className="w-5 h-5 sm:w-6 sm:h-6 fill-white" />}
             </button>
 
             <button
               onClick={() => {
-                if (videoRef.current) videoRef.current.currentTime -= 10;
+                if (videoRef.current) videoRef.current.currentTime = Math.max(0, videoRef.current.currentTime - 10);
+                setSkipFeedback({ side: 'left', text: '-10s', id: Date.now() });
+                setTimeout(() => setSkipFeedback(null), 800);
               }}
               className="hover:text-gray-300 transition-colors"
               title="Seek back 10s"
             >
-              <RotateCcw className="w-5 h-5" />
+              <RotateCcw className="w-4 h-4 sm:w-5 sm:h-5" />
             </button>
 
-            {/* Volume */}
-            <div className="flex items-center space-x-2 group/vol">
-              <button onClick={toggleMute} className="hover:text-gray-300 transition-colors">
-                {isMuted || volume === 0 ? <VolumeX className="w-5 h-5 text-red-500" /> : <Volume2 className="w-5 h-5" />}
-              </button>
-              <input
-                type="range"
-                min={0}
-                max={1}
-                step={0.05}
-                value={isMuted ? 0 : volume}
-                onChange={handleVolumeChange}
-                className="w-16 h-1 bg-gray-600 rounded appearance-none cursor-pointer accent-white"
-              />
-            </div>
-
             {/* Timestamp */}
-            <div className="text-xs font-mono text-gray-300">
+            <div className="text-[11px] sm:text-xs font-mono text-gray-300">
               <span>{formatTime(currentTime)}</span>
               <span className="mx-1 text-gray-500">/</span>
               <span>{formatTime(duration)}</span>
@@ -418,7 +559,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           </div>
 
           {/* Right Tools */}
-          <div className="flex items-center space-x-4 relative">
+          <div className="flex items-center space-x-3 sm:space-x-4 relative">
             {/* Speed & Quality Settings Popup */}
             <button
               onClick={() => setShowSettings(!showSettings)}
@@ -472,7 +613,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             )}
 
             {/* PiP */}
-            <button onClick={togglePictureInPicture} className="hover:text-gray-300 transition-colors" title="Picture in Picture">
+            <button onClick={togglePictureInPicture} className="hover:text-gray-300 transition-colors hidden sm:block" title="Picture in Picture">
               <Tv className="w-5 h-5" />
             </button>
 
