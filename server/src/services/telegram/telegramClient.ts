@@ -134,9 +134,18 @@ export class TelegramMediaProvider implements MediaProvider {
         if (mtClient && this.channelId) {
           const peer = await mtClient.getEntity(this.channelId).catch(() => null);
           if (peer) {
-            const messages = await mtClient.getMessages(peer as any, { limit: 100 });
-            const baseUrl = process.env.VERCEL_URL 
-              ? `https://${process.env.VERCEL_URL}` 
+            let messages: any[] = [];
+            try {
+              messages = await mtClient.getMessages(peer as any, { limit: 100 });
+            } catch (getMsgErr: any) {
+              // Bots cannot use messages.GetHistory via MTProto — skip silently
+              if (!getMsgErr.message?.includes('BOT_METHOD_INVALID')) {
+                console.warn(`[TelegramClient] MTProto getMessages notice: ${getMsgErr.message}`);
+              }
+            }
+
+            const baseUrl = process.env.VERCEL_URL
+              ? `https://${process.env.VERCEL_URL}`
               : (process.env.BACKEND_URL || 'http://localhost:5000');
 
             for (const msg of messages) {
@@ -168,7 +177,9 @@ export class TelegramMediaProvider implements MediaProvider {
           }
         }
       } catch (mtErr: any) {
-        console.warn(`[TelegramClient] MTProto channel sync notice: ${mtErr.message}`);
+        if (!mtErr.message?.includes('BOT_METHOD_INVALID')) {
+          console.warn(`[TelegramClient] MTProto channel sync notice: ${mtErr.message}`);
+        }
       }
     }
 

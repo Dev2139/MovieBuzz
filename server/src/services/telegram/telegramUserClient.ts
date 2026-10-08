@@ -34,6 +34,8 @@ export class TelegramUserMTProtoClient {
 
   /**
    * Connect to Telegram MTProto User API using shared telegramStreamService client instance.
+   * NOTE: This only works with a real USER session string, not a bot token.
+   * Bots cannot use messages.GetHistory — skip silently if running as bot.
    */
   async fetchPrivateChannelPosts(): Promise<number> {
     if (!this.isConfigured()) {
@@ -65,6 +67,11 @@ export class TelegramUserMTProtoClient {
       if (error.message?.includes('AUTH_KEY_DUPLICATED') || error.message?.includes('406')) {
         console.warn(`[TelegramUserClient] MTProto Session string notice (${error.message}).`);
         this.sessionInvalid = true;
+      } else if (
+        error.message?.includes('BOT_METHOD_INVALID') ||
+        error.message?.includes('400')
+      ) {
+        // Bot tokens cannot call messages.GetHistory — skip silently, this is expected
       } else {
         console.warn(`[TelegramUserClient] MTProto note (${error.message}).`);
       }
