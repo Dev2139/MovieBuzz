@@ -7,6 +7,7 @@ import { Navbar } from './components/Navbar';
 import { BottomNav } from './components/BottomNav';
 import { Footer } from './components/Footer';
 import { AuthModal } from './components/AuthModal';
+import { ScrollToTop } from './components/ScrollToTop';
 
 import { HomePage } from './pages/HomePage';
 import { MoviesPage } from './pages/MoviesPage';
@@ -46,6 +47,7 @@ export const App: React.FC = () => {
       <AuthProvider>
         <ToastProvider>
           <BrowserRouter>
+            <ScrollToTop />
             <div className="flex flex-col min-h-screen bg-dark-base relative">
               <Navbar />
               <main className="flex-1">
