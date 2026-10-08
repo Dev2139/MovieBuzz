@@ -103,9 +103,24 @@ export const proxyTelegramFileStream = async (req: Request, res: Response) => {
     const alignedOffset = Math.floor(start / chunkSize) * chunkSize;
     const limit = chunkSize;
 
-    const rawBuffer = await telegramStreamService.getChunk(fileId, alignedOffset, limit, messageId);
+    let rawBuffer = await telegramStreamService.getChunk(fileId, alignedOffset, limit, messageId);
 
+    // High Availability Fallback: If MTProto chunk is unavailable, stream directly via Telegram Bot API HTTP stream
     if (!rawBuffer) {
+      try {
+        const fallbackUrl = await storageService.getProvider().getStreamUrl(fileId).catch(() => null);
+        if (fallbackUrl && fallbackUrl.startsWith('http') && !fallbackUrl.includes('/proxy-file/')) {
+          const httpRes = await axios.get(fallbackUrl, {
+            headers: range ? { Range: range } : {},
+            responseType: 'arraybuffer',
+            timeout: 15000,
+          });
+          res.writeHead(httpRes.status, httpRes.headers as any);
+          return res.end(httpRes.data);
+        }
+      } catch (fallbackErr: any) {
+        console.warn('[proxyTelegramFileStream] Fallback stream notice:', fallbackErr.message);
+      }
       return res.status(503).json({ message: 'Telegram media stream is currently unavailable' });
     }
 

@@ -100,22 +100,22 @@ class TelegramStreamService {
         // Disable GramJS update loop polling to prevent background TIMEOUT exceptions
         (client as any)._updateLoop = () => Promise.resolve();
 
-        if (savedSession && savedSession.length > 5) {
-          await client.connect();
-          console.log('[TelegramStreamService] MTProto Client connected via User Session!');
-        } else if (this.botToken) {
-          await client.start({ botAuthToken: this.botToken });
-          console.log('[TelegramStreamService] MTProto Bot Client connected!');
-
-          const sessionData = (client.session as any).save();
-          const newSessionStr = typeof sessionData === 'string' ? sessionData : '';
-          if (newSessionStr && newSessionStr.length > 5) {
-            try {
-              fs.writeFileSync(this.sessionFilePath, newSessionStr, 'utf-8');
-            } catch {
-              // Ignore filesystem write on read-only serverless environments
+        if (this.botToken) {
+          try {
+            await client.start({ botAuthToken: this.botToken });
+            console.log('[TelegramStreamService] MTProto Bot Client connected successfully!');
+          } catch (botErr: any) {
+            console.warn('[TelegramStreamService] Bot auth fallback notice:', botErr.message);
+            if (savedSession && savedSession.length > 5) {
+              await client.connect();
+              console.log('[TelegramStreamService] MTProto Client connected via User Session!');
+            } else {
+              throw botErr;
             }
           }
+        } else if (savedSession && savedSession.length > 5) {
+          await client.connect();
+          console.log('[TelegramStreamService] MTProto Client connected via User Session!');
         } else {
           console.warn('[TelegramStreamService] MTProto note: No valid session or bot token provided.');
           return null;
