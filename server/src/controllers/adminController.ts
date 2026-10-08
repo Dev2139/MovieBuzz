@@ -171,10 +171,28 @@ export const updateContent = async (req: Request, res: Response) => {
 export const deleteContent = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+    const target = await Content.findById(id);
+
     await Content.findByIdAndDelete(id);
     await Media.deleteMany({ contentId: id });
     await Season.deleteMany({ seriesId: id });
     await Episode.deleteMany({ seriesId: id });
+
+    // Permanently mark Telegram import status as DELETED so background sync never re-publishes it!
+    if (target) {
+      await TelegramImport.updateMany(
+        {
+          $or: [
+            { mappedContentId: id },
+            { detectedTitle: new RegExp(`^${target.title.replace(/[^a-z0-9]/gi, '\\$&')}$`, 'i') },
+          ],
+        },
+        { status: 'DELETED' }
+      );
+    } else {
+      await TelegramImport.updateMany({ mappedContentId: id }, { status: 'DELETED' });
+    }
+
     return res.json({ message: 'Content deleted successfully' });
   } catch (error) {
     return res.status(500).json({ message: 'Error deleting content' });

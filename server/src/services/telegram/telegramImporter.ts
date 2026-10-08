@@ -55,6 +55,14 @@ export class TelegramImporter {
    */
   async autoPublishTelegramPost(raw: RawTelegramMessage) {
     try {
+      // 1. Check if post was already imported, ignored, or deleted by admin
+      const existingImport = await TelegramImport.findOne({ messageId: raw.messageId });
+      if (existingImport) {
+        if (['IMPORTED', 'IGNORED', 'DELETED', 'REVIEWED'].includes(existingImport.status)) {
+          return null; // Skip re-importing already processed/deleted/ignored posts!
+        }
+      }
+
       const parsed = parseTelegramCaption(raw.caption);
       const title = parsed.title;
       if (!title || title.startsWith('/') || title.toLowerCase() === 'start' || title.length < 2) {
@@ -159,6 +167,27 @@ export class TelegramImporter {
           );
         }
 
+        await TelegramImport.findOneAndUpdate(
+          { messageId: raw.messageId },
+          {
+            channelId: raw.channelId,
+            messageId: raw.messageId,
+            mediaId: raw.mediaId,
+            originalCaption: raw.caption,
+            detectedTitle: title,
+            detectedSeason: parsed.season,
+            detectedEpisode: parsed.episode,
+            detectedEpisodeEnd: parsed.episodeEnd,
+            detectedQuality: quality,
+            detectedYear: year,
+            detectedLanguage: language,
+            status: 'IMPORTED',
+            mappedContentId: series._id,
+            mappedEpisodeId: episodeDoc?._id,
+          },
+          { upsert: true }
+        );
+
         return { type: 'series', series, season, episode: episodeDoc };
       } else {
         // Movie Post
@@ -197,6 +226,23 @@ export class TelegramImporter {
               providerMediaId: raw.mediaId,
               providerMessageId: raw.messageId,
               status: 'active',
+            },
+            { upsert: true }
+          );
+
+          await TelegramImport.findOneAndUpdate(
+            { messageId: raw.messageId },
+            {
+              channelId: raw.channelId,
+              messageId: raw.messageId,
+              mediaId: raw.mediaId,
+              originalCaption: raw.caption,
+              detectedTitle: title,
+              detectedQuality: quality,
+              detectedYear: year,
+              detectedLanguage: language,
+              status: 'IMPORTED',
+              mappedContentId: movie._id,
             },
             { upsert: true }
           );
