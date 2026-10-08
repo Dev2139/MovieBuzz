@@ -260,3 +260,75 @@ export const handleTelegramWebhook = async (req: Request, res: Response) => {
     return res.json({ ok: true, published: false });
   }
 };
+
+/**
+ * Debug: Check TelegramImport history — shows all records regardless of status.
+ * Use to diagnose why posts were not imported.
+ */
+export const debugTelegramImports = async (req: Request, res: Response) => {
+  try {
+    const { TelegramImport } = await import('../models/TelegramImport');
+    const imports = await TelegramImport.find({}).sort({ createdAt: -1 }).limit(20).lean();
+    return res.json({
+      total: imports.length,
+      note: imports.length === 0
+        ? 'No import records found. Either no posts were ever sent to the bot, or they were silently skipped.'
+        : 'These are the last 20 import attempts.',
+      imports: imports.map((i: any) => ({
+        messageId: i.messageId,
+        status: i.status,
+        detectedTitle: i.detectedTitle,
+        detectedQuality: i.detectedQuality,
+        originalCaption: i.originalCaption?.slice(0, 100),
+        createdAt: i.createdAt,
+      })),
+    });
+  } catch (err: any) {
+    return res.status(500).json({ message: 'Debug error', error: err.message });
+  }
+};
+
+/**
+ * Manual Import: Directly process a Telegram video by providing its file_id and caption.
+ * Use this when getUpdates already consumed the update and the post wasn't auto-imported.
+ * POST /api/telegram/manual-import
+ * Body: { fileId: "TELEGRAM_FILE_ID", caption: "Movie Name (2026) 1080p", messageId?: "123" }
+ */
+export const manualTelegramImport = async (req: Request, res: Response) => {
+  try {
+    const { fileId, caption, messageId } = req.body;
+    if (!fileId || !caption) {
+      return res.status(400).json({ message: 'fileId and caption are required' });
+    }
+
+    const botToken = process.env.TELEGRAM_BOT_TOKEN;
+    const backendUrl = process.env.BACKEND_URL || 'https://moviebuzz-99fb.onrender.com';
+
+    const streamUrl = `${backendUrl}/api/media/proxy-file/${encodeURIComponent(fileId)}`;
+    const downloadUrl = `${backendUrl}/api/media/download-file/${encodeURIComponent(fileId)}`;
+
+    const { TelegramImporter } = await import('../services/telegram/telegramImporter');
+    const importer = new TelegramImporter();
+
+    const result = await importer.autoPublishTelegramPost({
+      channelId: process.env.TELEGRAM_CHANNEL_ID || 'manual',
+      messageId: messageId || `manual_${Date.now()}`,
+      mediaId: fileId,
+      caption,
+      streamUrl,
+      downloadUrl,
+    });
+
+    if (result) {
+      return res.json({ success: true, message: 'Content imported successfully!', result });
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: 'Import returned null — either the caption could not be parsed, or this post was already imported/ignored.',
+        tip: 'Check /api/telegram/debug-imports to see the import history.',
+      });
+    }
+  } catch (err: any) {
+    return res.status(500).json({ message: 'Manual import error', error: err.message });
+  }
+};
