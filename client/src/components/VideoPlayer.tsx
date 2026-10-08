@@ -421,13 +421,17 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         playsInline
       />
 
-      {/* Buffering Stream Spinner Overlay */}
+      {/* Buffering Stream Spinner Overlay - Pure Animated Multi-Ring (No Text) */}
       {isBuffering && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 backdrop-blur-[2px] z-20 pointer-events-none space-y-3 animate-fade-in">
-          <Loader2 className="w-12 h-12 text-brand-500 animate-spin drop-shadow-2xl" />
-          <span className="text-xs font-bold text-gray-200 uppercase tracking-widest animate-pulse">
-            Loading Telegram Stream...
-          </span>
+        <div className="absolute inset-0 flex items-center justify-center bg-black/75 backdrop-blur-sm z-20 pointer-events-none animate-fade-in">
+          <div className="relative flex items-center justify-center w-20 h-20">
+            {/* Outer glowing spinning ring */}
+            <div className="absolute inset-0 rounded-full border-4 border-t-brand-500 border-r-purple-500 border-b-cyan-400 border-l-transparent animate-spin drop-shadow-[0_0_15px_rgba(236,72,153,0.6)]" />
+            {/* Inner reverse rotating ring */}
+            <div className="absolute inset-2 rounded-full border-4 border-t-amber-400 border-r-pink-500 border-b-indigo-500 border-l-transparent animate-spin [animation-direction:reverse] [animation-duration:1.2s]" />
+            {/* Pulsing center core */}
+            <div className="w-5 h-5 bg-gradient-to-tr from-brand-500 to-cyan-400 rounded-full animate-pulse shadow-[0_0_20px_rgba(236,72,153,0.9)]" />
+          </div>
         </div>
       )}
 
@@ -445,14 +449,14 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         </div>
       )}
 
-      {/* Parallel Side Vertical Sliders (Left: Brightness, Right: Volume) */}
+      {/* MOBILE ONLY: Parallel Side Vertical Sliders (Left: Brightness, Right: Volume) */}
       <div
-        className={`absolute top-1/2 -translate-y-1/2 left-3 sm:left-6 right-3 sm:right-6 flex justify-between items-center pointer-events-none transition-opacity duration-300 z-30 ${
+        className={`absolute top-1/2 -translate-y-1/2 left-3 right-3 flex justify-between items-center pointer-events-none transition-opacity duration-300 z-30 sm:hidden ${
           showControls ? 'opacity-100' : 'opacity-0'
         }`}
       >
-        {/* Left Side: Brightness Slider */}
-        <div className="pointer-events-auto no-player-click flex flex-col items-center bg-black/70 backdrop-blur-md p-2.5 rounded-2xl border border-white/10 space-y-2.5 shadow-2xl">
+        {/* Left Side: Mobile Brightness Slider */}
+        <div className="pointer-events-auto no-player-click flex flex-col items-center bg-black/75 backdrop-blur-md p-2 rounded-2xl border border-white/10 space-y-2 shadow-2xl">
           <Sun className="w-4 h-4 text-amber-400" />
           <input
             type="range"
@@ -461,14 +465,14 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             step={0.05}
             value={brightness}
             onChange={(e) => setBrightness(parseFloat(e.target.value))}
-            className="w-1.5 h-20 sm:h-28 accent-amber-400 bg-gray-700/80 rounded-lg appearance-none cursor-pointer [writing-mode:vertical-lr] [direction:rtl]"
+            className="w-1.5 h-24 accent-amber-400 bg-gray-700/80 rounded-lg appearance-none cursor-pointer [writing-mode:vertical-lr] [direction:rtl]"
             title={`Brightness: ${Math.round(brightness * 100)}%`}
           />
-          <span className="text-[10px] font-mono font-bold text-amber-400">{Math.round(brightness * 100)}%</span>
+          <span className="text-[9px] font-mono font-bold text-amber-400">{Math.round(brightness * 100)}%</span>
         </div>
 
-        {/* Right Side: Volume Slider */}
-        <div className="pointer-events-auto no-player-click flex flex-col items-center bg-black/70 backdrop-blur-md p-2.5 rounded-2xl border border-white/10 space-y-2.5 shadow-2xl">
+        {/* Right Side: Mobile Volume Slider */}
+        <div className="pointer-events-auto no-player-click flex flex-col items-center bg-black/75 backdrop-blur-md p-2 rounded-2xl border border-white/10 space-y-2 shadow-2xl">
           <button onClick={toggleMute} className="hover:text-brand-500 transition-colors">
             {isMuted || volume === 0 ? (
               <VolumeX className="w-4 h-4 text-red-500" />
@@ -483,10 +487,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             step={0.05}
             value={isMuted ? 0 : volume}
             onChange={handleVolumeChange}
-            className="w-1.5 h-20 sm:h-28 accent-brand-500 bg-gray-700/80 rounded-lg appearance-none cursor-pointer [writing-mode:vertical-lr] [direction:rtl]"
+            className="w-1.5 h-24 accent-brand-500 bg-gray-700/80 rounded-lg appearance-none cursor-pointer [writing-mode:vertical-lr] [direction:rtl]"
             title={`Volume: ${Math.round((isMuted ? 0 : volume) * 100)}%`}
           />
-          <span className="text-[10px] font-mono font-bold text-brand-500">{Math.round((isMuted ? 0 : volume) * 100)}%</span>
+          <span className="text-[9px] font-mono font-bold text-brand-500">{Math.round((isMuted ? 0 : volume) * 100)}%</span>
         </div>
       </div>
 
@@ -514,7 +518,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
       {/* Player Controls Bar */}
       <div
-        className={`absolute bottom-0 left-0 right-0 p-4 sm:p-6 bg-gradient-to-t from-black/95 via-black/70 to-transparent transition-opacity duration-300 space-y-3 z-30 ${
+        className={`absolute bottom-0 left-0 right-0 p-3 sm:p-5 bg-gradient-to-t from-black/95 via-black/80 to-transparent transition-opacity duration-300 space-y-2.5 z-30 ${
           showControls ? 'opacity-100' : 'opacity-0'
         }`}
       >
@@ -558,8 +562,44 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             </div>
           </div>
 
-          {/* Right Tools */}
-          <div className="flex items-center space-x-3 sm:space-x-4 relative">
+          {/* Right Tools & DESKTOP Sliders */}
+          <div className="flex items-center space-x-2.5 sm:space-x-4 relative">
+            {/* DESKTOP ONLY: Brightness Control */}
+            <div className="hidden sm:flex items-center space-x-2 bg-black/60 backdrop-blur-md px-2.5 py-1 rounded-xl border border-white/10" title="Adjust Brightness">
+              <Sun className="w-4 h-4 text-amber-400 flex-none" />
+              <input
+                type="range"
+                min={0.2}
+                max={1.2}
+                step={0.05}
+                value={brightness}
+                onChange={(e) => setBrightness(parseFloat(e.target.value))}
+                className="w-16 lg:w-24 h-1.5 accent-amber-400 bg-gray-700/80 rounded-lg appearance-none cursor-pointer"
+              />
+              <span className="text-[10px] font-mono text-amber-400 w-7 text-right">{Math.round(brightness * 100)}%</span>
+            </div>
+
+            {/* DESKTOP ONLY: Volume Control */}
+            <div className="hidden sm:flex items-center space-x-2 bg-black/60 backdrop-blur-md px-2.5 py-1 rounded-xl border border-white/10" title="Adjust Volume">
+              <button onClick={toggleMute} className="hover:text-brand-500 transition-colors flex-none">
+                {isMuted || volume === 0 ? (
+                  <VolumeX className="w-4 h-4 text-red-500" />
+                ) : (
+                  <Volume2 className="w-4 h-4 text-brand-500" />
+                )}
+              </button>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                value={isMuted ? 0 : volume}
+                onChange={handleVolumeChange}
+                className="w-16 lg:w-24 h-1.5 accent-brand-500 bg-gray-700/80 rounded-lg appearance-none cursor-pointer"
+              />
+              <span className="text-[10px] font-mono text-brand-500 w-7 text-right">{Math.round((isMuted ? 0 : volume) * 100)}%</span>
+            </div>
+
             {/* Speed & Quality Settings Popup */}
             <button
               onClick={() => setShowSettings(!showSettings)}
