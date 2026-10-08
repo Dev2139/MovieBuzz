@@ -78,11 +78,25 @@ export const proxyTelegramFileStream = async (req: Request, res: Response) => {
     res.setHeader('Accept-Ranges', 'bytes');
     res.setHeader('Access-Control-Allow-Origin', '*');
 
+    // Reject placeholder/fake file IDs immediately — they cannot be streamed
+    // These are synthetic IDs created when real Telegram file_id was not available
+    if (
+      fileId.startsWith('tg_mtproto_') ||
+      fileId.startsWith('tg_media_') ||
+      fileId.startsWith('mock_') ||
+      fileId.length < 10
+    ) {
+      return res.status(404).json({
+        message: 'This media has no real stream source. Please re-upload the content with a valid Telegram file.',
+      });
+    }
+
     // Pull associated media doc for messageId + stored streamUrl fallback
     const mediaDoc = await Media.findOne({
       $or: [{ providerMediaId: fileId }, { _id: fileId }],
     }).select('providerMessageId streamUrl').lean().catch(() => null);
     const messageId = (mediaDoc as any)?.providerMessageId;
+
     const storedStreamUrl: string | undefined = (mediaDoc as any)?.streamUrl;
 
     // --- TIER 1: MTProto chunk streaming ---
