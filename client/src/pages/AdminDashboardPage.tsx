@@ -95,6 +95,7 @@ export const AdminDashboardPage: React.FC = () => {
   // Edit Content State & Mutation
   const [editingItem, setEditingItem] = useState<any | null>(null);
   const [editTitle, setEditTitle] = useState('');
+  const [editType, setEditType] = useState<'movie' | 'series'>('movie');
   const [editDescription, setEditDescription] = useState('');
   const [editPosterUrl, setEditPosterUrl] = useState('');
   const [editBackdropUrl, setEditBackdropUrl] = useState('');
@@ -104,7 +105,7 @@ export const AdminDashboardPage: React.FC = () => {
   const updateMutation = useMutation({
     mutationFn: updateContentApi,
     onSuccess: (data) => {
-      alert(`Updated successfully! "${data.content?.title || 'Item'}" is now live across the site.`);
+      alert(`Updated successfully! "${data.content?.title || 'Item'}" (${data.content?.type || 'media'}) is now live across the site.`);
       setEditingItem(null);
       queryClient.invalidateQueries({ queryKey: ['admin-stats'] });
       queryClient.invalidateQueries({ queryKey: ['admin-catalog'] });
@@ -116,6 +117,7 @@ export const AdminDashboardPage: React.FC = () => {
   const handleEditOpen = (item: any) => {
     setEditingItem(item);
     setEditTitle(item.title || '');
+    setEditType(item.type === 'series' ? 'series' : 'movie');
     setEditDescription(item.description || '');
     setEditPosterUrl(item.posterUrl || '');
     setEditBackdropUrl(item.backdropUrl || '');
@@ -130,6 +132,7 @@ export const AdminDashboardPage: React.FC = () => {
       id: editingItem._id,
       data: {
         title: editTitle,
+        type: editType,
         description: editDescription,
         posterUrl: editPosterUrl,
         backdropUrl: editBackdropUrl,
@@ -510,6 +513,36 @@ export const AdminDashboardPage: React.FC = () => {
                   onChange={(e) => setEditTitle(e.target.value)}
                   className="w-full bg-dark-surface border border-dark-border rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-brand-500"
                 />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-400 uppercase mb-1">Content Type</label>
+                <div className="flex space-x-3">
+                  <button
+                    type="button"
+                    onClick={() => setEditType('movie')}
+                    className={`flex-1 py-2 rounded-xl text-xs font-bold border transition-colors flex items-center justify-center space-x-1.5 ${
+                      editType === 'movie'
+                        ? 'bg-brand-500 text-white border-brand-500 shadow-md'
+                        : 'bg-dark-surface border-dark-border text-gray-400 hover:text-white'
+                    }`}
+                  >
+                    <Film className="w-3.5 h-3.5" />
+                    <span>Movie</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditType('series')}
+                    className={`flex-1 py-2 rounded-xl text-xs font-bold border transition-colors flex items-center justify-center space-x-1.5 ${
+                      editType === 'series'
+                        ? 'bg-brand-500 text-white border-brand-500 shadow-md'
+                        : 'bg-dark-surface border-dark-border text-gray-400 hover:text-white'
+                    }`}
+                  >
+                    <Tv className="w-3.5 h-3.5" />
+                    <span>TV Series</span>
+                  </button>
+                </div>
               </div>
 
               <div>

@@ -91,17 +91,59 @@ export const createMovie = async (req: Request, res: Response) => {
 export const updateContent = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { title, description, posterUrl, backdropUrl, genres, languages, releaseYear, rating, director } = req.body;
+    const { title, type, description, posterUrl, backdropUrl, genres, languages, releaseYear, rating, director } = req.body;
 
     const content = await Content.findById(id);
     if (!content) {
       return res.status(404).json({ message: 'Content not found' });
     }
 
+    // Update Title & Slug
     if (title && title.trim() !== content.title) {
       content.title = title.trim();
       const slugBase = title.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
       content.slug = `${slugBase}-${releaseYear || content.releaseYear || 2026}`;
+    }
+
+    // Handle Type Conversion (Movie <-> Series)
+    if (type && (type === 'movie' || type === 'series') && type !== content.type) {
+      const oldType = content.type;
+      content.type = type;
+
+      if (oldType === 'movie' && type === 'series') {
+        // Converting Movie -> Series: Ensure Season 1 and Episode 1 exist, link existing media
+        let season = await Season.findOne({ seriesId: content._id, seasonNumber: 1 });
+        if (!season) {
+          season = await Season.create({
+            seriesId: content._id,
+            seasonNumber: 1,
+            title: 'Season 1',
+            releaseYear: content.releaseYear || 2026,
+          });
+        }
+
+        let ep1 = await Episode.findOne({ seasonId: season._id, episodeNumber: 1 });
+        if (!ep1) {
+          ep1 = await Episode.create({
+            seriesId: content._id,
+            seasonId: season._id,
+            episodeNumber: 1,
+            title: 'Episode 1',
+            description: content.description,
+            thumbnailUrl: content.posterUrl,
+            duration: 2700,
+          });
+        }
+
+        await Media.updateMany({ contentId: content._id }, { episodeId: ep1._id });
+      } else if (oldType === 'series' && type === 'movie') {
+        // Converting Series -> Movie: Re-attach episode media to movie contentId
+        const episodes = await Episode.find({ seriesId: content._id });
+        const epIds = episodes.map((e) => e._id);
+        if (epIds.length > 0) {
+          await Media.updateMany({ episodeId: { $in: epIds } }, { contentId: content._id });
+        }
+      }
     }
 
     if (description !== undefined) content.description = description;
