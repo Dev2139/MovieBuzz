@@ -1,0 +1,20 @@
+{
+  "name": "MovieBuzz - Stream Movies & TV Series",
+  "short_name": "MovieBuzz",
+  "description": "Watch movies and TV series with high quality streaming and fast downloads.",
+  "start_url": "/",
+  "id": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0B0C10",
+  "theme_color": "#E50914",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["entertainment", "movies", "video"]
+}
