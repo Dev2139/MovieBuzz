@@ -181,6 +181,71 @@ export const syncTelegramPosts = async (req: Request, res: Response) => {
   }
 };
 
+/**
+ * Force-resync: resets the lastUpdateId so getUpdates starts from the beginning again.
+ * Use this when a post was sent before the server polled and was missed.
+ */
+export const forceResyncTelegramPosts = async (req: Request, res: Response) => {
+  try {
+    const { storageService } = await import('../services/telegram/telegramService');
+    const client = storageService.getTelegramClient();
+    if (!client) {
+      return res.json({ message: 'Telegram client not configured', importedCount: 0 });
+    }
+
+    // Reset the lastUpdateId to 0 so ALL unacknowledged updates are refetched
+    (client as any).lastUpdateId = 0;
+    const count = await client.syncChannelPosts();
+    return res.json({ message: 'Force resync completed', importedCount: count });
+  } catch (err: any) {
+    return res.status(500).json({ message: 'Force resync error', error: err.message });
+  }
+};
+
+/**
+ * Diagnostic: Shows what Telegram Bot API currently has in the update queue WITHOUT consuming them.
+ * Use this to debug why posts are not being picked up.
+ */
+export const diagnosticTelegramUpdates = async (req: Request, res: Response) => {
+  try {
+    const axios = (await import('axios')).default;
+    const botToken = process.env.TELEGRAM_BOT_TOKEN;
+    if (!botToken) {
+      return res.status(400).json({ message: 'TELEGRAM_BOT_TOKEN not set' });
+    }
+
+    // Use negative offset (-100) to peek at last updates without confirming them
+    const peekUrl = `https://api.telegram.org/bot${botToken}/getUpdates?offset=-100&limit=10`;
+    const peekRes = await axios.get(peekUrl, { timeout: 10000 });
+
+    const updates = peekRes.data?.result || [];
+    const summary = updates.map((u: any) => {
+      const post = u.channel_post || u.message;
+      return {
+        update_id: u.update_id,
+        type: u.channel_post ? 'channel_post' : u.message ? 'message' : 'other',
+        caption: post?.caption || post?.text || '(no text)',
+        has_video: Boolean(post?.video),
+        has_document: Boolean(post?.document),
+        file_id: post?.video?.file_id || post?.document?.file_id || null,
+        chat_id: post?.chat?.id,
+        date: post?.date ? new Date(post.date * 1000).toISOString() : null,
+      };
+    });
+
+    return res.json({
+      total: updates.length,
+      note: updates.length === 0
+        ? 'No updates in queue. If you sent a post before the last sync, it was already consumed. Please resend the video to the bot.'
+        : 'These updates are in queue but not yet processed.',
+      updates: summary,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ message: 'Diagnostic error', error: err.message });
+  }
+};
+
+
 export const handleTelegramWebhook = async (req: Request, res: Response) => {
   try {
     const { storageService } = await import('../services/telegram/telegramService');
