@@ -51,14 +51,27 @@ export class TelegramUserMTProtoClient {
 
       let count = 0;
       for (const msg of messages) {
-        if (msg && msg.message && msg.message.length > 5) {
-          await this.importer.autoPublishTelegramPost({
-            channelId: this.channelId,
-            messageId: String(msg.id),
-            mediaId: `tg_mtproto_${msg.id}`,
-            caption: msg.message,
-          });
-          count++;
+        if (msg && (msg.message || msg.media)) {
+          let videoFileId = '';
+          if (msg.media && (msg.media as any).document) {
+            videoFileId = (msg.media as any).document.id.toString();
+          }
+
+          let caption = msg.message || '';
+          if (!caption && msg.media && (msg.media as any).document?.attributes) {
+            const fileAttr = (msg.media as any).document.attributes.find((a: any) => a.fileName);
+            if (fileAttr) caption = fileAttr.fileName;
+          }
+
+          if (caption && caption.length >= 2) {
+            const published = await this.importer.autoPublishTelegramPost({
+              channelId: this.channelId,
+              messageId: String(msg.id),
+              mediaId: videoFileId || `tg_mtproto_${msg.id}`,
+              caption,
+            });
+            if (published) count++;
+          }
         }
       }
 

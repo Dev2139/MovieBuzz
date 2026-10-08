@@ -78,29 +78,42 @@ export const proxyTelegramFileStream = async (req: Request, res: Response) => {
     res.setHeader('Accept-Ranges', 'bytes');
     res.setHeader('Access-Control-Allow-Origin', '*');
 
-    // Reject placeholder/fake file IDs immediately — they cannot be streamed
-    // These are synthetic IDs created when real Telegram file_id was not available
-    if (
-      fileId.startsWith('tg_mtproto_') ||
-      fileId.startsWith('tg_media_') ||
-      fileId.startsWith('mock_') ||
-      fileId.length < 10
-    ) {
+    let activeFileId = fileId;
+    let messageId: string | undefined = undefined;
+
+    // Pull associated media doc for real document ID or messageId + stored streamUrl fallback
+    const mediaDoc = await Media.findOne({
+      $or: [
+        { providerMediaId: fileId },
+        { _id: fileId },
+        { streamUrl: { $regex: encodeURIComponent(fileId) } },
+      ],
+    }).select('providerMediaId providerMessageId streamUrl').lean().catch(() => null);
+
+    if (mediaDoc) {
+      messageId = (mediaDoc as any)?.providerMessageId;
+      const docMediaId = (mediaDoc as any)?.providerMediaId;
+      if (docMediaId && !docMediaId.startsWith('tg_') && !docMediaId.startsWith('mock_')) {
+        activeFileId = docMediaId;
+      }
+    }
+
+    if (!messageId) {
+      const match = fileId.match(/tg_(?:mtproto|media)_(\d+)/);
+      if (match) messageId = match[1];
+    }
+
+    // Only reject if completely synthetic with no telegram message backing
+    if (fileId.startsWith('mock_') || (!messageId && !mediaDoc && fileId.length < 10)) {
       return res.status(404).json({
         message: 'This media has no real stream source. Please re-upload the content with a valid Telegram file.',
       });
     }
 
-    // Pull associated media doc for messageId + stored streamUrl fallback
-    const mediaDoc = await Media.findOne({
-      $or: [{ providerMediaId: fileId }, { _id: fileId }],
-    }).select('providerMessageId streamUrl').lean().catch(() => null);
-    const messageId = (mediaDoc as any)?.providerMessageId;
-
     const storedStreamUrl: string | undefined = (mediaDoc as any)?.streamUrl;
 
     // --- TIER 1: MTProto chunk streaming ---
-    const totalSize = (await telegramStreamService.getFileSize(fileId, messageId)) || 1500000000;
+    const totalSize = (await telegramStreamService.getFileSize(activeFileId, messageId)) || 1500000000;
 
     let start = 0;
     let reqSize = 512 * 1024;
@@ -122,7 +135,7 @@ export const proxyTelegramFileStream = async (req: Request, res: Response) => {
     const chunkSize = 512 * 1024;
     const alignedOffset = Math.floor(start / chunkSize) * chunkSize;
 
-    const rawBuffer = await telegramStreamService.getChunk(fileId, alignedOffset, chunkSize, messageId);
+    const rawBuffer = await telegramStreamService.getChunk(activeFileId, alignedOffset, chunkSize, messageId);
 
     if (rawBuffer && rawBuffer.length > 0) {
       // MTProto succeeded — slice to requested range and return
@@ -215,20 +228,41 @@ export const downloadTelegramFile = async (req: Request, res: Response) => {
     const rawFileId = req.params.fileId;
     const fileId = decodeURIComponent(rawFileId);
 
-    const mediaDoc = await Media.findOne({ providerMediaId: fileId }).select('providerMessageId').lean().catch(() => null);
-    const messageId = mediaDoc?.providerMessageId;
+    let activeFileId = fileId;
+    let messageId: string | undefined = undefined;
 
-    const totalSize = (await telegramStreamService.getFileSize(fileId)) || 50 * 1024 * 1024;
+    const mediaDoc = await Media.findOne({
+      $or: [
+        { providerMediaId: fileId },
+        { _id: fileId },
+        { downloadUrl: { $regex: encodeURIComponent(fileId) } },
+      ],
+    }).select('providerMediaId providerMessageId').lean().catch(() => null);
+
+    if (mediaDoc) {
+      messageId = (mediaDoc as any)?.providerMessageId;
+      const docMediaId = (mediaDoc as any)?.providerMediaId;
+      if (docMediaId && !docMediaId.startsWith('tg_') && !docMediaId.startsWith('mock_')) {
+        activeFileId = docMediaId;
+      }
+    }
+
+    if (!messageId) {
+      const match = fileId.match(/tg_(?:mtproto|media)_(\d+)/);
+      if (match) messageId = match[1];
+    }
+
+    const totalSize = (await telegramStreamService.getFileSize(activeFileId, messageId)) || 50 * 1024 * 1024;
     const chunkSize = 512 * 1024;
 
-    res.setHeader('Content-Disposition', `attachment; filename="CineStream_${fileId.slice(-8)}.mp4"`);
+    res.setHeader('Content-Disposition', `attachment; filename="CineStream_${activeFileId.slice(-8)}.mp4"`);
     res.setHeader('Content-Type', 'video/mp4');
     if (totalSize > 0) {
       res.setHeader('Content-Length', totalSize);
     }
 
     for (let offset = 0; offset < totalSize; offset += chunkSize) {
-      const chunk = await telegramStreamService.getChunk(fileId, offset, chunkSize, messageId);
+      const chunk = await telegramStreamService.getChunk(activeFileId, offset, chunkSize, messageId);
       if (!chunk || chunk.length === 0) break;
       res.write(chunk);
     }
