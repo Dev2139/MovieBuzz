@@ -10,10 +10,14 @@ import { TelegramImport } from '../models/TelegramImport';
 
 dotenv.config();
 
+const baseUrl = process.env.VERCEL_URL 
+  ? `https://${process.env.VERCEL_URL}` 
+  : (process.env.BACKEND_URL || 'http://localhost:5000');
+
 const sampleStreams = {
-  mp4_1080p: 'https://vjs.zencdn.net/v/oceans.mp4',
-  mp4_720p: 'https://vjs.zencdn.net/v/oceans.mp4',
-  mp4_480p: 'https://vjs.zencdn.net/v/oceans.mp4',
+  mp4_1080p: `${baseUrl}/api/media/proxy-file/5909161815681539797`,
+  mp4_720p: `${baseUrl}/api/media/proxy-file/5909161815681539296`,
+  mp4_480p: `${baseUrl}/api/media/proxy-file/5909161815681539296`,
 };
 
 async function seedDatabase() {
