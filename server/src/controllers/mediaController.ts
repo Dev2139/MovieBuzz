@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import mongoose from 'mongoose';
 import axios from 'axios';
 import { storageService } from '../services/telegram/telegramService';
 import { telegramStreamService } from '../services/telegram/telegramStreamService';
@@ -81,14 +82,19 @@ export const proxyTelegramFileStream = async (req: Request, res: Response) => {
     let activeFileId = fileId;
     let messageId: string | undefined = undefined;
 
-    // Pull associated media doc for real document ID or messageId + stored streamUrl fallback
-    const mediaDoc = await Media.findOne({
-      $or: [
-        { providerMediaId: fileId },
-        { _id: fileId },
-        { streamUrl: { $regex: encodeURIComponent(fileId) } },
-      ],
-    }).select('providerMediaId providerMessageId streamUrl').lean().catch(() => null);
+    // Pull associated media doc safely without Mongoose CastError on non-ObjectId fileId
+    const orConditions: any[] = [
+      { providerMediaId: fileId },
+      { streamUrl: { $regex: encodeURIComponent(fileId) } },
+    ];
+    if (mongoose.Types.ObjectId.isValid(fileId)) {
+      orConditions.push({ _id: fileId });
+    }
+
+    const mediaDoc = await Media.findOne({ $or: orConditions })
+      .select('providerMediaId providerMessageId streamUrl mimeType fileSize')
+      .lean()
+      .catch(() => null);
 
     if (mediaDoc) {
       messageId = (mediaDoc as any)?.providerMessageId;
@@ -149,9 +155,15 @@ export const proxyTelegramFileStream = async (req: Request, res: Response) => {
       }
 
       const end = Math.min(start + buffer.length - 1, totalSize - 1);
-      let contentType = 'video/mp4';
-      if (rawBuffer[0] === 0x1a && rawBuffer[1] === 0x45 && rawBuffer[2] === 0xdf && rawBuffer[3] === 0xa3) {
-        contentType = 'video/webm';
+
+      // Consistent browser-compatible MIME type across all byte ranges
+      let contentType = (mediaDoc as any)?.mimeType || 'video/mp4';
+      if (
+        contentType === 'video/x-matroska' ||
+        contentType === 'video/webm' ||
+        contentType === 'application/octet-stream'
+      ) {
+        contentType = 'video/mp4';
       }
 
       res.writeHead(range ? 206 : 200, {
@@ -231,13 +243,18 @@ export const downloadTelegramFile = async (req: Request, res: Response) => {
     let activeFileId = fileId;
     let messageId: string | undefined = undefined;
 
-    const mediaDoc = await Media.findOne({
-      $or: [
-        { providerMediaId: fileId },
-        { _id: fileId },
-        { downloadUrl: { $regex: encodeURIComponent(fileId) } },
-      ],
-    }).select('providerMediaId providerMessageId').lean().catch(() => null);
+    const orConditions: any[] = [
+      { providerMediaId: fileId },
+      { downloadUrl: { $regex: encodeURIComponent(fileId) } },
+    ];
+    if (mongoose.Types.ObjectId.isValid(fileId)) {
+      orConditions.push({ _id: fileId });
+    }
+
+    const mediaDoc = await Media.findOne({ $or: orConditions })
+      .select('providerMediaId providerMessageId mimeType fileSize')
+      .lean()
+      .catch(() => null);
 
     if (mediaDoc) {
       messageId = (mediaDoc as any)?.providerMessageId;
