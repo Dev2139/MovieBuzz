@@ -1,6 +1,8 @@
 import { Request, Response } from 'express';
 import mongoose from 'mongoose';
 import axios from 'axios';
+import { spawn } from 'child_process';
+import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
 import { storageService } from '../services/telegram/telegramService';
 import { telegramStreamService } from '../services/telegram/telegramStreamService';
 import { Media } from '../models/Media';
@@ -73,6 +75,12 @@ export const proxyTelegramFileStream = async (req: Request, res: Response) => {
   try {
     const rawFileId = req.params.fileId;
     const fileId = decodeURIComponent(rawFileId);
+
+    // If AAC compatibility / transcoding is explicitly requested, route to FFmpeg audio transcoder
+    if (req.query.transcode === 'true' || req.query.compat === 'true' || req.query.aac === 'true') {
+      return transcodeTelegramFileStream(req, res);
+    }
+
     const range = req.headers.range;
 
     // Always advertise Accept-Ranges so browser knows we support seeking
@@ -287,6 +295,71 @@ export const downloadTelegramFile = async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('downloadTelegramFile error:', error.message);
     return res.status(500).json({ message: 'Error downloading media' });
+  }
+};
+
+/**
+ * On-the-fly FFmpeg Audio Transcoding stream.
+ * Copies the video stream directly (0% CPU, instant start) and converts
+ * unsupported Dolby AC-3, E-AC-3, and DTS audio into universal AAC stereo (MP4).
+ */
+export const transcodeTelegramFileStream = async (req: Request, res: Response) => {
+  try {
+    const rawFileId = req.params.fileId;
+    const fileId = decodeURIComponent(rawFileId);
+    const startSec = Math.max(0, parseFloat((req.query.t as string) || (req.query.ss as string) || '0') || 0);
+
+    const host = req.get('host') || 'localhost:5000';
+    const protocol = (req.headers['x-forwarded-proto'] as string) || req.protocol || 'http';
+    const port = process.env.PORT || 5000;
+
+    // Use direct loopback if localhost, otherwise public host URL
+    const proxyUrl = host.includes('localhost') || host.includes('127.0.0.1')
+      ? `http://127.0.0.1:${port}/api/media/proxy-file/${encodeURIComponent(fileId)}`
+      : `${protocol}://${host}/api/media/proxy-file/${encodeURIComponent(fileId)}`;
+
+    res.setHeader('Content-Type', 'video/mp4');
+    res.setHeader('Accept-Ranges', 'none');
+    res.setHeader('Cache-Control', 'no-cache, no-store');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+
+    const ffmpegPath = process.env.FFMPEG_PATH || (ffmpegInstaller as any)?.path || 'ffmpeg';
+
+    const ffmpegArgs = [
+      ...(startSec > 0 ? ['-ss', String(startSec)] : []),
+      '-i', proxyUrl,
+      '-c:v', 'copy',
+      '-c:a', 'aac',
+      '-b:a', '192k',
+      '-ac', '2',
+      '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
+      '-f', 'mp4',
+      'pipe:1',
+    ];
+
+    const ffmpeg = spawn(ffmpegPath, ffmpegArgs);
+
+    ffmpeg.stdout.pipe(res);
+
+    ffmpeg.stderr.on('data', () => {});
+
+    ffmpeg.on('error', (err) => {
+      console.warn('[transcodeTelegramFileStream] FFmpeg process warning:', err.message);
+      if (!res.headersSent) {
+        res.status(500).json({ message: 'Transcoding stream error' });
+      }
+    });
+
+    req.on('close', () => {
+      try {
+        ffmpeg.kill('SIGKILL');
+      } catch {}
+    });
+  } catch (error: any) {
+    console.error('transcodeTelegramFileStream error:', error);
+    if (!res.headersSent) {
+      res.status(500).json({ message: 'Transcoding initialization error' });
+    }
   }
 };
 

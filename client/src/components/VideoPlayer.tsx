@@ -111,6 +111,31 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [audioTracksList, setAudioTracksList] = useState<Array<{ index: number; label: string; language: string }>>([]);
   const [selectedAudioTrack, setSelectedAudioTrack] = useState<number>(0);
   const [showAudioHelp, setShowAudioHelp] = useState<boolean>(false);
+  const [isTranscodeMode, setIsTranscodeMode] = useState<boolean>(false);
+
+  const getEffectiveStreamUrl = (baseStreamUrl: string, transcode: boolean) => {
+    if (!baseStreamUrl) return '';
+    if (!transcode) return baseStreamUrl;
+    if (baseStreamUrl.includes('/proxy-file/')) {
+      return baseStreamUrl.replace('/proxy-file/', '/transcode-stream/');
+    }
+    const separator = baseStreamUrl.includes('?') ? '&' : '?';
+    return `${baseStreamUrl}${separator}transcode=true`;
+  };
+
+  const handleToggleTranscodeMode = () => {
+    const next = !isTranscodeMode;
+    setIsTranscodeMode(next);
+    const currentPos = videoRef.current?.currentTime || 0;
+    setIsBuffering(true);
+    setTimeout(() => {
+      if (videoRef.current) {
+        videoRef.current.load();
+        videoRef.current.currentTime = currentPos;
+        videoRef.current.play().catch(() => {});
+      }
+    }, 150);
+  };
 
   const audioContextRef = useRef<AudioContext | null>(null);
   const gainNodeRef = useRef<GainNode | null>(null);
@@ -610,7 +635,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       videoRef.current.load();
       setIsBuffering(true);
     }
-  }, [streamUrl]);
+  }, [streamUrl, isTranscodeMode]);
 
   return (
     <div
@@ -624,7 +649,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     >
       <video
         ref={videoRef}
-        src={streamUrl}
+        src={getEffectiveStreamUrl(streamUrl, isTranscodeMode)}
         onTimeUpdate={handleTimeUpdate}
         onLoadedMetadata={handleLoadedMetadata}
         onLoadStart={() => setIsBuffering(true)}
@@ -1002,6 +1027,33 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                   </div>
                 </div>
 
+                {/* Audio Compatibility Section (Fix EAC3/AC3 sound) */}
+                <div className="border-t border-dark-border pt-2">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <h4 className="font-bold text-gray-400 uppercase tracking-wider">Audio Format</h4>
+                    <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${isTranscodeMode ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-gray-700/50 text-gray-400'}`}>
+                      {isTranscodeMode ? 'AAC Fixed' : 'Original'}
+                    </span>
+                  </div>
+                  <button
+                    onClick={handleToggleTranscodeMode}
+                    className={`w-full py-2 px-2.5 rounded-lg font-medium text-left flex items-center justify-between transition-colors ${
+                      isTranscodeMode
+                        ? 'bg-emerald-600 text-white'
+                        : 'bg-dark-surface hover:bg-dark-hover text-gray-200 border border-white/5'
+                    }`}
+                  >
+                    <div className="flex flex-col">
+                      <span className="font-semibold text-xs">
+                        {isTranscodeMode ? '✓ AAC Audio Enabled' : '🔊 Fix Audio (Convert to AAC)'}
+                      </span>
+                      <span className="text-[10px] opacity-80">
+                        {isTranscodeMode ? 'Universal browser sound active' : 'Fixes silence on Dolby EAC3/AC3 films'}
+                      </span>
+                    </div>
+                  </button>
+                </div>
+
                 {/* Audio Enhancement Section */}
                 <div className="border-t border-dark-border pt-2">
                   <div className="flex items-center justify-between mb-1.5">
@@ -1123,33 +1175,46 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             </div>
 
             <div className="space-y-2.5 text-xs text-gray-300">
+              {/* 1-Click AAC Audio Fix */}
+              <div className="p-3 bg-brand-500/10 border border-brand-500/30 rounded-xl space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-white text-xs">Instant 1-Click Fix</span>
+                  <span className="text-[10px] text-brand-400 font-semibold uppercase">Recommended</span>
+                </div>
+                <p className="text-gray-300 text-[11px] leading-relaxed">
+                  Convert Dolby E-AC-3/AC-3 to universal AAC on the fly so your browser plays full sound immediately.
+                </p>
+                <button
+                  onClick={() => {
+                    if (!isTranscodeMode) handleToggleTranscodeMode();
+                    setShowAudioHelp(false);
+                  }}
+                  className="w-full py-2 px-3 bg-brand-500 hover:bg-brand-600 text-white rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-md shadow-brand-500/25"
+                >
+                  <span>🔊 {isTranscodeMode ? '✓ AAC Audio Active' : 'Enable AAC Audio (Fix Sound)'}</span>
+                </button>
+              </div>
+
               <div className="p-2.5 bg-dark-surface rounded-xl border border-white/5 space-y-1">
-                <span className="font-semibold text-white text-xs block">1. Dolby AC-3 / DTS Audio</span>
+                <span className="font-semibold text-white text-xs block">Why this happens</span>
                 <p className="text-gray-400 text-[11px] leading-relaxed">
-                  Many cinema files use multi-channel <strong>Dolby Digital (AC3/E-AC3)</strong> or <strong>DTS</strong> audio. Most web browsers do not license Dolby decoders, causing the browser to mute the audio.
+                  Movies like <em>Shu Thayu</em> are encoded in <strong>Dolby Digital Plus (E-AC-3)</strong>. Web browsers (Chrome, Edge, Firefox) do not license Dolby decoders, muting the sound.
                 </p>
               </div>
 
               <div className="p-2.5 bg-dark-surface rounded-xl border border-white/5 space-y-1">
-                <span className="font-semibold text-white text-xs block">2. Solution: Audio Boost</span>
+                <span className="font-semibold text-white text-xs block">Alternative: Play in VLC</span>
                 <p className="text-gray-400 text-[11px] leading-relaxed">
-                  Open <strong>Settings ⚙️</strong> and try <strong>Audio Boost 150% or 200%</strong> to amplify center speech dialogue.
-                </p>
-              </div>
-
-              <div className="p-2.5 bg-dark-surface rounded-xl border border-white/5 space-y-1">
-                <span className="font-semibold text-white text-xs block">3. Play in VLC Media Player</span>
-                <p className="text-gray-400 text-[11px] leading-relaxed">
-                  Desktop players like <strong>VLC Media Player</strong> natively decode all Dolby Atmos, AC3, and DTS tracks with 100% sound.
+                  Desktop players like <strong>VLC Media Player</strong> natively decode Dolby Atmos, AC3, and DTS tracks.
                 </p>
                 {currentDownloadUrl && (
                   <a
                     href={currentDownloadUrl}
                     download
-                    className="mt-2 inline-flex items-center space-x-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-medium text-[11px] transition-colors"
+                    className="mt-1.5 inline-flex items-center space-x-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-medium text-[11px] transition-colors"
                   >
                     <Download className="w-3.5 h-3.5" />
-                    <span>Download to Play in VLC</span>
+                    <span>Download Movie for VLC</span>
                   </a>
                 )}
               </div>
@@ -1158,9 +1223,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             <div className="pt-1 flex justify-end">
               <button
                 onClick={() => setShowAudioHelp(false)}
-                className="px-3.5 py-1.5 bg-brand-500 hover:bg-brand-600 text-white rounded-xl text-xs font-semibold"
+                className="px-3.5 py-1.5 bg-dark-surface hover:bg-dark-hover text-white rounded-xl text-xs font-semibold"
               >
-                Understood
+                Close
               </button>
             </div>
           </div>
