@@ -14,6 +14,8 @@ import {
   Sun,
   Loader2,
   Film,
+  Download,
+  HelpCircle,
 } from 'lucide-react';
 import { Media } from '../types';
 import { useAuth } from '../context/AuthContext';
@@ -61,12 +63,31 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     return rawUrl;
   };
 
+  const resolveDownloadUrl = (rawUrl?: string) => {
+    if (!rawUrl) return '';
+    const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+    const backendOrigin = apiBase.replace(/\/api\/?$/, '');
+
+    if (rawUrl.startsWith('http://localhost:5000')) {
+      return rawUrl.replace('http://localhost:5000', backendOrigin);
+    }
+    if (rawUrl.startsWith('/api/')) {
+      return `${backendOrigin}${rawUrl}`;
+    }
+    return rawUrl;
+  };
+
   const [selectedQuality, setSelectedQuality] = useState<string>(
     mediaList && mediaList.length > 0 ? mediaList[0].quality : '1080p'
   );
   const [streamUrl, setStreamUrl] = useState<string>(
     resolveStreamUrl(mediaList && mediaList.length > 0 ? mediaList[0].streamUrl : undefined)
   );
+
+  const activeMedia = mediaList && mediaList.length > 0
+    ? (mediaList.find((m) => m.quality === selectedQuality) || mediaList[0])
+    : null;
+  const currentDownloadUrl = resolveDownloadUrl(activeMedia?.downloadUrl);
 
   useEffect(() => {
     if (mediaList && mediaList.length > 0) {
@@ -83,9 +104,72 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [duration, setDuration] = useState<number>(0);
   const [streamError, setStreamError] = useState<string | null>(null);
 
-  // Audio Volume & Mute States
+  // Audio Volume, Mute, Boost & Track States
   const [volume, setVolume] = useState<number>(1);
   const [isMuted, setIsMuted] = useState<boolean>(false);
+  const [audioBoost, setAudioBoost] = useState<number>(1); // 1 = 100%, 1.5 = 150%, 2 = 200%
+  const [audioTracksList, setAudioTracksList] = useState<Array<{ index: number; label: string; language: string }>>([]);
+  const [selectedAudioTrack, setSelectedAudioTrack] = useState<number>(0);
+  const [showAudioHelp, setShowAudioHelp] = useState<boolean>(false);
+
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const gainNodeRef = useRef<GainNode | null>(null);
+
+  const handleAudioBoostChange = (boostMultiplier: number) => {
+    try {
+      if (!audioContextRef.current && videoRef.current) {
+        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+        if (AudioCtx) {
+          const ctx = new AudioCtx();
+          const source = ctx.createMediaElementSource(videoRef.current);
+          const compressor = ctx.createDynamicsCompressor();
+          const gain = ctx.createGain();
+          gain.gain.value = boostMultiplier;
+
+          source.connect(compressor);
+          compressor.connect(gain);
+          gain.connect(ctx.destination);
+
+          audioContextRef.current = ctx;
+          gainNodeRef.current = gain;
+        }
+      } else if (gainNodeRef.current) {
+        gainNodeRef.current.gain.value = boostMultiplier;
+      }
+      if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+        audioContextRef.current.resume();
+      }
+      setAudioBoost(boostMultiplier);
+    } catch (err) {
+      console.warn('Audio boost setup notice:', err);
+    }
+  };
+
+  const checkAudioTracks = () => {
+    const vid = videoRef.current as any;
+    if (vid && vid.audioTracks && vid.audioTracks.length > 1) {
+      const tracks = [];
+      for (let i = 0; i < vid.audioTracks.length; i++) {
+        const t = vid.audioTracks[i];
+        tracks.push({
+          index: i,
+          label: t.label || `Audio Track ${i + 1}${t.language ? ` (${t.language})` : ''}`,
+          language: t.language || '',
+        });
+      }
+      setAudioTracksList(tracks);
+    }
+  };
+
+  const handleSelectAudioTrack = (trackIndex: number) => {
+    const vid = videoRef.current as any;
+    if (vid && vid.audioTracks) {
+      for (let i = 0; i < vid.audioTracks.length; i++) {
+        vid.audioTracks[i].enabled = i === trackIndex;
+      }
+      setSelectedAudioTrack(trackIndex);
+    }
+  };
 
   // Brightness Control (0.2 to 1.2)
   const [brightness, setBrightness] = useState<number>(1);
@@ -225,6 +309,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         setCurrentTime(initialPosition);
         hasAppliedInitialPosRef.current = true;
       }
+      checkAudioTracks();
     }
     setIsBuffering(false);
   };
@@ -234,6 +319,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       if (isPlaying) {
         videoRef.current.pause();
       } else {
+        if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+          audioContextRef.current.resume();
+        }
         videoRef.current.play().catch(() => {});
       }
       setIsPlaying(!isPlaying);
@@ -548,12 +636,16 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         onPlay={() => {
           setIsPlaying(true);
           setIsBuffering(false);
+          if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+            audioContextRef.current.resume().catch(() => {});
+          }
           if (videoRef.current) {
             videoRef.current.volume = volume;
             videoRef.current.muted = isMuted;
           }
         }}
         onPause={() => setIsPlaying(false)}
+        crossOrigin="anonymous"
         onError={(e) => {
           const vid = e.currentTarget;
           const errCode = vid.error?.code;
@@ -561,7 +653,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           let userMsg = 'Video failed to load.';
           if (errCode === 2) userMsg = 'Network error — stream could not be fetched.';
           else if (errCode === 3) userMsg = 'Decoding error — unsupported video format.';
-          else if (errCode === 4) userMsg = 'Source not supported — the stream URL is invalid or unavailable.';
+          else if (errCode === 4) userMsg = 'Source not supported — the stream format or codec is not supported by your browser.';
           else if (errMsg) userMsg = errMsg;
           setStreamError(userMsg);
           setIsBuffering(false);
@@ -578,27 +670,61 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
       {/* Stream Error Overlay */}
       {streamError && !isBuffering && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/90 backdrop-blur-sm z-20 pointer-events-auto animate-fade-in px-6 text-center">
-          <div className="w-16 h-16 rounded-full bg-red-500/20 border border-red-500/40 flex items-center justify-center mb-4">
-            <svg className="w-8 h-8 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/95 backdrop-blur-md z-20 pointer-events-auto animate-fade-in px-6 text-center">
+          <div className="w-14 h-14 rounded-full bg-red-500/20 border border-red-500/40 flex items-center justify-center mb-3">
+            <svg className="w-7 h-7 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.293 4.293a1 1 0 011.414 0L21 13.586V19a2 2 0 01-2 2H5a2 2 0 01-2-2v-5.414L10.293 4.293z" />
             </svg>
           </div>
-          <h3 className="text-white font-bold text-base mb-1">Stream Unavailable</h3>
-          <p className="text-gray-400 text-xs max-w-xs mb-4">{streamError}</p>
-          <button
-            onClick={() => {
-              setStreamError(null);
-              setIsBuffering(true);
-              if (videoRef.current) {
-                videoRef.current.load();
-                videoRef.current.play().catch(() => {});
-              }
-            }}
-            className="px-4 py-2 bg-brand-500 hover:bg-brand-600 text-white rounded-xl text-sm font-semibold transition-all active:scale-95 shadow-lg shadow-brand-500/25"
-          >
-            Retry
-          </button>
+          <h3 className="text-white font-bold text-lg mb-1">Stream Unavailable</h3>
+          <p className="text-gray-400 text-xs max-w-md mb-5 leading-relaxed">{streamError}</p>
+
+          <div className="flex flex-wrap items-center justify-center gap-2.5 max-w-md">
+            <button
+              onClick={() => {
+                setStreamError(null);
+                setIsBuffering(true);
+                if (videoRef.current) {
+                  videoRef.current.load();
+                  videoRef.current.play().catch(() => {});
+                }
+              }}
+              className="px-4 py-2 bg-brand-500 hover:bg-brand-600 text-white rounded-xl text-sm font-semibold transition-all active:scale-95 shadow-lg shadow-brand-500/25 flex items-center gap-1.5"
+            >
+              <RotateCw className="w-4 h-4" />
+              Retry
+            </button>
+
+            {/* Quality Fallback Buttons */}
+            {mediaList && mediaList.length > 1 && (
+              mediaList
+                .filter((m) => m.quality !== selectedQuality)
+                .map((m) => (
+                  <button
+                    key={m._id}
+                    onClick={() => handleQualityChange(m.quality)}
+                    className="px-3.5 py-2 bg-white/10 hover:bg-white/20 text-gray-200 rounded-xl text-xs font-medium transition-all active:scale-95 border border-white/10"
+                  >
+                    Try {m.quality} ({m.resolution})
+                  </button>
+                ))
+            )}
+
+            {currentDownloadUrl && (
+              <a
+                href={currentDownloadUrl}
+                download
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold transition-all active:scale-95 flex items-center gap-1.5 shadow-lg shadow-emerald-600/20"
+              >
+                <Download className="w-4 h-4" />
+                Download to Play in VLC
+              </a>
+            )}
+          </div>
+
+          <p className="text-gray-500 text-[11px] mt-4 max-w-sm">
+            💡 Tip: If this video format (e.g. MKV/HEVC/AC3) is unsupported by your browser, download it to watch with full audio on VLC or Windows Media Player.
+          </p>
         </div>
       )}
 
@@ -853,7 +979,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             </button>
 
             {showSettings && (
-              <div className="absolute right-12 bottom-10 w-56 bg-dark-card border border-dark-border rounded-xl shadow-2xl p-3 z-50 text-xs space-y-3">
+              <div className="absolute right-12 bottom-10 w-64 bg-dark-card border border-dark-border rounded-xl shadow-2xl p-3 z-50 text-xs space-y-3 max-h-96 overflow-y-auto">
                 <div>
                   <h4 className="font-bold text-gray-400 uppercase tracking-wider mb-1.5">Quality</h4>
                   <div className="space-y-1">
@@ -876,9 +1002,62 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                   </div>
                 </div>
 
+                {/* Audio Enhancement Section */}
+                <div className="border-t border-dark-border pt-2">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <h4 className="font-bold text-gray-400 uppercase tracking-wider">Audio Boost</h4>
+                    <button
+                      onClick={() => setShowAudioHelp(true)}
+                      className="text-brand-400 hover:text-brand-300 text-[10px] flex items-center gap-0.5"
+                    >
+                      <HelpCircle className="w-3 h-3" />
+                      No Sound?
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-3 gap-1">
+                    {[
+                      { label: '100%', val: 1 },
+                      { label: '150%', val: 1.5 },
+                      { label: '200%', val: 2 },
+                    ].map((b) => (
+                      <button
+                        key={b.val}
+                        onClick={() => handleAudioBoostChange(b.val)}
+                        className={`py-1 rounded text-center font-medium transition-colors ${
+                          audioBoost === b.val ? 'bg-brand-500 text-white' : 'bg-dark-surface text-gray-300 hover:bg-dark-hover'
+                        }`}
+                      >
+                        {b.label}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-[10px] text-gray-500 mt-1">Normalizes 5.1 surround dialogue</p>
+                </div>
+
+                {/* Multi-Track Audio Selection (if detected) */}
+                {audioTracksList.length > 1 && (
+                  <div className="border-t border-dark-border pt-2">
+                    <h4 className="font-bold text-gray-400 uppercase tracking-wider mb-1.5">Audio Track</h4>
+                    <div className="space-y-1">
+                      {audioTracksList.map((tr) => (
+                        <button
+                          key={tr.index}
+                          onClick={() => handleSelectAudioTrack(tr.index)}
+                          className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg font-medium transition-colors ${
+                            selectedAudioTrack === tr.index ? 'bg-brand-500 text-white' : 'hover:bg-dark-hover text-gray-300'
+                          }`}
+                        >
+                          <span className="truncate">{tr.label}</span>
+                          {selectedAudioTrack === tr.index && <Check className="w-3.5 h-3.5 flex-none ml-1" />}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 <div className="border-t border-dark-border pt-2">
                   <h4 className="font-bold text-gray-400 uppercase tracking-wider mb-1.5">Speed</h4>
-                  <div className="grid grid-cols-4 gap-1">
+                  <div className="grid grid-cols-5 gap-1">
                     {[0.75, 1, 1.25, 1.5, 2].map((speed) => (
                       <button
                         key={speed}
@@ -892,6 +1071,19 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                     ))}
                   </div>
                 </div>
+
+                {currentDownloadUrl && (
+                  <div className="border-t border-dark-border pt-2">
+                    <a
+                      href={currentDownloadUrl}
+                      download
+                      className="w-full flex items-center justify-center gap-1.5 py-1.5 px-2 bg-dark-surface hover:bg-dark-hover text-emerald-400 rounded-lg font-medium transition-colors"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>Download File</span>
+                    </a>
+                  </div>
+                )}
               </div>
             )}
 
@@ -907,6 +1099,73 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Audio Troubleshooting Help Modal */}
+      {showAudioHelp && (
+        <div className="absolute inset-0 bg-black/90 backdrop-blur-md flex items-center justify-center p-4 z-50 pointer-events-auto">
+          <div className="bg-dark-card border border-dark-border rounded-2xl max-w-sm w-full p-5 text-left shadow-2xl space-y-3.5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2.5">
+                <div className="w-8 h-8 rounded-xl bg-brand-500/20 text-brand-500 flex items-center justify-center font-bold text-sm">
+                  🔊
+                </div>
+                <div>
+                  <h3 className="text-white font-bold text-sm">Sound Troubleshooting</h3>
+                  <p className="text-gray-400 text-[11px]">Why is there no audio in some movies?</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowAudioHelp(false)}
+                className="text-gray-400 hover:text-white text-sm p-1 rounded-lg hover:bg-white/10"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-2.5 text-xs text-gray-300">
+              <div className="p-2.5 bg-dark-surface rounded-xl border border-white/5 space-y-1">
+                <span className="font-semibold text-white text-xs block">1. Dolby AC-3 / DTS Audio</span>
+                <p className="text-gray-400 text-[11px] leading-relaxed">
+                  Many cinema files use multi-channel <strong>Dolby Digital (AC3/E-AC3)</strong> or <strong>DTS</strong> audio. Most web browsers do not license Dolby decoders, causing the browser to mute the audio.
+                </p>
+              </div>
+
+              <div className="p-2.5 bg-dark-surface rounded-xl border border-white/5 space-y-1">
+                <span className="font-semibold text-white text-xs block">2. Solution: Audio Boost</span>
+                <p className="text-gray-400 text-[11px] leading-relaxed">
+                  Open <strong>Settings ⚙️</strong> and try <strong>Audio Boost 150% or 200%</strong> to amplify center speech dialogue.
+                </p>
+              </div>
+
+              <div className="p-2.5 bg-dark-surface rounded-xl border border-white/5 space-y-1">
+                <span className="font-semibold text-white text-xs block">3. Play in VLC Media Player</span>
+                <p className="text-gray-400 text-[11px] leading-relaxed">
+                  Desktop players like <strong>VLC Media Player</strong> natively decode all Dolby Atmos, AC3, and DTS tracks with 100% sound.
+                </p>
+                {currentDownloadUrl && (
+                  <a
+                    href={currentDownloadUrl}
+                    download
+                    className="mt-2 inline-flex items-center space-x-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-medium text-[11px] transition-colors"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Download to Play in VLC</span>
+                  </a>
+                )}
+              </div>
+            </div>
+
+            <div className="pt-1 flex justify-end">
+              <button
+                onClick={() => setShowAudioHelp(false)}
+                className="px-3.5 py-1.5 bg-brand-500 hover:bg-brand-600 text-white rounded-xl text-xs font-semibold"
+              >
+                Understood
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
