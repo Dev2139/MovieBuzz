@@ -20,6 +20,7 @@ import {
 import { Media } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { saveLocalPlaybackPosition } from '../utils/localStorage';
+import { resolveMediaUrl } from '../utils/url';
 import { saveWatchProgress } from '../services/api';
 
 interface VideoPlayerProps {
@@ -49,50 +50,22 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const resolveStreamUrl = (rawUrl?: string) => {
-    if (!rawUrl) return '';
-    const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
-    const backendOrigin = apiBase.replace(/\/api\/?$/, '');
-
-    if (rawUrl.startsWith('http://localhost:5000')) {
-      return rawUrl.replace('http://localhost:5000', backendOrigin);
-    }
-    if (rawUrl.startsWith('/api/')) {
-      return `${backendOrigin}${rawUrl}`;
-    }
-    return rawUrl;
-  };
-
-  const resolveDownloadUrl = (rawUrl?: string) => {
-    if (!rawUrl) return '';
-    const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
-    const backendOrigin = apiBase.replace(/\/api\/?$/, '');
-
-    if (rawUrl.startsWith('http://localhost:5000')) {
-      return rawUrl.replace('http://localhost:5000', backendOrigin);
-    }
-    if (rawUrl.startsWith('/api/')) {
-      return `${backendOrigin}${rawUrl}`;
-    }
-    return rawUrl;
-  };
-
   const [selectedQuality, setSelectedQuality] = useState<string>(
     mediaList && mediaList.length > 0 ? mediaList[0].quality : '1080p'
   );
   const [streamUrl, setStreamUrl] = useState<string>(
-    resolveStreamUrl(mediaList && mediaList.length > 0 ? mediaList[0].streamUrl : undefined)
+    resolveMediaUrl(mediaList && mediaList.length > 0 ? mediaList[0].streamUrl : undefined)
   );
 
   const activeMedia = mediaList && mediaList.length > 0
     ? (mediaList.find((m) => m.quality === selectedQuality) || mediaList[0])
     : null;
-  const currentDownloadUrl = resolveDownloadUrl(activeMedia?.downloadUrl);
+  const currentDownloadUrl = resolveMediaUrl(activeMedia?.downloadUrl);
 
   useEffect(() => {
     if (mediaList && mediaList.length > 0) {
       const found = mediaList.find((m) => m.quality === selectedQuality) || mediaList[0];
-      const resolved = resolveStreamUrl(found.streamUrl);
+      const resolved = resolveMediaUrl(found.streamUrl);
       setStreamUrl(resolved);
       setStreamError(null); // clear error on quality/source change
     }
@@ -218,7 +191,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     if (found) {
       setSelectedQuality(quality);
       const currentPos = videoRef.current?.currentTime || 0;
-      setStreamUrl(resolveStreamUrl(found.streamUrl));
+      setStreamUrl(resolveMediaUrl(found.streamUrl));
       setShowSettings(false);
       setIsBuffering(true);
 

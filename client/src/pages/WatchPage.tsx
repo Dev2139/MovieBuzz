@@ -5,6 +5,7 @@ import { fetchContentBySlug, fetchSeriesEpisodeByNumber, fetchUserHistory, fetch
 import { VideoPlayer } from '../components/VideoPlayer';
 import { ChevronLeft, ChevronRight, List, Film, Tv, Play, Sparkles } from 'lucide-react';
 import { getLocalPlaybackItem } from '../utils/localStorage';
+import { resolveMediaUrl } from '../utils/url';
 import { useAuth } from '../context/AuthContext';
 
 export const WatchPage: React.FC = () => {
@@ -295,7 +296,7 @@ export const WatchPage: React.FC = () => {
                         </div>
 
                         <a
-                          href={m.downloadUrl || m.streamUrl}
+                          href={resolveMediaUrl(m.downloadUrl || m.streamUrl)}
                           target="_blank"
                           rel="noreferrer"
                           download

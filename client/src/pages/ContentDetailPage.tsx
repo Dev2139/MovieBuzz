@@ -13,6 +13,7 @@ import { Play, Download, Star, Calendar, Globe, Users, Film, Plus, Check, Heart,
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { getLocalWatchlist, toggleLocalWatchlist, getLocalFavorites, toggleLocalFavorites } from '../utils/localStorage';
+import { resolveMediaUrl } from '../utils/url';
 
 export const ContentDetailPage: React.FC = () => {
   const { slug } = useParams<{ slug: string }>();
@@ -382,7 +383,7 @@ export const ContentDetailPage: React.FC = () => {
               Your direct file download token has been generated through the platform backend server without exposing channel storage credentials.
             </p>
             <a
-              href={downloadLinkInfo.downloadUrl}
+              href={resolveMediaUrl(downloadLinkInfo.downloadUrl)}
               target="_blank"
               rel="noopener noreferrer"
               download
