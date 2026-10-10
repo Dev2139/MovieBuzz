@@ -43,7 +43,29 @@ export const WatchPage: React.FC = () => {
     queryFn: () => fetchContentList({ limit: 10 }),
   });
 
+  const currentEpNum = Number(episode || 1);
+  const currentSeasonNum = Number(season || 1);
+
+  // MovieBox Dynamic Playback Source Resolution
+  const rawTitle = isMovie ? movieData?.content?.title : seriesData?.series?.title;
+  const rawYear = isMovie ? movieData?.content?.releaseYear : seriesData?.series?.releaseYear;
+
+  const { data: movieboxData } = useQuery({
+    queryKey: ['moviebox-sources', rawTitle, rawYear, isMovie ? 'movie' : 'series', currentSeasonNum, currentEpNum],
+    queryFn: () =>
+      resolveStreamingSourcesByTitle(
+        rawTitle!,
+        rawYear,
+        isMovie ? 'movie' : 'series',
+        currentSeasonNum,
+        currentEpNum
+      ),
+    enabled: Boolean(rawTitle),
+    staleTime: 10 * 60 * 1000,
+  });
+
   const [isPlaylistOpen, setIsPlaylistOpen] = useState(false);
+  const [activeSourceProvider, setActiveSourceProvider] = useState<'all' | 'telegram' | 'moviebox'>('all');
 
   if (isMovieLoading || isSeriesLoading) {
     return (
@@ -84,28 +106,8 @@ export const WatchPage: React.FC = () => {
     imdbId = seriesObj?.imdbId;
   }
 
-  const currentEpNum = Number(episode || 1);
-  const currentSeasonNum = Number(season || 1);
   const prevEp = playlist.find((e) => e.episodeNumber === currentEpNum - 1);
   const nextEp = playlist.find((e) => e.episodeNumber === currentEpNum + 1);
-
-  // MovieBox Dynamic Playback Source Resolution
-  const rawTitle = isMovie ? movieData?.content?.title : seriesObj?.title;
-  const rawYear = isMovie ? movieData?.content?.releaseYear : seriesObj?.releaseYear;
-
-  const { data: movieboxData } = useQuery({
-    queryKey: ['moviebox-sources', rawTitle, rawYear, isMovie ? 'movie' : 'series', currentSeasonNum, currentEpNum],
-    queryFn: () =>
-      resolveStreamingSourcesByTitle(
-        rawTitle!,
-        rawYear,
-        isMovie ? 'movie' : 'series',
-        currentSeasonNum,
-        currentEpNum
-      ),
-    enabled: Boolean(rawTitle),
-    staleTime: 10 * 60 * 1000,
-  });
 
   const movieboxMediaList: any[] = (movieboxData?.sources || []).map((s: any) => ({
     _id: `moviebox-${s.resourceId || s.quality}`,
@@ -118,8 +120,6 @@ export const WatchPage: React.FC = () => {
     streamUrl: s.streamUrl,
     downloadUrl: s.streamUrl,
   }));
-
-  const [activeSourceProvider, setActiveSourceProvider] = useState<'all' | 'telegram' | 'moviebox'>('all');
 
   // Compute effective media list based on user preference or availability
   let effectiveMediaList = [...mediaList];
