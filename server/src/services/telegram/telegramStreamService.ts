@@ -94,7 +94,7 @@ class TelegramStreamService {
         const client = new TelegramClient(stringSession, apiId, apiHash, {
           connectionRetries: 5,
           autoReconnect: true,
-          useWSS: false,
+          useWSS: true,
         });
 
         // Disable GramJS update loop polling to prevent background TIMEOUT exceptions

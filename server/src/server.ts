@@ -90,6 +90,15 @@ app.get(['/', '/api', '/api/health'], (req, res) => {
     service: 'CineStream Backend API',
     message: '🎬 CineStream API is active and running',
     timestamp: new Date().toISOString(),
+    config: {
+      hasSession: !!process.env.TELEGRAM_SESSION_STRING,
+      sessionLength: process.env.TELEGRAM_SESSION_STRING?.length || 0,
+      hasBotToken: !!process.env.TELEGRAM_BOT_TOKEN,
+      hasApiId: !!process.env.TELEGRAM_API_ID,
+      hasApiHash: !!process.env.TELEGRAM_API_HASH,
+      channelId: process.env.TELEGRAM_CHANNEL_ID || 'none',
+      nodeEnv: process.env.NODE_ENV || 'development',
+    },
   });
 });
 

@@ -153,6 +153,12 @@ export const proxyTelegramFileStream = async (req: Request, res: Response) => {
     const rawBuffer = await telegramStreamService.getChunk(activeFileId, alignedOffset, chunkSize, messageId);
 
     if (rawBuffer && rawBuffer.length > 0) {
+      // Trigger speculative background prefetch of next chunk into RAM cache so subsequent Range requests resolve in 0ms!
+      const nextOffset = alignedOffset + chunkSize;
+      if (nextOffset < totalSize) {
+        telegramStreamService.getChunk(activeFileId, nextOffset, chunkSize, messageId).catch(() => {});
+      }
+
       // MTProto succeeded — slice to requested range and return
       const sliceStart = start - alignedOffset;
       const sliceEnd = Math.min(sliceStart + reqSize, rawBuffer.length);

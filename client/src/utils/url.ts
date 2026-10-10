@@ -7,6 +7,10 @@ export const resolveMediaUrl = (rawUrl?: string): string => {
   const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
   const backendOrigin = apiBase.replace(/\/api\/?$/, '');
 
+  if (rawUrl.includes('/api/media/')) {
+    const mediaPath = rawUrl.substring(rawUrl.indexOf('/api/media/'));
+    return `${backendOrigin}${mediaPath}`;
+  }
   if (rawUrl.startsWith('http://localhost:5000')) {
     return rawUrl.replace('http://localhost:5000', backendOrigin);
   }
