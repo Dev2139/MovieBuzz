@@ -682,7 +682,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         }
       });
 
-      hls.on(Hls.Events.ERROR, (_event, data) => {
+      hls.on(Hls.Events.ERROR, (_event: any, data: any) => {
         if (data.fatal) {
           switch (data.type) {
             case Hls.ErrorTypes.NETWORK_ERROR:
