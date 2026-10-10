@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Server, Zap, AlertCircle, RefreshCw } from 'lucide-react';
+import { Server, AlertCircle, RefreshCw } from 'lucide-react';
 import { Media } from '../types';
 
 interface VideoPlayerProps {
@@ -18,92 +18,95 @@ interface VideoPlayerProps {
   episodeNumber?: number;
 }
 
-export type CloudServer = 'autoembed' | 'vidsrc' | 'superembed' | 'vidlink';
-
-interface ServerOption {
-  id: CloudServer;
+export interface EmbedServer {
+  id: string;
   name: string;
-  badge: string;
-  subtext: string;
-  icon: string;
-  color: string;
+  getMovieUrl: (tmdbId: number | string) => string;
+  getTvUrl: (tmdbId: number | string, season: number, episode: number) => string;
 }
 
-export const CLOUD_SERVERS: ServerOption[] = [
+export const EMBED_SERVERS: EmbedServer[] = [
   {
-    id: 'autoembed',
-    name: 'Server 1 (AutoEmbed)',
-    badge: 'Rapid 1080p',
-    subtext: 'High-speed cloud stream • Zero buffer',
-    icon: '🚀',
-    color: 'text-cyan-400 border-cyan-500/40 bg-cyan-500/10',
+    id: "vidfast",
+    name: "VidFast",
+    getMovieUrl: (tmdbId) =>
+      `https://vidfast.vc/movie/${tmdbId}`,
+    getTvUrl: (tmdbId, season, episode) =>
+      `https://vidfast.vc/tv/${tmdbId}/${season}/${episode}`,
   },
   {
-    id: 'vidsrc',
-    name: 'Server 2 (VidSrc)',
-    badge: 'Ultra HD',
-    subtext: 'Global CDN edge streaming',
-    icon: '⚡',
-    color: 'text-amber-400 border-amber-500/40 bg-amber-500/10',
+    id: "vidlink",
+    name: "VidLink",
+    getMovieUrl: (tmdbId) =>
+      `https://vidlink.pro/movie/${tmdbId}`,
+    getTvUrl: (tmdbId, season, episode) =>
+      `https://vidlink.pro/tv/${tmdbId}/${season}/${episode}`,
   },
   {
-    id: 'superembed',
-    name: 'Server 3 (Multi-Server)',
-    badge: 'Multi-Audio',
-    subtext: 'Hindi, Tamil & global audio tracks',
-    icon: '🌐',
-    color: 'text-purple-400 border-purple-500/40 bg-purple-500/10',
+    id: "vidsrcpro",
+    name: "VidSrc Pro",
+    getMovieUrl: (tmdbId) =>
+      `https://vidsrc.pro/embed/movie/${tmdbId}`,
+    getTvUrl: (tmdbId, season, episode) =>
+      `https://vidsrc.pro/embed/tv/${tmdbId}/${season}/${episode}`,
   },
   {
-    id: 'vidlink',
-    name: 'Server 4 (VidLink)',
-    badge: 'Clean HD',
-    subtext: 'Smooth lightweight cloud mirror',
-    icon: '✨',
-    color: 'text-emerald-400 border-emerald-500/40 bg-emerald-500/10',
+    id: "upcloud",
+    name: "UpCloud",
+    getMovieUrl: (tmdbId) =>
+      `https://vidsrc.cc/v2/embed/movie/${tmdbId}`,
+    getTvUrl: (tmdbId, season, episode) =>
+      `https://vidsrc.cc/v2/embed/tv/${tmdbId}/${season}/${episode}`,
+  },
+  {
+    id: "peachify",
+    name: "Peachify",
+    getMovieUrl: (tmdbId) =>
+      `https://peachify.top/movie/${tmdbId}`,
+    getTvUrl: (tmdbId, season, episode) =>
+      `https://peachify.top/tv/${tmdbId}/${season}/${episode}`,
+  },
+  {
+    id: "vidup",
+    name: "VidUp",
+    getMovieUrl: (tmdbId) =>
+      `https://vidup.to/movie/${tmdbId}`,
+    getTvUrl: (tmdbId, season, episode) =>
+      `https://vidup.to/tv/${tmdbId}/${season}/${episode}`,
+  },
+  {
+    id: "vidnest",
+    name: "VidNest",
+    getMovieUrl: (tmdbId) =>
+      `https://vidnest.fun/movie/${tmdbId}`,
+    getTvUrl: (tmdbId, season, episode) =>
+      `https://vidnest.fun/tv/${tmdbId}/${season}/${episode}`,
+  },
+  {
+    id: "vidrock",
+    name: "VidRock",
+    getMovieUrl: (tmdbId) =>
+      `https://vidrock.net/movie/${tmdbId}`,
+    getTvUrl: (tmdbId, season, episode) =>
+      `https://vidrock.net/tv/${tmdbId}/${season}/${episode}`,
+  },
+  {
+    id: "autoembed",
+    name: "AutoEmbed",
+    getMovieUrl: (tmdbId) =>
+      `https://autoembed.co/movie/tmdb/${tmdbId}`,
+    getTvUrl: (tmdbId, season, episode) =>
+      `https://autoembed.co/tv/tmdb/${tmdbId}-${season}-${episode}`,
+  },
+  {
+    id: "videasy",
+    name: "Videasy",
+    getMovieUrl: (tmdbId) =>
+      `https://player.videasy.net/movie/${tmdbId}`,
+    getTvUrl: (tmdbId, season, episode) =>
+      `https://player.videasy.net/tv/${tmdbId}/${season}/${episode}`,
   },
 ];
-
-export const getCloudEmbedUrl = (
-  server: CloudServer,
-  tmdb?: number,
-  imdb?: string,
-  contentType: 'movie' | 'series' = 'movie',
-  seasonNumber: number = 1,
-  episodeNumber: number = 1
-): string | null => {
-  if (!tmdb && !imdb) return null;
-  const isMovie = contentType === 'movie';
-  const id = tmdb ? String(tmdb) : imdb!;
-  const s = seasonNumber || 1;
-  const e = episodeNumber || 1;
-
-  switch (server) {
-    case 'autoembed':
-      return isMovie
-        ? `https://player.autoembed.cc/embed/movie/${id}`
-        : `https://player.autoembed.cc/embed/tv/${id}/${s}/${e}`;
-    case 'vidsrc':
-      return isMovie
-        ? `https://vidsrc.to/embed/movie/${id}`
-        : `https://vidsrc.to/embed/tv/${id}/${s}/${e}`;
-    case 'superembed':
-      if (tmdb) {
-        return isMovie
-          ? `https://multiembed.mov/?video_id=${tmdb}&tmdb=1`
-          : `https://multiembed.mov/?video_id=${tmdb}&tmdb=1&s=${s}&e=${e}`;
-      }
-      return isMovie
-        ? `https://multiembed.mov/?video_id=${imdb}&imdb=1`
-        : `https://multiembed.mov/?video_id=${imdb}&imdb=1&s=${s}&e=${e}`;
-    case 'vidlink':
-      return isMovie
-        ? `https://vidlink.pro/movie/${id}`
-        : `https://vidlink.pro/tv/${id}/${s}/${e}`;
-    default:
-      return null;
-  }
-};
 
 export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   contentTitle,
@@ -113,18 +116,17 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   seasonNumber = 1,
   episodeNumber = 1,
 }) => {
-  const [activeServer, setActiveServer] = useState<CloudServer>('autoembed');
+  const [activeServerId, setActiveServerId] = useState<string>(EMBED_SERVERS[0].id);
   const [reloadKey, setReloadKey] = useState<number>(0);
 
   const hasId = Boolean(tmdbId || imdbId);
-  const embedUrl = getCloudEmbedUrl(
-    activeServer,
-    tmdbId,
-    imdbId,
-    contentType,
-    seasonNumber,
-    episodeNumber
-  );
+  const activeServerObj = EMBED_SERVERS.find((s) => s.id === activeServerId) || EMBED_SERVERS[0];
+
+  const embedUrl = hasId
+    ? contentType === 'movie'
+      ? activeServerObj.getMovieUrl(tmdbId || imdbId!)
+      : activeServerObj.getTvUrl(tmdbId || imdbId!, seasonNumber, episodeNumber)
+    : null;
 
   return (
     <div className="space-y-3 sm:space-y-4 select-none">
@@ -132,7 +134,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       <div className="relative w-full aspect-video bg-black rounded-xl sm:rounded-2xl overflow-hidden shadow-2xl border border-white/5">
         {hasId && embedUrl ? (
           <iframe
-            key={`${activeServer}-${tmdbId || imdbId}-${seasonNumber}-${episodeNumber}-${reloadKey}`}
+            key={`${activeServerId}-${tmdbId || imdbId}-${seasonNumber}-${episodeNumber}-${reloadKey}`}
             src={embedUrl}
             title={contentTitle}
             className="w-full h-full border-0 rounded-xl sm:rounded-2xl"
@@ -148,13 +150,13 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               Metadata Match Required
             </h3>
             <p className="text-gray-400 text-xs max-w-md leading-relaxed mb-4">
-              This title is missing a TMDB/IMDb ID in the database to stream through the free movie API.
+              This title is missing a TMDB/IMDb ID in the database to stream through the media server.
             </p>
           </div>
         )}
       </div>
 
-      {/* Cloud Streaming Server Selector Bar */}
+      {/* Discreet Server Selector Bar */}
       <div className="bg-dark-card/90 border border-dark-border/80 rounded-xl sm:rounded-2xl p-3 sm:p-4 shadow-xl backdrop-blur-md space-y-3">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-white/5 pb-2.5">
           <div className="flex items-center space-x-2">
@@ -166,11 +168,11 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 <span className="text-white text-xs sm:text-sm font-bold tracking-tight">Streaming Server</span>
                 <span className="flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                  <span>0 MB Server Bandwidth</span>
+                  <span>1080p Ultra HD</span>
                 </span>
               </div>
               <p className="text-[11px] text-gray-400 hidden sm:block">
-                If the stream buffers, shows an ad, or is blocked, switch to another cloud mirror below.
+                If a server buffers or is slow, switch to another server below.
               </p>
             </div>
           </div>
@@ -181,66 +183,35 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             className="flex items-center space-x-1 text-[11px] text-gray-400 hover:text-white bg-dark-surface px-2.5 py-1 rounded-lg border border-white/5 active:scale-95 transition-all w-fit"
           >
             <RefreshCw className="w-3 h-3" />
-            <span>Reload Stream</span>
+            <span>Reload Player</span>
           </button>
         </div>
 
-        {/* Server Buttons */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          {CLOUD_SERVERS.map((server) => {
-            const isSelected = activeServer === server.id;
+        {/* Server Buttons Grid (Discreet Server 1 to Server 10 labels) */}
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+          {EMBED_SERVERS.map((server, index) => {
+            const isSelected = activeServerId === server.id;
 
             return (
               <button
                 key={server.id}
                 type="button"
-                onClick={() => setActiveServer(server.id)}
-                className={`relative group flex flex-col items-start p-2.5 rounded-xl border text-left transition-all duration-200 active:scale-95 ${
+                onClick={() => setActiveServerId(server.id)}
+                className={`relative group flex items-center justify-center p-2.5 rounded-xl border text-center transition-all duration-200 active:scale-95 ${
                   isSelected
-                    ? 'bg-gradient-to-b from-white/10 to-white/5 border-brand-500 shadow-lg shadow-brand-500/20 ring-1 ring-brand-500/50'
-                    : 'bg-dark-surface/80 border-white/5 hover:border-white/20 hover:bg-dark-surface hover:-translate-y-0.5'
+                    ? 'bg-gradient-to-b from-brand-500/20 to-brand-500/10 border-brand-500 text-white shadow-lg shadow-brand-500/20 ring-1 ring-brand-500/50'
+                    : 'bg-dark-surface/80 border-white/5 text-gray-300 hover:text-white hover:border-white/20 hover:bg-dark-surface'
                 }`}
               >
-                {isSelected && (
-                  <div className="absolute top-2 right-2 w-2 h-2 rounded-full bg-brand-400 shadow-[0_0_8px_rgba(236,72,153,0.8)]" />
-                )}
-
-                <div className="flex items-center space-x-1.5 w-full">
-                  <span className="text-sm">{server.icon}</span>
-                  <span
-                    className={`text-xs font-semibold truncate ${
-                      isSelected ? 'text-white' : 'text-gray-300 group-hover:text-white'
-                    }`}
-                  >
-                    {server.name}
+                <div className="flex items-center space-x-1.5">
+                  <span className="text-xs">⚡</span>
+                  <span className="text-xs font-semibold">
+                    Server {index + 1}
                   </span>
                 </div>
-
-                <div className="mt-1 flex items-center space-x-1.5 w-full">
-                  <span
-                    className={`text-[10px] px-1.5 py-0.5 rounded font-medium border ${
-                      isSelected ? server.color : 'text-gray-400 border-white/10 bg-white/5'
-                    }`}
-                  >
-                    {server.badge}
-                  </span>
-                </div>
-
-                <span className="text-[10px] text-gray-400 mt-1 line-clamp-1">
-                  {server.subtext}
-                </span>
               </button>
             );
           })}
-        </div>
-
-        <div className="flex items-center justify-between text-[11px] text-gray-400 pt-1 border-t border-white/5">
-          <div className="flex items-center space-x-1.5">
-            <Zap className="w-3.5 h-3.5 text-amber-400" />
-            <span>
-              <strong>Free Cloud API:</strong> Streams directly from global multi-edge CDNs. Multi-audio & subtitles supported.
-            </span>
-          </div>
         </div>
       </div>
     </div>
