@@ -7,7 +7,7 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        target: 'https://moviebuzz-99fb.onrender.com',
+        target: 'https://movie-buzz-kappa.vercel.app',
         changeOrigin: true,
       },
     },

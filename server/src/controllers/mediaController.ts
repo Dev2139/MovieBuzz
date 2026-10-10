@@ -181,6 +181,7 @@ export const proxyTelegramFileStream = async (req: Request, res: Response) => {
         'Content-Length': buffer.length,
         'Content-Type': contentType,
         'Cache-Control': 'public, max-age=3600',
+        'Access-Control-Allow-Origin': '*',
       });
       return res.end(buffer);
     }

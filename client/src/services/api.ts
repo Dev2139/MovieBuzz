@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { Content, Season, Episode, Media, User, WatchHistoryItem, AdminStats, TelegramImportItem } from '../types';
+import { Content, Season, Episode, Media, User, WatchHistoryItem, AdminStats, TelegramImportItem, ContentRequest, AdminCatalogResponse } from '../types';
 
 const API_URL = import.meta.env.VITE_API_URL || 'https://moviebuzz-99fb.onrender.com/api';
 
@@ -208,5 +208,66 @@ export const publishTelegramImportApi = async (payload: any) => {
 
 export const enrichCatalogApi = async () => {
   const res = await api.post<{ message: string; enrichedCount: number }>('/admin/enrich');
+  return res.data;
+};
+
+// --- User Content Requests APIs ---
+export const submitContentRequestApi = async (data: {
+  title: string;
+  type?: 'movie' | 'series';
+  releaseYear?: number;
+  notes?: string;
+  userName?: string;
+  userEmail?: string;
+}) => {
+  const res = await api.post<{ message: string; request: ContentRequest }>('/requests', data);
+  return res.data;
+};
+
+// --- Admin Content Requests Management APIs ---
+export const fetchAdminRequestsApi = async (params?: {
+  status?: string;
+  type?: string;
+  search?: string;
+}) => {
+  const res = await api.get<{
+    requests: ContentRequest[];
+    total: number;
+    counts: { pending: number; fulfilled: number; rejected: number };
+  }>('/admin/requests', { params });
+  return res.data;
+};
+
+export const updateAdminRequestApi = async ({
+  id,
+  status,
+  adminNotes,
+}: {
+  id: string;
+  status?: 'pending' | 'fulfilled' | 'rejected';
+  adminNotes?: string;
+}) => {
+  const res = await api.put<{ message: string; request: ContentRequest }>(`/admin/requests/${id}`, {
+    status,
+    adminNotes,
+  });
+  return res.data;
+};
+
+export const deleteAdminRequestApi = async (id: string) => {
+  const res = await api.delete<{ message: string }>(`/admin/requests/${id}`);
+  return res.data;
+};
+
+// --- Dedicated Admin Catalog API (Full Movies & Series with search & status) ---
+export const fetchAdminCatalogApi = async (params?: {
+  type?: string;
+  status?: string;
+  search?: string;
+  page?: number;
+  limit?: number | string;
+  sort?: string;
+}) => {
+  const res = await api.get<AdminCatalogResponse>('/admin/catalog', { params });
   return res.data;
 };

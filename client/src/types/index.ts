@@ -124,4 +124,30 @@ export interface AdminStats {
   totalViews: number;
   totalDownloads: number;
   pendingImports: number;
+  pendingRequests?: number;
+}
+
+export interface ContentRequest {
+  _id: string;
+  title: string;
+  type: 'movie' | 'series';
+  releaseYear?: number;
+  notes?: string;
+  requestedBy?: string;
+  userName?: string;
+  userEmail?: string;
+  status: 'pending' | 'fulfilled' | 'rejected';
+  adminNotes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AdminCatalogResponse {
+  items: Content[];
+  total: number;
+  totalMovies: number;
+  totalSeries: number;
+  totalDrafts: number;
+  page: number;
+  totalPages: number;
 }

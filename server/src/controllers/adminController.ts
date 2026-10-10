@@ -8,14 +8,17 @@ import { TelegramImport } from '../models/TelegramImport';
 import { TelegramImporter } from '../services/telegram/telegramImporter';
 import { parseTelegramCaption } from '../services/telegram/telegramParser';
 
+import { ContentRequest } from '../models/ContentRequest';
+
 export const getAdminStats = async (req: Request, res: Response) => {
   try {
-    const [totalMovies, totalSeries, totalEpisodes, totalUsers, totalImports, popularItems] = await Promise.all([
+    const [totalMovies, totalSeries, totalEpisodes, totalUsers, totalImports, pendingRequests, popularItems] = await Promise.all([
       Content.countDocuments({ type: 'movie' }),
       Content.countDocuments({ type: 'series' }),
       Episode.countDocuments(),
       User.countDocuments({ role: 'user' }),
       TelegramImport.countDocuments({ status: 'PENDING' }),
+      ContentRequest.countDocuments({ status: 'pending' }),
       Content.aggregate([{ $group: { _id: null, totalViews: { $sum: '$popularity' } } }]),
     ]);
 
@@ -29,6 +32,7 @@ export const getAdminStats = async (req: Request, res: Response) => {
       totalViews,
       totalDownloads: Math.floor(totalViews * 0.45),
       pendingImports: totalImports,
+      pendingRequests,
     });
   } catch (error) {
     return res.status(500).json({ message: 'Error loading admin stats' });
@@ -548,5 +552,62 @@ export const enrichCatalogMetadata = async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('enrichCatalogMetadata error:', error);
     return res.status(500).json({ message: 'Error enriching catalog metadata' });
+  }
+};
+
+/**
+ * Admin Catalog: returns all movies and series without arbitrary omissions, supporting search, filters & pagination
+ */
+export const getAdminCatalog = async (req: Request, res: Response) => {
+  try {
+    const { type, status, search, page = 1, limit = 100, sort = 'latest' } = req.query;
+
+    const query: any = {};
+
+    if (type && type !== 'all') {
+      query.type = type;
+    }
+
+    if (status && status !== 'all') {
+      query.status = status;
+    }
+
+    if (search && typeof search === 'string' && search.trim()) {
+      query.title = { $regex: search.trim(), $options: 'i' };
+    }
+
+    let sortOptions: any = { createdAt: -1 };
+    if (sort === 'title') {
+      sortOptions = { title: 1 };
+    } else if (sort === 'rating') {
+      sortOptions = { rating: -1, createdAt: -1 };
+    } else if (sort === 'oldest') {
+      sortOptions = { createdAt: 1 };
+    }
+
+    const pageNum = Math.max(1, Number(page) || 1);
+    const limitNum = limit === 'all' ? 1000 : Math.max(1, Number(limit) || 100);
+    const skip = (pageNum - 1) * limitNum;
+
+    const [items, total, totalMovies, totalSeries, totalDrafts] = await Promise.all([
+      Content.find(query).sort(sortOptions).skip(skip).limit(limitNum).lean(),
+      Content.countDocuments(query),
+      Content.countDocuments({ type: 'movie' }),
+      Content.countDocuments({ type: 'series' }),
+      Content.countDocuments({ status: 'draft' }),
+    ]);
+
+    return res.json({
+      items,
+      total,
+      totalMovies,
+      totalSeries,
+      totalDrafts,
+      page: pageNum,
+      totalPages: Math.ceil(total / limitNum),
+    });
+  } catch (error: any) {
+    console.error('getAdminCatalog error:', error);
+    return res.status(500).json({ message: 'Error fetching admin catalog' });
   }
 };

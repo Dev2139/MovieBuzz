@@ -148,9 +148,9 @@ export const WatchPage: React.FC = () => {
               {/* Subtle Ambient Glow */}
               <div className="absolute top-0 right-0 w-72 h-72 bg-brand-500/10 rounded-full blur-3xl pointer-events-none -mr-16 -mt-16" />
 
-              <div className="flex flex-row gap-4 items-start relative z-10">
+              <div className="flex flex-row gap-3 sm:gap-4 items-start relative z-10">
                 {/* Compact Poster Thumbnail */}
-                <div className="flex-none w-24 sm:w-32 aspect-[2/3] rounded-lg overflow-hidden border border-white/10 shadow-xl bg-dark-surface relative group">
+                <div className="flex-none w-20 sm:w-28 md:w-32 aspect-[2/3] rounded-lg overflow-hidden border border-white/10 shadow-xl bg-dark-surface relative group">
                   <img
                     src={posterUrl || 'https://images.unsplash.com/photo-1542751371-adc38448a05e?w=800'}
                     alt={contentTitle}
@@ -162,26 +162,26 @@ export const WatchPage: React.FC = () => {
                 </div>
 
                 {/* Compact Details Column */}
-                <div className="flex-1 space-y-2.5 min-w-0">
+                <div className="flex-1 space-y-2 sm:space-y-2.5 min-w-0">
                   <div>
-                    <h1 className="text-lg sm:text-2xl font-bold text-white tracking-tight truncate">
+                    <h1 className="text-base sm:text-2xl font-bold text-white tracking-tight truncate">
                       {isMovie ? movieData?.content?.title : seriesObj?.title}
                     </h1>
-                    <p className="text-[11px] text-brand-400 font-semibold mt-0.5">
+                    <p className="text-[10px] sm:text-[11px] text-brand-400 font-semibold mt-0.5">
                       {isMovie ? 'Feature Film' : `Series Season ${season}`} • {isMovie ? movieData?.content?.releaseYear : seriesObj?.releaseYear}
                     </p>
                   </div>
 
                   {/* Ratings Badges (IMDb, TMDB, OMDb) */}
-                  <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
                     {/* IMDb Badge */}
-                    <div className="flex items-center space-x-1 px-2.5 py-0.5 rounded-md bg-amber-500/20 border border-amber-500/40 text-amber-400 font-bold text-[11px]">
+                    <div className="flex items-center space-x-1 px-2 py-0.5 rounded-md bg-amber-500/20 border border-amber-500/40 text-amber-400 font-bold text-[10px] sm:text-[11px]">
                       <span className="font-black text-amber-300">IMDb</span>
                       <span>★ {(movieData?.content?.rating || seriesObj?.rating || 8.5).toFixed(1)}</span>
                     </div>
 
                     {/* TMDB Badge */}
-                    <div className="flex items-center space-x-1 px-2.5 py-0.5 rounded-md bg-cyan-500/20 border border-cyan-500/40 text-cyan-400 font-bold text-[11px]">
+                    <div className="flex items-center space-x-1 px-2 py-0.5 rounded-md bg-cyan-500/20 border border-cyan-500/40 text-cyan-400 font-bold text-[10px] sm:text-[11px]">
                       <span className="font-black text-cyan-300">TMDB</span>
                       <span>{Math.round((movieData?.content?.rating || seriesObj?.rating || 8.5) * 10)}%</span>
                     </div>
@@ -193,24 +193,24 @@ export const WatchPage: React.FC = () => {
                     </div>
 
                     {/* Release Year */}
-                    <span className="px-2 py-0.5 rounded-md bg-dark-surface border border-dark-border text-gray-300 text-[11px] font-medium">
+                    <span className="px-2 py-0.5 rounded-md bg-dark-surface border border-dark-border text-gray-300 text-[10px] sm:text-[11px] font-medium">
                       {movieData?.content?.releaseYear || seriesObj?.releaseYear || 2024}
                     </span>
                   </div>
 
                   {/* Genres & Director Pills */}
-                  <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                  <div className="flex flex-wrap items-center gap-1 sm:gap-1.5 pt-0.5">
                     {(movieData?.content?.genres || seriesObj?.genres || ['Action', 'Drama']).slice(0, 3).map((genre: string) => (
                       <span
                         key={genre}
-                        className="px-2 py-0.5 rounded-full bg-brand-500/15 text-brand-400 border border-brand-500/30 text-[10px] font-medium"
+                        className="px-2 py-0.5 rounded-full bg-brand-500/15 text-brand-400 border border-brand-500/30 text-[9px] sm:text-[10px] font-medium"
                       >
                         {genre}
                       </span>
                     ))}
 
                     {(movieData?.content?.director || seriesObj?.director) && (
-                      <span className="px-2 py-0.5 rounded-full bg-dark-surface text-gray-300 border border-dark-border text-[10px] font-medium truncate max-w-[160px]">
+                      <span className="px-2 py-0.5 rounded-full bg-dark-surface text-gray-300 border border-dark-border text-[9px] sm:text-[10px] font-medium truncate max-w-[140px] sm:max-w-[160px]">
                         🎬 {movieData?.content?.director || seriesObj?.director}
                       </span>
                     )}
@@ -218,7 +218,7 @@ export const WatchPage: React.FC = () => {
 
                   {/* Synopsis */}
                   <div className="pt-1 border-t border-dark-border/50">
-                    <p className="text-xs text-gray-300 leading-normal line-clamp-3 sm:line-clamp-4">
+                    <p className="text-[11px] sm:text-xs text-gray-300 leading-normal line-clamp-3 sm:line-clamp-4">
                       {movieData?.content?.description || seriesObj?.description || 'No detailed plot summary available for this title.'}
                     </p>
                   </div>
@@ -236,7 +236,7 @@ export const WatchPage: React.FC = () => {
                 </div>
 
                 {/* Compact Cast Grid */}
-                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2">
                   {(
                     movieData?.content?.cast ||
                     seriesObj?.cast || [

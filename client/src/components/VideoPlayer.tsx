@@ -112,32 +112,76 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
   const audioContextRef = useRef<AudioContext | null>(null);
   const gainNodeRef = useRef<GainNode | null>(null);
+  const mediaSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
 
-  const handleAudioBoostChange = (boostMultiplier: number) => {
+  // Initialize or resume Web Audio API graph to control device audio output directly (bypassing mobile volume locks)
+  const ensureAudioContext = useCallback(() => {
     try {
       if (!audioContextRef.current && videoRef.current) {
         const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
         if (AudioCtx) {
           const ctx = new AudioCtx();
-          const source = ctx.createMediaElementSource(videoRef.current);
-          const compressor = ctx.createDynamicsCompressor();
-          const gain = ctx.createGain();
-          gain.gain.value = boostMultiplier;
+          if (!mediaSourceRef.current) {
+            const source = ctx.createMediaElementSource(videoRef.current);
+            const compressor = ctx.createDynamicsCompressor();
+            const gain = ctx.createGain();
+            gain.gain.value = isMuted ? 0 : volume * audioBoost;
 
-          source.connect(compressor);
-          compressor.connect(gain);
-          gain.connect(ctx.destination);
+            source.connect(compressor);
+            compressor.connect(gain);
+            gain.connect(ctx.destination);
 
+            mediaSourceRef.current = source;
+            gainNodeRef.current = gain;
+          }
           audioContextRef.current = ctx;
-          gainNodeRef.current = gain;
         }
-      } else if (gainNodeRef.current) {
-        gainNodeRef.current.gain.value = boostMultiplier;
       }
       if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
-        audioContextRef.current.resume();
+        audioContextRef.current.resume().catch(() => {});
       }
+    } catch (err) {
+      console.warn('AudioContext setup:', err);
+    }
+  }, [isMuted, volume, audioBoost]);
+
+  // Master volume controller: controls both HTMLMediaElement and Web Audio API gain for real physical device volume output
+  const updateVolume = useCallback(
+    (newVol: number, explicitMute?: boolean) => {
+      ensureAudioContext();
+      const clampedVol = Math.max(0, Math.min(1, newVol));
+      const nextMuted = explicitMute !== undefined ? explicitMute : clampedVol === 0;
+
+      setVolume(clampedVol);
+      setIsMuted(nextMuted);
+
+      if (videoRef.current) {
+        try {
+          videoRef.current.volume = nextMuted ? 0 : clampedVol;
+          videoRef.current.muted = nextMuted;
+        } catch {}
+      }
+
+      if (gainNodeRef.current) {
+        try {
+          gainNodeRef.current.gain.value = nextMuted ? 0 : clampedVol * audioBoost;
+        } catch {}
+      }
+
+      if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+        audioContextRef.current.resume().catch(() => {});
+      }
+    },
+    [audioBoost, ensureAudioContext]
+  );
+
+  const handleAudioBoostChange = (boostMultiplier: number) => {
+    try {
+      ensureAudioContext();
       setAudioBoost(boostMultiplier);
+      if (gainNodeRef.current) {
+        gainNodeRef.current.gain.value = isMuted ? 0 : volume * boostMultiplier;
+      }
     } catch (err) {
       console.warn('Audio boost setup notice:', err);
     }
@@ -313,12 +357,13 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   };
 
   const togglePlay = () => {
+    ensureAudioContext();
     if (videoRef.current) {
       if (isPlaying) {
         videoRef.current.pause();
       } else {
         if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
-          audioContextRef.current.resume();
+          audioContextRef.current.resume().catch(() => {});
         }
         videoRef.current.play().catch(() => {});
       }
@@ -328,22 +373,15 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
   const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = parseFloat(e.target.value);
-    setVolume(val);
-    if (videoRef.current) {
-      videoRef.current.volume = val;
-      setIsMuted(val === 0);
-    }
+    updateVolume(val, val === 0);
   };
 
   const toggleMute = () => {
-    if (videoRef.current) {
-      if (isMuted) {
-        videoRef.current.volume = volume || 1;
-        setIsMuted(false);
-      } else {
-        videoRef.current.volume = 0;
-        setIsMuted(true);
-      }
+    if (isMuted) {
+      const restored = volume > 0 ? volume : 1;
+      updateVolume(restored, false);
+    } else {
+      updateVolume(volume, true);
     }
   };
 
@@ -433,6 +471,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   } | null>(null);
 
   const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    ensureAudioContext();
     if ((e.target as HTMLElement).closest('button, input, .no-player-click')) return;
 
     const touch = e.touches[0];
@@ -460,7 +499,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     const deltaY = touchStartRef.current.y - currentY; // positive when swiping up
     const deltaX = Math.abs(currentX - touchStartRef.current.x);
 
-    if (Math.abs(deltaY) > 10 && Math.abs(deltaY) > deltaX) {
+    if (Math.abs(deltaY) > 8 && Math.abs(deltaY) > deltaX) {
       touchStartRef.current.isGesture = true;
       const height = rect.height || 300;
       const ratio = (deltaY / height) * 1.3;
@@ -471,10 +510,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         setBrightness(newB);
         setGestureHUD({ type: 'brightness', value: Math.round(newB * 100) });
       } else {
-        // Right side swipe: Volume
+        // Right side swipe: Controls device volume output directly via Web Audio gain + media volume
         const newV = Math.max(0, Math.min(1, touchStartRef.current.volume + ratio));
-        setVolume(newV);
-        if (newV > 0) setIsMuted(false);
+        updateVolume(newV, newV === 0);
         setGestureHUD({ type: 'volume', value: Math.round(newV * 100) });
       }
 
@@ -618,7 +656,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
-      className="relative w-full aspect-video bg-black rounded-2xl overflow-hidden group shadow-2xl select-none"
+      className="relative w-full aspect-video bg-black rounded-xl sm:rounded-2xl overflow-hidden group shadow-2xl select-none touch-none"
     >
       <video
         ref={videoRef}
@@ -634,12 +672,16 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         onPlay={() => {
           setIsPlaying(true);
           setIsBuffering(false);
+          ensureAudioContext();
+          if (videoRef.current) {
+            videoRef.current.volume = isMuted ? 0 : volume;
+            videoRef.current.muted = isMuted;
+          }
+          if (gainNodeRef.current) {
+            gainNodeRef.current.gain.value = isMuted ? 0 : volume * audioBoost;
+          }
           if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
             audioContextRef.current.resume().catch(() => {});
-          }
-          if (videoRef.current) {
-            videoRef.current.volume = volume;
-            videoRef.current.muted = isMuted;
           }
         }}
         onPause={() => setIsPlaying(false)}
@@ -777,17 +819,17 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
       {/* Floating Touch Swipe Gesture HUD Badge (Active while sliding) */}
       {gestureHUD && (
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-black/85 backdrop-blur-md border border-white/20 px-4 sm:px-6 py-3 rounded-2xl flex items-center space-x-3 text-white z-40 pointer-events-none shadow-2xl animate-fade-in">
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-black/90 backdrop-blur-md border border-white/20 px-5 py-3 rounded-2xl flex items-center space-x-3 text-white z-40 pointer-events-none shadow-2xl animate-fade-in">
           {gestureHUD.type === 'brightness' ? (
-            <Sun className="w-6 h-6 text-amber-400 flex-none animate-pulse" />
+            <Sun className="w-5 h-5 sm:w-6 sm:h-6 text-amber-400 flex-none animate-pulse" />
           ) : gestureHUD.value === 0 ? (
-            <VolumeX className="w-6 h-6 text-red-500 flex-none" />
+            <VolumeX className="w-5 h-5 sm:w-6 sm:h-6 text-red-500 flex-none" />
           ) : (
-            <Volume2 className="w-6 h-6 text-brand-500 flex-none animate-pulse" />
+            <Volume2 className="w-5 h-5 sm:w-6 sm:h-6 text-brand-500 flex-none animate-pulse" />
           )}
           <div className="flex flex-col space-y-1">
-            <span className="text-[10px] font-bold font-mono tracking-widest uppercase text-gray-400">
-              {gestureHUD.type}
+            <span className="text-[10px] font-bold font-mono tracking-wider uppercase text-gray-300">
+              {gestureHUD.type === 'volume' ? 'Device Volume' : 'Brightness'}
             </span>
             <div className="w-24 sm:w-28 h-2 bg-gray-700/80 rounded-full overflow-hidden">
               <div
@@ -804,72 +846,27 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
       {/* Double Tap Skip Feedback Indicators */}
       {skipFeedback?.side === 'left' && (
-        <div className="absolute left-8 sm:left-16 top-1/2 -translate-y-1/2 flex flex-col items-center justify-center w-20 h-20 bg-black/80 backdrop-blur-md rounded-full border border-white/20 text-white z-30 pointer-events-none shadow-2xl animate-bounce">
-          <RotateCcw className="w-7 h-7 text-brand-500" />
-          <span className="text-xs font-black font-mono mt-0.5">{skipFeedback.text}</span>
+        <div className="absolute left-6 sm:left-16 top-1/2 -translate-y-1/2 flex flex-col items-center justify-center w-16 h-16 sm:w-20 sm:h-20 bg-black/80 backdrop-blur-md rounded-full border border-white/20 text-white z-30 pointer-events-none shadow-2xl animate-bounce">
+          <RotateCcw className="w-6 h-6 sm:w-7 sm:h-7 text-brand-500" />
+          <span className="text-[11px] sm:text-xs font-black font-mono mt-0.5">{skipFeedback.text}</span>
         </div>
       )}
       {skipFeedback?.side === 'right' && (
-        <div className="absolute right-8 sm:right-16 top-1/2 -translate-y-1/2 flex flex-col items-center justify-center w-20 h-20 bg-black/80 backdrop-blur-md rounded-full border border-white/20 text-white z-30 pointer-events-none shadow-2xl animate-bounce">
-          <RotateCw className="w-7 h-7 text-brand-500" />
-          <span className="text-xs font-black font-mono mt-0.5">{skipFeedback.text}</span>
+        <div className="absolute right-6 sm:right-16 top-1/2 -translate-y-1/2 flex flex-col items-center justify-center w-16 h-16 sm:w-20 sm:h-20 bg-black/80 backdrop-blur-md rounded-full border border-white/20 text-white z-30 pointer-events-none shadow-2xl animate-bounce">
+          <RotateCw className="w-6 h-6 sm:w-7 sm:h-7 text-brand-500" />
+          <span className="text-[11px] sm:text-xs font-black font-mono mt-0.5">{skipFeedback.text}</span>
         </div>
       )}
 
-      {/* MOBILE ONLY: Parallel Side Vertical Sliders (Left: Brightness, Right: Volume) */}
-      <div
-        className={`absolute top-1/2 -translate-y-1/2 left-3 right-3 flex justify-between items-center pointer-events-none transition-opacity duration-300 z-30 sm:hidden ${
-          showControls ? 'opacity-100' : 'opacity-0'
-        }`}
-      >
-        {/* Left Side: Mobile Brightness Slider */}
-        <div className="pointer-events-auto no-player-click flex flex-col items-center bg-black/75 backdrop-blur-md p-2 rounded-2xl border border-white/10 space-y-2 shadow-2xl">
-          <Sun className="w-4 h-4 text-amber-400" />
-          <input
-            type="range"
-            min={0.2}
-            max={1.2}
-            step={0.05}
-            value={brightness}
-            onChange={(e) => setBrightness(parseFloat(e.target.value))}
-            className="w-1.5 h-24 accent-amber-400 bg-gray-700/80 rounded-lg appearance-none cursor-pointer [writing-mode:vertical-lr] [direction:rtl]"
-            title={`Brightness: ${Math.round(brightness * 100)}%`}
-          />
-          <span className="text-[9px] font-mono font-bold text-amber-400">{Math.round(brightness * 100)}%</span>
-        </div>
-
-        {/* Right Side: Mobile Volume Slider */}
-        <div className="pointer-events-auto no-player-click flex flex-col items-center bg-black/75 backdrop-blur-md p-2 rounded-2xl border border-white/10 space-y-2 shadow-2xl">
-          <button onClick={toggleMute} className="hover:text-brand-500 transition-colors">
-            {isMuted || volume === 0 ? (
-              <VolumeX className="w-4 h-4 text-red-500" />
-            ) : (
-              <Volume2 className="w-4 h-4 text-brand-500" />
-            )}
-          </button>
-          <input
-            type="range"
-            min={0}
-            max={1}
-            step={0.05}
-            value={isMuted ? 0 : volume}
-            onChange={handleVolumeChange}
-            className="w-1.5 h-24 accent-brand-500 bg-gray-700/80 rounded-lg appearance-none cursor-pointer [writing-mode:vertical-lr] [direction:rtl]"
-            title={`Volume: ${Math.round((isMuted ? 0 : volume) * 100)}%`}
-          />
-          <span className="text-[9px] font-mono font-bold text-brand-500">{Math.round((isMuted ? 0 : volume) * 100)}%</span>
-        </div>
-      </div>
-
       {/* Overlay Title when paused or hovering */}
       <div
-        className={`absolute top-0 left-0 right-0 p-4 sm:p-6 bg-gradient-to-b from-black/90 via-black/40 to-transparent transition-opacity duration-300 pointer-events-none flex items-center justify-between z-20 ${
-          showControls ? 'opacity-100' : 'opacity-0'
+        className={`absolute top-0 left-0 right-0 p-3 sm:p-5 bg-gradient-to-b from-black/90 via-black/40 to-transparent transition-opacity duration-300 pointer-events-none flex items-center justify-between z-20 ${
+          showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'
         }`}
       >
-        <div>
-          <h3 className="text-white font-bold text-sm sm:text-xl drop-shadow truncate max-w-xs sm:max-w-md">{contentTitle}</h3>
-          <p className="text-[11px] text-brand-500 font-semibold uppercase tracking-wider">{selectedQuality} Streaming</p>
+        <div className="pr-4 min-w-0">
+          <h3 className="text-white font-bold text-xs sm:text-lg drop-shadow truncate max-w-[200px] sm:max-w-md">{contentTitle}</h3>
+          <p className="text-[10px] sm:text-[11px] text-brand-500 font-semibold uppercase tracking-wider">{selectedQuality} Streaming</p>
         </div>
       </div>
 
@@ -877,20 +874,21 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       {!isPlaying && !isBuffering && (
         <button
           onClick={togglePlay}
-          className="no-player-click absolute inset-0 m-auto w-16 h-16 sm:w-20 sm:h-20 bg-brand-500/90 hover:bg-brand-500 rounded-full flex items-center justify-center text-white shadow-2xl transition-transform hover:scale-110 z-20"
+          className="no-player-click absolute inset-0 m-auto w-14 h-14 sm:w-20 sm:h-20 bg-brand-500/90 hover:bg-brand-500 rounded-full flex items-center justify-center text-white shadow-2xl transition-transform hover:scale-110 z-20"
+          aria-label="Play video"
         >
-          <Play className="w-8 h-8 sm:w-10 sm:h-10 fill-white ml-1" />
+          <Play className="w-7 h-7 sm:w-10 sm:h-10 fill-white ml-0.5" />
         </button>
       )}
 
-      {/* Player Controls Bar */}
+      {/* Mobile-First Player Controls Bar */}
       <div
-        className={`absolute bottom-0 left-0 right-0 p-3 sm:p-5 bg-gradient-to-t from-black/95 via-black/80 to-transparent transition-opacity duration-300 space-y-2.5 z-30 ${
-          showControls ? 'opacity-100' : 'opacity-0'
+        className={`absolute bottom-0 left-0 right-0 p-2 sm:p-4 bg-gradient-to-t from-black/95 via-black/80 to-transparent transition-opacity duration-300 space-y-1.5 sm:space-y-2.5 z-30 ${
+          showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'
         }`}
       >
         {/* Scrub Bar */}
-        <div className="relative flex items-center no-player-click">
+        <div className="relative flex items-center no-player-click py-1">
           <input
             type="range"
             min={0}
@@ -898,15 +896,21 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             step={0.1}
             value={currentTime}
             onChange={handleSeek}
-            className="w-full h-1.5 bg-gray-700/80 rounded-lg appearance-none cursor-pointer accent-brand-500 hover:h-2.5 transition-all"
+            className="w-full h-1 sm:h-1.5 bg-gray-700/80 rounded-lg appearance-none cursor-pointer accent-brand-500 hover:h-2 transition-all touch-none"
+            aria-label="Video seek scrubber"
           />
         </div>
 
         {/* Action Controls */}
-        <div className="flex items-center justify-between text-white no-player-click">
-          <div className="flex items-center space-x-3 sm:space-x-4">
-            <button onClick={togglePlay} className="hover:text-brand-500 transition-colors">
-              {isPlaying ? <Pause className="w-5 h-5 sm:w-6 sm:h-6" /> : <Play className="w-5 h-5 sm:w-6 sm:h-6 fill-white" />}
+        <div className="flex items-center justify-between text-white no-player-click gap-2">
+          {/* Left Controls: Play, Rewind 10s, Forward 10s, Timestamp */}
+          <div className="flex items-center space-x-1.5 sm:space-x-3 min-w-0">
+            <button
+              onClick={togglePlay}
+              className="p-1 sm:p-1.5 hover:text-brand-500 transition-colors flex-none"
+              aria-label={isPlaying ? 'Pause' : 'Play'}
+            >
+              {isPlaying ? <Pause className="w-4 h-4 sm:w-5 sm:h-5" /> : <Play className="w-4 h-4 sm:w-5 sm:h-5 fill-white" />}
             </button>
 
             <button
@@ -915,25 +919,39 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 setSkipFeedback({ side: 'left', text: '-10s', id: Date.now() });
                 setTimeout(() => setSkipFeedback(null), 800);
               }}
-              className="hover:text-gray-300 transition-colors"
+              className="p-1 sm:p-1.5 hover:text-gray-300 transition-colors flex-none"
               title="Seek back 10s"
+              aria-label="Seek back 10s"
             >
-              <RotateCcw className="w-4 h-4 sm:w-5 sm:h-5" />
+              <RotateCcw className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+            </button>
+
+            <button
+              onClick={() => {
+                if (videoRef.current) videoRef.current.currentTime = Math.min(duration, videoRef.current.currentTime + 10);
+                setSkipFeedback({ side: 'right', text: '+10s', id: Date.now() });
+                setTimeout(() => setSkipFeedback(null), 800);
+              }}
+              className="p-1 sm:p-1.5 hover:text-gray-300 transition-colors flex-none"
+              title="Seek forward 10s"
+              aria-label="Seek forward 10s"
+            >
+              <RotateCw className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
             </button>
 
             {/* Timestamp */}
-            <div className="text-[11px] sm:text-xs font-mono text-gray-300">
+            <div className="text-[10px] sm:text-xs font-mono text-gray-300 truncate select-none whitespace-nowrap">
               <span>{formatTime(currentTime)}</span>
-              <span className="mx-1 text-gray-500">/</span>
+              <span className="mx-0.5 sm:mx-1 text-gray-500">/</span>
               <span>{formatTime(duration)}</span>
             </div>
           </div>
 
-          {/* Right Tools & DESKTOP Sliders */}
-          <div className="flex items-center space-x-2.5 sm:space-x-4 relative">
-            {/* DESKTOP ONLY: Brightness Control */}
+          {/* Right Controls: Desktop Sliders (Hidden on mobile), Settings, PiP, Fullscreen */}
+          <div className="flex items-center space-x-1 sm:space-x-3 relative flex-none">
+            {/* DESKTOP ONLY: Brightness Control (Hidden on Mobile) */}
             <div className="hidden sm:flex items-center space-x-2 bg-black/60 backdrop-blur-md px-2.5 py-1 rounded-xl border border-white/10" title="Adjust Brightness">
-              <Sun className="w-4 h-4 text-amber-400 flex-none" />
+              <Sun className="w-3.5 h-3.5 text-amber-400 flex-none" />
               <input
                 type="range"
                 min={0.2}
@@ -941,18 +959,18 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 step={0.05}
                 value={brightness}
                 onChange={(e) => setBrightness(parseFloat(e.target.value))}
-                className="w-16 lg:w-24 h-1.5 accent-amber-400 bg-gray-700/80 rounded-lg appearance-none cursor-pointer"
+                className="w-16 lg:w-20 h-1.5 accent-amber-400 bg-gray-700/80 rounded-lg appearance-none cursor-pointer"
               />
               <span className="text-[10px] font-mono text-amber-400 w-7 text-right">{Math.round(brightness * 100)}%</span>
             </div>
 
-            {/* DESKTOP ONLY: Volume Control */}
+            {/* DESKTOP ONLY: Volume Control (Hidden on Mobile) */}
             <div className="hidden sm:flex items-center space-x-2 bg-black/60 backdrop-blur-md px-2.5 py-1 rounded-xl border border-white/10" title="Adjust Volume">
               <button onClick={toggleMute} className="hover:text-brand-500 transition-colors flex-none">
                 {isMuted || volume === 0 ? (
-                  <VolumeX className="w-4 h-4 text-red-500" />
+                  <VolumeX className="w-3.5 h-3.5 text-red-500" />
                 ) : (
-                  <Volume2 className="w-4 h-4 text-brand-500" />
+                  <Volume2 className="w-3.5 h-3.5 text-brand-500" />
                 )}
               </button>
               <input
@@ -962,168 +980,195 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 step={0.05}
                 value={isMuted ? 0 : volume}
                 onChange={handleVolumeChange}
-                className="w-16 lg:w-24 h-1.5 accent-brand-500 bg-gray-700/80 rounded-lg appearance-none cursor-pointer"
+                className="w-16 lg:w-20 h-1.5 accent-brand-500 bg-gray-700/80 rounded-lg appearance-none cursor-pointer"
               />
               <span className="text-[10px] font-mono text-brand-500 w-7 text-right">{Math.round((isMuted ? 0 : volume) * 100)}%</span>
             </div>
 
-            {/* Speed & Quality Settings Popup */}
+            {/* Settings Button */}
             <button
               onClick={() => setShowSettings(!showSettings)}
-              className="hover:text-brand-500 transition-colors"
+              className="p-1 sm:p-1.5 hover:text-brand-500 transition-colors flex-none"
               title="Settings"
+              aria-label="Playback Settings"
             >
-              <Settings className="w-5 h-5" />
+              <Settings className="w-4 h-4 sm:w-5 sm:h-5" />
             </button>
 
-            {showSettings && (
-              <div className="absolute right-12 bottom-10 w-64 bg-dark-card border border-dark-border rounded-xl shadow-2xl p-3 z-50 text-xs space-y-3 max-h-96 overflow-y-auto">
-                <div>
-                  <h4 className="font-bold text-gray-400 uppercase tracking-wider mb-1.5">Quality</h4>
-                  <div className="space-y-1">
-                    {mediaList && mediaList.length > 0 ? (
-                      mediaList.map((m) => (
-                        <button
-                          key={m._id}
-                          onClick={() => handleQualityChange(m.quality)}
-                          className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg font-medium transition-colors ${
-                            selectedQuality === m.quality ? 'bg-brand-500 text-white' : 'hover:bg-dark-hover text-gray-300'
-                          }`}
-                        >
-                          <span>{m.quality} ({m.resolution})</span>
-                          {selectedQuality === m.quality && <Check className="w-3.5 h-3.5" />}
-                        </button>
-                      ))
-                    ) : (
-                      <span className="text-gray-400">1080p Standard</span>
-                    )}
-                  </div>
-                </div>
-
-                {/* Audio Compatibility Section (Fix EAC3/AC3 sound) */}
-                <div className="border-t border-dark-border pt-2">
-                  <div className="flex items-center justify-between mb-1.5">
-                    <h4 className="font-bold text-gray-400 uppercase tracking-wider">Audio Format</h4>
-                    <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${isTranscodeMode ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-gray-700/50 text-gray-400'}`}>
-                      {isTranscodeMode ? 'AAC Fixed' : 'Original'}
-                    </span>
-                  </div>
-                  <button
-                    onClick={handleToggleTranscodeMode}
-                    className={`w-full py-2 px-2.5 rounded-lg font-medium text-left flex items-center justify-between transition-colors ${
-                      isTranscodeMode
-                        ? 'bg-emerald-600 text-white'
-                        : 'bg-dark-surface hover:bg-dark-hover text-gray-200 border border-white/5'
-                    }`}
-                  >
-                    <div className="flex flex-col">
-                      <span className="font-semibold text-xs">
-                        {isTranscodeMode ? '✓ AAC Audio Enabled' : '🔊 Fix Audio (Convert to AAC)'}
-                      </span>
-                      <span className="text-[10px] opacity-80">
-                        {isTranscodeMode ? 'Universal browser sound active' : 'Fixes silence on Dolby EAC3/AC3 films'}
-                      </span>
-                    </div>
-                  </button>
-                </div>
-
-                {/* Audio Enhancement Section */}
-                <div className="border-t border-dark-border pt-2">
-                  <div className="flex items-center justify-between mb-1.5">
-                    <h4 className="font-bold text-gray-400 uppercase tracking-wider">Audio Boost</h4>
-                    <button
-                      onClick={() => setShowAudioHelp(true)}
-                      className="text-brand-400 hover:text-brand-300 text-[10px] flex items-center gap-0.5"
-                    >
-                      <HelpCircle className="w-3 h-3" />
-                      No Sound?
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-3 gap-1">
-                    {[
-                      { label: '100%', val: 1 },
-                      { label: '150%', val: 1.5 },
-                      { label: '200%', val: 2 },
-                    ].map((b) => (
-                      <button
-                        key={b.val}
-                        onClick={() => handleAudioBoostChange(b.val)}
-                        className={`py-1 rounded text-center font-medium transition-colors ${
-                          audioBoost === b.val ? 'bg-brand-500 text-white' : 'bg-dark-surface text-gray-300 hover:bg-dark-hover'
-                        }`}
-                      >
-                        {b.label}
-                      </button>
-                    ))}
-                  </div>
-                  <p className="text-[10px] text-gray-500 mt-1">Normalizes 5.1 surround dialogue</p>
-                </div>
-
-                {/* Multi-Track Audio Selection (if detected) */}
-                {audioTracksList.length > 1 && (
-                  <div className="border-t border-dark-border pt-2">
-                    <h4 className="font-bold text-gray-400 uppercase tracking-wider mb-1.5">Audio Track</h4>
-                    <div className="space-y-1">
-                      {audioTracksList.map((tr) => (
-                        <button
-                          key={tr.index}
-                          onClick={() => handleSelectAudioTrack(tr.index)}
-                          className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg font-medium transition-colors ${
-                            selectedAudioTrack === tr.index ? 'bg-brand-500 text-white' : 'hover:bg-dark-hover text-gray-300'
-                          }`}
-                        >
-                          <span className="truncate">{tr.label}</span>
-                          {selectedAudioTrack === tr.index && <Check className="w-3.5 h-3.5 flex-none ml-1" />}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                <div className="border-t border-dark-border pt-2">
-                  <h4 className="font-bold text-gray-400 uppercase tracking-wider mb-1.5">Speed</h4>
-                  <div className="grid grid-cols-5 gap-1">
-                    {[0.75, 1, 1.25, 1.5, 2].map((speed) => (
-                      <button
-                        key={speed}
-                        onClick={() => handleSpeedChange(speed)}
-                        className={`py-1 rounded text-center font-medium ${
-                          playbackSpeed === speed ? 'bg-brand-500 text-white' : 'bg-dark-surface text-gray-300 hover:bg-dark-hover'
-                        }`}
-                      >
-                        {speed}x
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {currentDownloadUrl && (
-                  <div className="border-t border-dark-border pt-2">
-                    <a
-                      href={currentDownloadUrl}
-                      download
-                      className="w-full flex items-center justify-center gap-1.5 py-1.5 px-2 bg-dark-surface hover:bg-dark-hover text-emerald-400 rounded-lg font-medium transition-colors"
-                    >
-                      <Download className="w-3.5 h-3.5" />
-                      <span>Download File</span>
-                    </a>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* PiP */}
-            <button onClick={togglePictureInPicture} className="hover:text-gray-300 transition-colors hidden sm:block" title="Picture in Picture">
-              <Tv className="w-5 h-5" />
+            {/* Picture in Picture (Desktop only) */}
+            <button onClick={togglePictureInPicture} className="p-1 sm:p-1.5 hover:text-gray-300 transition-colors hidden sm:block flex-none" title="Picture in Picture">
+              <Tv className="w-4 h-4 sm:w-5 sm:h-5" />
             </button>
 
             {/* Fullscreen */}
-            <button onClick={toggleFullscreen} className="hover:text-gray-300 transition-colors" title="Toggle Fullscreen">
-              {isFullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}
+            <button onClick={toggleFullscreen} className="p-1 sm:p-1.5 hover:text-gray-300 transition-colors flex-none" title="Toggle Fullscreen" aria-label="Toggle Fullscreen">
+              {isFullscreen ? <Minimize className="w-4 h-4 sm:w-5 sm:h-5" /> : <Maximize className="w-4 h-4 sm:w-5 sm:h-5" />}
             </button>
           </div>
         </div>
       </div>
+
+      {/* Settings Modal: Mobile Bottom Sheet + Desktop Popover */}
+      {showSettings && (
+        <>
+          {/* Mobile Backdrop */}
+          <div
+            className="fixed inset-0 bg-black/75 backdrop-blur-sm z-40 sm:hidden"
+            onClick={() => setShowSettings(false)}
+          />
+
+          <div className="fixed inset-x-0 bottom-0 sm:inset-auto sm:right-4 sm:bottom-14 w-full sm:w-72 bg-dark-card border-t sm:border border-dark-border rounded-t-3xl sm:rounded-2xl shadow-2xl p-4 sm:p-3.5 z-50 text-xs space-y-3.5 max-h-[75vh] sm:max-h-96 overflow-y-auto animate-slide-up sm:animate-fade-in no-player-click">
+            {/* Mobile Sheet Header */}
+            <div className="flex items-center justify-between border-b border-dark-border pb-2.5 sm:hidden">
+              <div className="flex items-center space-x-2">
+                <Settings className="w-4 h-4 text-brand-500" />
+                <span className="font-bold text-white text-sm">Playback Settings</span>
+              </div>
+              <button
+                onClick={() => setShowSettings(false)}
+                className="p-1 text-gray-400 hover:text-white rounded-lg hover:bg-white/10"
+                aria-label="Close settings"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Quality Selector */}
+            <div>
+              <h4 className="font-bold text-gray-400 uppercase tracking-wider mb-1.5 text-[10px]">Stream Quality</h4>
+              <div className="space-y-1">
+                {mediaList && mediaList.length > 0 ? (
+                  mediaList.map((m) => (
+                    <button
+                      key={m._id}
+                      onClick={() => handleQualityChange(m.quality)}
+                      className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg font-medium transition-colors ${
+                        selectedQuality === m.quality ? 'bg-brand-500 text-white' : 'hover:bg-dark-hover text-gray-300'
+                      }`}
+                    >
+                      <span>{m.quality} ({m.resolution})</span>
+                      {selectedQuality === m.quality && <Check className="w-3.5 h-3.5" />}
+                    </button>
+                  ))
+                ) : (
+                  <span className="text-gray-400">1080p Standard</span>
+                )}
+              </div>
+            </div>
+
+            {/* Audio Compatibility Section (Fix EAC3/AC3 sound) */}
+            <div className="border-t border-dark-border pt-2.5">
+              <div className="flex items-center justify-between mb-1.5">
+                <h4 className="font-bold text-gray-400 uppercase tracking-wider text-[10px]">Audio Format</h4>
+                <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${isTranscodeMode ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-gray-700/50 text-gray-400'}`}>
+                  {isTranscodeMode ? 'AAC Fixed' : 'Original'}
+                </span>
+              </div>
+              <button
+                onClick={handleToggleTranscodeMode}
+                className={`w-full py-2 px-2.5 rounded-lg font-medium text-left flex items-center justify-between transition-colors ${
+                  isTranscodeMode
+                    ? 'bg-emerald-600 text-white'
+                    : 'bg-dark-surface hover:bg-dark-hover text-gray-200 border border-white/5'
+                }`}
+              >
+                <div className="flex flex-col">
+                  <span className="font-semibold text-xs">
+                    {isTranscodeMode ? '✓ AAC Audio Enabled' : '🔊 Fix Audio (Convert to AAC)'}
+                  </span>
+                  <span className="text-[10px] opacity-80">
+                    {isTranscodeMode ? 'Universal browser sound active' : 'Fixes silence on Dolby EAC3/AC3 films'}
+                  </span>
+                </div>
+              </button>
+            </div>
+
+            {/* Audio Enhancement Section */}
+            <div className="border-t border-dark-border pt-2.5">
+              <div className="flex items-center justify-between mb-1.5">
+                <h4 className="font-bold text-gray-400 uppercase tracking-wider text-[10px]">Audio Boost</h4>
+                <button
+                  onClick={() => setShowAudioHelp(true)}
+                  className="text-brand-400 hover:text-brand-300 text-[10px] flex items-center gap-0.5"
+                >
+                  <HelpCircle className="w-3 h-3" />
+                  No Sound?
+                </button>
+              </div>
+              <div className="grid grid-cols-3 gap-1">
+                {[
+                  { label: '100%', val: 1 },
+                  { label: '150%', val: 1.5 },
+                  { label: '200%', val: 2 },
+                ].map((b) => (
+                  <button
+                    key={b.val}
+                    onClick={() => handleAudioBoostChange(b.val)}
+                    className={`py-1 rounded text-center font-medium transition-colors ${
+                      audioBoost === b.val ? 'bg-brand-500 text-white' : 'bg-dark-surface text-gray-300 hover:bg-dark-hover'
+                    }`}
+                  >
+                    {b.label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[10px] text-gray-500 mt-1">Normalizes 5.1 surround dialogue</p>
+            </div>
+
+            {/* Multi-Track Audio Selection (if detected) */}
+            {audioTracksList.length > 1 && (
+              <div className="border-t border-dark-border pt-2.5">
+                <h4 className="font-bold text-gray-400 uppercase tracking-wider mb-1.5 text-[10px]">Audio Track</h4>
+                <div className="space-y-1">
+                  {audioTracksList.map((tr) => (
+                    <button
+                      key={tr.index}
+                      onClick={() => handleSelectAudioTrack(tr.index)}
+                      className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg font-medium transition-colors ${
+                        selectedAudioTrack === tr.index ? 'bg-brand-500 text-white' : 'hover:bg-dark-hover text-gray-300'
+                      }`}
+                    >
+                      <span className="truncate">{tr.label}</span>
+                      {selectedAudioTrack === tr.index && <Check className="w-3.5 h-3.5 flex-none ml-1" />}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Speed Control */}
+            <div className="border-t border-dark-border pt-2.5">
+              <h4 className="font-bold text-gray-400 uppercase tracking-wider mb-1.5 text-[10px]">Playback Speed</h4>
+              <div className="grid grid-cols-5 gap-1">
+                {[0.75, 1, 1.25, 1.5, 2].map((speed) => (
+                  <button
+                    key={speed}
+                    onClick={() => handleSpeedChange(speed)}
+                    className={`py-1 rounded text-center font-medium ${
+                      playbackSpeed === speed ? 'bg-brand-500 text-white' : 'bg-dark-surface text-gray-300 hover:bg-dark-hover'
+                    }`}
+                  >
+                    {speed}x
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {currentDownloadUrl && (
+              <div className="border-t border-dark-border pt-2.5">
+                <a
+                  href={currentDownloadUrl}
+                  download
+                  className="w-full flex items-center justify-center gap-1.5 py-2 px-2 bg-dark-surface hover:bg-dark-hover text-emerald-400 rounded-lg font-medium transition-colors text-xs"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Download File</span>
+                </a>
+              </div>
+            )}
+          </div>
+        </>
+      )}
 
       {/* Audio Troubleshooting Help Modal */}
       {showAudioHelp && (
