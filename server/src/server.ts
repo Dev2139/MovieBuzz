@@ -24,6 +24,7 @@ import searchRoutes from './routes/searchRoutes';
 import userRoutes from './routes/userRoutes';
 import adminRoutes from './routes/adminRoutes';
 import requestRoutes from './routes/requestRoutes';
+import streamingRoutes from './routes/streamingRoutes';
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -82,6 +83,7 @@ app.use('/api', searchRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/requests', requestRoutes);
+app.use('/api/streaming', streamingRoutes);
 
 // Root & Health check endpoints
 app.get(['/', '/api', '/api/health'], (req, res) => {

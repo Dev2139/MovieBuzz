@@ -38,6 +38,7 @@ interface VideoPlayerProps {
   imdbId?: string;
   seasonNumber?: number;
   episodeNumber?: number;
+  subtitles?: Array<{ label: string; language: string; src: string; default?: boolean }>;
 }
 
 export const VideoPlayer: React.FC<VideoPlayerProps> = ({
@@ -50,6 +51,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   contentType,
   initialPosition = 0,
   onEnded,
+  subtitles,
 }) => {
   const { user } = useAuth();
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -779,7 +781,19 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         style={{ filter: `brightness(${brightness})` }}
         className="w-full h-full object-contain cursor-pointer transition-[filter] duration-150"
         playsInline
-      />
+      >
+        {subtitles &&
+          subtitles.map((sub, idx) => (
+            <track
+              key={idx}
+              kind="subtitles"
+              label={sub.label}
+              srcLang={sub.language}
+              src={sub.src}
+              default={sub.default}
+            />
+          ))}
+      </video>
 
       {/* Stream Error Overlay */}
       {streamError && !isBuffering && (

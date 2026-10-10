@@ -259,7 +259,6 @@ export const deleteAdminRequestApi = async (id: string) => {
   return res.data;
 };
 
-// --- Dedicated Admin Catalog API (Full Movies & Series with search & status) ---
 export const fetchAdminCatalogApi = async (params?: {
   type?: string;
   status?: string;
@@ -271,3 +270,38 @@ export const fetchAdminCatalogApi = async (params?: {
   const res = await api.get<AdminCatalogResponse>('/admin/catalog', { params });
   return res.data;
 };
+
+// --- MovieBox Streaming Source APIs ---
+export const fetchStreamingSearch = async (query: string, type: 'movie' | 'series' | 'all' = 'all') => {
+  const res = await api.get<{ query: string; results: any[]; count: number }>('/streaming/search', {
+    params: { q: query, type },
+  });
+  return res.data;
+};
+
+export const fetchMovieStreamingSources = async (subjectId: string) => {
+  const res = await api.get<{ subjectId: string; count: number; sources: any[] }>(`/streaming/movies/${subjectId}/sources`);
+  return res.data;
+};
+
+export const fetchEpisodeStreamingSources = async (subjectId: string, season: number = 1, episode: number = 1) => {
+  const res = await api.get<{ subjectId: string; season: number; episode: number; count: number; sources: any[] }>(
+    `/streaming/episodes/${subjectId}/sources`,
+    { params: { season, episode } }
+  );
+  return res.data;
+};
+
+export const resolveStreamingSourcesByTitle = async (
+  title: string,
+  year?: number,
+  type: 'movie' | 'series' = 'movie',
+  season: number = 1,
+  episode: number = 1
+) => {
+  const res = await api.get<{ subject: any; sources: any[] }>('/streaming/resolve', {
+    params: { title, year, type, season, episode },
+  });
+  return res.data;
+};
+

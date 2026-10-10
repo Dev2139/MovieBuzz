@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { fetchContentBySlug, fetchSeriesEpisodeByNumber, fetchUserHistory, fetchContentList } from '../services/api';
+import { fetchContentBySlug, fetchSeriesEpisodeByNumber, fetchUserHistory, fetchContentList, resolveStreamingSourcesByTitle } from '../services/api';
 import { VideoPlayer } from '../components/VideoPlayer';
-import { ChevronLeft, ChevronRight, List, Film, Tv, Play, Sparkles } from 'lucide-react';
+import { ChevronLeft, ChevronRight, List, Film, Tv, Play, Sparkles, Server } from 'lucide-react';
 import { getLocalPlaybackItem } from '../utils/localStorage';
 import { resolveMediaUrl } from '../utils/url';
 import { useAuth } from '../context/AuthContext';
@@ -85,8 +85,49 @@ export const WatchPage: React.FC = () => {
   }
 
   const currentEpNum = Number(episode || 1);
+  const currentSeasonNum = Number(season || 1);
   const prevEp = playlist.find((e) => e.episodeNumber === currentEpNum - 1);
   const nextEp = playlist.find((e) => e.episodeNumber === currentEpNum + 1);
+
+  // MovieBox Dynamic Playback Source Resolution
+  const rawTitle = isMovie ? movieData?.content?.title : seriesObj?.title;
+  const rawYear = isMovie ? movieData?.content?.releaseYear : seriesObj?.releaseYear;
+
+  const { data: movieboxData } = useQuery({
+    queryKey: ['moviebox-sources', rawTitle, rawYear, isMovie ? 'movie' : 'series', currentSeasonNum, currentEpNum],
+    queryFn: () =>
+      resolveStreamingSourcesByTitle(
+        rawTitle!,
+        rawYear,
+        isMovie ? 'movie' : 'series',
+        currentSeasonNum,
+        currentEpNum
+      ),
+    enabled: Boolean(rawTitle),
+    staleTime: 10 * 60 * 1000,
+  });
+
+  const movieboxMediaList: any[] = (movieboxData?.sources || []).map((s: any) => ({
+    _id: `moviebox-${s.resourceId || s.quality}`,
+    quality: s.quality,
+    resolution: s.resolution,
+    fileSize: s.fileSize,
+    mimeType: 'video/mp4',
+    provider: 'moviebox',
+    providerMediaId: s.resourceId,
+    streamUrl: s.streamUrl,
+    downloadUrl: s.streamUrl,
+  }));
+
+  const [activeSourceProvider, setActiveSourceProvider] = useState<'all' | 'telegram' | 'moviebox'>('all');
+
+  // Compute effective media list based on user preference or availability
+  let effectiveMediaList = [...mediaList];
+  if (activeSourceProvider === 'moviebox' || effectiveMediaList.length === 0) {
+    effectiveMediaList = movieboxMediaList.length > 0 ? movieboxMediaList : mediaList;
+  } else if (activeSourceProvider === 'all') {
+    effectiveMediaList = [...mediaList, ...movieboxMediaList];
+  }
 
   // Saved position lookup (Cloud authenticated history first, fallback to local storage)
   let initialPos = 0;
@@ -112,8 +153,8 @@ export const WatchPage: React.FC = () => {
   return (
     <div className="min-h-screen bg-dark-base text-white pt-16 sm:pt-20 pb-20 md:pb-16 select-none">
       <div className="max-w-7xl mx-auto px-2 sm:px-6 lg:px-8 space-y-4 sm:space-y-6">
-        {/* Navigation Breadcrumb */}
-        <div className="flex items-center justify-between text-xs text-gray-400 px-2 sm:px-0">
+        {/* Navigation Breadcrumb & Source Indicator */}
+        <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-gray-400 px-2 sm:px-0">
           <button
             onClick={() => navigate(-1)}
             className="flex items-center space-x-1 hover:text-white transition-colors bg-dark-card border border-dark-border px-2.5 py-1.5 rounded-lg active:scale-95"
@@ -122,16 +163,62 @@ export const WatchPage: React.FC = () => {
             <span>Back</span>
           </button>
 
-          <div className="flex items-center space-x-2 font-medium">
-            <span className="text-brand-500 font-bold">{isMovie ? 'MOVIE' : 'SERIES EPISODE'}</span>
-            <span>•</span>
-            <span className="text-white truncate max-w-[150px] sm:max-w-xs">{contentTitle}</span>
+          {/* Source Provider Badges & Switcher */}
+          <div className="flex items-center gap-2">
+            {mediaList.length > 0 && movieboxMediaList.length > 0 && (
+              <div className="flex items-center gap-1 bg-dark-card border border-dark-border px-1.5 py-1 rounded-lg">
+                <span className="text-[10px] text-gray-400 font-semibold px-1">Source:</span>
+                <button
+                  onClick={() => setActiveSourceProvider('all')}
+                  className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all ${
+                    activeSourceProvider === 'all'
+                      ? 'bg-brand-500 text-white shadow'
+                      : 'text-gray-400 hover:text-white'
+                  }`}
+                >
+                  All Qualities
+                </button>
+                <button
+                  onClick={() => setActiveSourceProvider('telegram')}
+                  className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all ${
+                    activeSourceProvider === 'telegram'
+                      ? 'bg-brand-500 text-white shadow'
+                      : 'text-gray-400 hover:text-white'
+                  }`}
+                >
+                  Telegram Server
+                </button>
+                <button
+                  onClick={() => setActiveSourceProvider('moviebox')}
+                  className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all ${
+                    activeSourceProvider === 'moviebox'
+                      ? 'bg-brand-500 text-white shadow'
+                      : 'text-gray-400 hover:text-white'
+                  }`}
+                >
+                  MovieBox Stream
+                </button>
+              </div>
+            )}
+
+            {mediaList.length === 0 && movieboxMediaList.length > 0 && (
+              <span className="flex items-center gap-1 text-[10px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-2 py-1 rounded-md">
+                <Sparkles className="w-3 h-3 text-emerald-400" />
+                <span>MovieBox Direct Stream</span>
+              </span>
+            )}
+
+            <div className="flex items-center space-x-2 font-medium">
+              <span className="text-brand-500 font-bold">{isMovie ? 'MOVIE' : 'SERIES EPISODE'}</span>
+              <span>•</span>
+              <span className="text-white truncate max-w-[150px] sm:max-w-xs">{contentTitle}</span>
+            </div>
           </div>
         </div>
 
         {/* Reusable Video Player */}
         <VideoPlayer
-          mediaList={mediaList}
+          mediaList={effectiveMediaList}
           contentId={contentId}
           episodeId={episodeId}
           contentTitle={contentTitle}
