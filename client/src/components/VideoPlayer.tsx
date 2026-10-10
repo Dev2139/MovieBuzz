@@ -16,6 +16,7 @@ import {
   Film,
   Download,
   HelpCircle,
+  Zap,
 } from 'lucide-react';
 import { Media } from '../types';
 import { useAuth } from '../context/AuthContext';
@@ -49,10 +50,43 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   contentType,
   initialPosition = 0,
   onEnded,
+  tmdbId,
+  imdbId,
+  seasonNumber = 1,
+  episodeNumber = 1,
 }) => {
   const { user } = useAuth();
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  const hasPartner = Boolean(tmdbId || imdbId);
+  const [streamSource, setStreamSource] = useState<'partner' | 'telegram'>(() => {
+    return hasPartner ? 'partner' : 'telegram';
+  });
+
+  useEffect(() => {
+    if (!hasPartner && streamSource !== 'telegram') {
+      setStreamSource('telegram');
+    }
+  }, [hasPartner, streamSource]);
+
+  const getPartnerUrl = (): string | null => {
+    if (!tmdbId && !imdbId) return null;
+    const isMovie = contentType === 'movie';
+    const s = seasonNumber || 1;
+    const e = episodeNumber || 1;
+
+    if (tmdbId) {
+      return isMovie
+        ? `https://player.autoembed.cc/embed/movie/${tmdbId}`
+        : `https://player.autoembed.cc/embed/tv/${tmdbId}/${s}/${e}`;
+    }
+    return isMovie
+      ? `https://player.autoembed.cc/embed/movie/${imdbId}`
+      : `https://player.autoembed.cc/embed/tv/${imdbId}/${s}/${e}`;
+  };
+
+  const partnerStreamUrl = getPartnerUrl();
 
   const [selectedQuality, setSelectedQuality] = useState<string>(
     mediaList && mediaList.length > 0 ? mediaList[0].quality : '1080p'
@@ -653,25 +687,53 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   }, [streamUrl, isTranscodeMode]);
 
   return (
-    <div
-      ref={containerRef}
-      onMouseMove={handleMouseMove}
-      onClick={handleContainerClick}
-      onTouchStart={handleTouchStart}
-      onTouchMove={handleTouchMove}
-      onTouchEnd={handleTouchEnd}
-      className="relative w-full aspect-video bg-black rounded-xl sm:rounded-2xl overflow-hidden group shadow-2xl select-none touch-none"
-    >
-      <video
-        ref={videoRef}
-        src={getEffectiveStreamUrl(streamUrl, isTranscodeMode)}
-        preload="auto"
-        onTimeUpdate={handleTimeUpdate}
-        onLoadedMetadata={handleLoadedMetadata}
-        onLoadStart={() => setIsBuffering(true)}
-        onWaiting={handleStall}
-        onStalled={handleStall}
-        onSeeking={() => setIsBuffering(true)}
+    <div className="space-y-3">
+      {/* Player Container */}
+      <div
+        ref={containerRef}
+        onMouseMove={streamSource === 'telegram' ? handleMouseMove : undefined}
+        onClick={streamSource === 'telegram' ? handleContainerClick : undefined}
+        onTouchStart={streamSource === 'telegram' ? handleTouchStart : undefined}
+        onTouchMove={streamSource === 'telegram' ? handleTouchMove : undefined}
+        onTouchEnd={streamSource === 'telegram' ? handleTouchEnd : undefined}
+        className="relative w-full aspect-video bg-black rounded-xl sm:rounded-2xl overflow-hidden group shadow-2xl select-none touch-none"
+      >
+        {streamSource === 'partner' ? (
+          <div className="relative w-full h-full bg-black">
+            {partnerStreamUrl ? (
+              <iframe
+                key={`partner-${tmdbId || imdbId}-${seasonNumber}-${episodeNumber}`}
+                src={partnerStreamUrl}
+                title={contentTitle}
+                className="w-full h-full border-0 rounded-xl sm:rounded-2xl"
+                allowFullScreen
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              />
+            ) : (
+              <div className="w-full h-full flex flex-col items-center justify-center bg-black/95 text-center px-6">
+                <p className="text-white font-medium text-sm">Streaming partner unavailable for this title</p>
+                <p className="text-gray-400 text-xs mt-1">Playing from your Telegram server instead.</p>
+                <button
+                  onClick={() => setStreamSource('telegram')}
+                  className="mt-3 px-4 py-2 bg-brand-500 hover:bg-brand-600 text-white rounded-lg text-xs font-semibold"
+                >
+                  Play with Telegram
+                </button>
+              </div>
+            )}
+          </div>
+        ) : (
+          <>
+            <video
+              ref={videoRef}
+              src={getEffectiveStreamUrl(streamUrl, isTranscodeMode)}
+              preload="auto"
+              onTimeUpdate={handleTimeUpdate}
+              onLoadedMetadata={handleLoadedMetadata}
+              onLoadStart={() => setIsBuffering(true)}
+              onWaiting={handleStall}
+              onStalled={handleStall}
+              onSeeking={() => setIsBuffering(true)}
         onSeeked={() => setIsBuffering(false)}
         onCanPlay={() => setIsBuffering(false)}
         onPlay={() => {
@@ -725,6 +787,19 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           <p className="text-gray-400 text-xs max-w-md mb-5 leading-relaxed">{streamError}</p>
 
           <div className="flex flex-wrap items-center justify-center gap-2.5 max-w-md">
+            {hasPartner && (
+              <button
+                onClick={() => {
+                  setStreamError(null);
+                  setStreamSource('partner');
+                }}
+                className="px-4 py-2 bg-gradient-to-r from-amber-500 to-brand-500 hover:from-amber-600 hover:to-brand-600 text-white rounded-xl text-sm font-bold transition-all active:scale-95 shadow-lg shadow-brand-500/25 flex items-center gap-1.5"
+              >
+                <Zap className="w-4 h-4 fill-current" />
+                Switch to Cloud Streaming Partner
+              </button>
+            )}
+
             <button
               onClick={() => {
                 setStreamError(null);
@@ -1254,6 +1329,65 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           </div>
         </div>
       )}
+          </>
+        )}
+      </div>
+
+      {/* Stream Source Selector */}
+      <div className="bg-dark-card/90 border border-dark-border/80 rounded-xl p-3 shadow-lg flex flex-col sm:flex-row sm:items-center justify-between gap-3 backdrop-blur-md">
+        <div className="flex items-center space-x-2 text-xs">
+          <span className="text-gray-400 font-medium">Stream Source:</span>
+          <span className="text-white font-semibold flex items-center space-x-1.5">
+            {streamSource === 'partner' ? (
+              <>
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                <span>Cloud Streaming Partner (0 MB Bandwidth)</span>
+              </>
+            ) : (
+              <>
+                <span className="w-2 h-2 rounded-full bg-sky-400" />
+                <span>Telegram Bot Server (Direct Upload)</span>
+              </>
+            )}
+          </span>
+        </div>
+
+        <div className="flex items-center gap-2">
+          {hasPartner && (
+            <button
+              type="button"
+              onClick={() => {
+                setStreamError(null);
+                setStreamSource('partner');
+              }}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
+                streamSource === 'partner'
+                  ? 'bg-brand-500 text-white shadow-md shadow-brand-500/20'
+                  : 'bg-dark-surface text-gray-300 hover:text-white hover:bg-dark-hover border border-white/5'
+              }`}
+            >
+              <span>⚡ Cloud Partner</span>
+              <span className="text-[10px] opacity-80 font-normal hidden sm:inline">(Fastest)</span>
+            </button>
+          )}
+
+          <button
+            type="button"
+            onClick={() => {
+              setStreamError(null);
+              setStreamSource('telegram');
+            }}
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
+              streamSource === 'telegram'
+                ? 'bg-sky-500 text-white shadow-md shadow-sky-500/20'
+                : 'bg-dark-surface text-gray-300 hover:text-white hover:bg-dark-hover border border-white/5'
+            }`}
+          >
+            <span>📱 Telegram Server</span>
+            <span className="text-[10px] opacity-80 font-normal hidden sm:inline">(Bot File)</span>
+          </button>
+        </div>
+      </div>
     </div>
   );
 };
