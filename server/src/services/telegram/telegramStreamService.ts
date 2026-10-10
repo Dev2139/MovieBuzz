@@ -45,8 +45,10 @@ class TelegramStreamService {
 
   // Map of documentId string -> CachedLocation with fresh fileReference & size
   private locationCache = new Map<string, CachedLocation>();
-  // RAM cache for recent 512KB video byte chunks
+  // RAM cache for recent video byte chunks (400 chunks * 512KB = ~200MB max with LRU eviction)
   private chunkMemoryCache = new Map<string, CachedChunk>();
+  // In-flight download deduplication: prevents duplicate simultaneous MTProto calls for the same chunk
+  private inFlightChunks = new Map<string, Promise<Buffer | null>>();
 
   private getCachedChunk(key: string): Buffer | null {
     const item = this.chunkMemoryCache.get(key);
@@ -58,11 +60,11 @@ class TelegramStreamService {
   }
 
   private setCachedChunk(key: string, buffer: Buffer): void {
-    if (this.chunkMemoryCache.size > 150) {
+    if (this.chunkMemoryCache.size > 400) {
       const oldestKey = this.chunkMemoryCache.keys().next().value;
       if (oldestKey) this.chunkMemoryCache.delete(oldestKey);
     }
-    this.chunkMemoryCache.set(key, { buffer, expiresAt: Date.now() + 60000 });
+    this.chunkMemoryCache.set(key, { buffer, expiresAt: Date.now() + 300000 }); // 5 minutes TTL
   }
 
   async getClient(): Promise<TelegramClient | null> {
@@ -259,118 +261,129 @@ class TelegramStreamService {
     const existing = this.getCachedChunk(cacheKey);
     if (existing) return existing;
 
-    try {
-      const client = await this.getClient();
-      if (!client) return null;
-
-      let decoded: any = null;
-      let docIdStr = fileId;
-      try {
-        decoded = decodeFileId(fileId);
-        if (decoded && decoded.id) docIdStr = String(decoded.id);
-      } catch {}
-
-      let cached = this.locationCache.get(docIdStr) || this.locationCache.get(fileId);
-      if (!cached && !decoded) {
-        await this.refreshLocations(fileId, messageId);
-        cached = this.locationCache.get(docIdStr) || this.locationCache.get(fileId);
-      }
-
-      let inputLocation: any;
-      let dcId: number;
-
-      if (cached) {
-        inputLocation = cached.inputLocation;
-        dcId = cached.dcId;
-      } else if (decoded) {
-        dcId = decoded.dcId || 4;
-        const fileRefBuffer = decoded.fileReference
-          ? (Buffer.isBuffer(decoded.fileReference)
-              ? decoded.fileReference
-              : Buffer.from(decoded.fileReference, 'hex'))
-          : Buffer.alloc(0);
-
-        if (decoded.fileType === 'photo' || decoded.fileType === 'thumbnail') {
-          inputLocation = new Api.InputPhotoFileLocation({
-            id: bigInt(decoded.id) as any,
-            accessHash: bigInt(decoded.access_hash) as any,
-            fileReference: fileRefBuffer,
-            thumbSize: 'm',
-          });
-        } else {
-          inputLocation = new Api.InputDocumentFileLocation({
-            id: bigInt(decoded.id) as any,
-            accessHash: bigInt(decoded.access_hash) as any,
-            fileReference: fileRefBuffer,
-            thumbSize: '',
-          });
-        }
-      } else {
-        return null;
-      }
-
-      for (let attempt = 1; attempt <= 3; attempt++) {
-        try {
-          const request = new Api.upload.GetFile({
-            location: inputLocation,
-            offset: bigInt(safeOffset) as any,
-            limit: safeLimit,
-          });
-
-          let res: any;
-          try {
-            res = await client.invoke(request);
-          } catch (invokeErr: any) {
-            if (
-              invokeErr?.message?.includes('AUTH_KEY_DUPLICATED') ||
-              invokeErr?.message?.includes('406') ||
-              invokeErr?.message?.includes('DISCONNECT')
-            ) {
-              console.warn('[TelegramStreamService] MTProto socket reset triggered for reconnect...');
-              this.client = null;
-              this.initPromise = null;
-            }
-            try {
-              const sender = await client.getSender(dcId);
-              res = await sender.send(request);
-            } catch {
-              throw invokeErr;
-            }
-          }
-
-          if (res && res.bytes) {
-            const buf = Buffer.from(res.bytes);
-            this.setCachedChunk(cacheKey, buf);
-            return buf;
-          }
-        } catch (fileRefErr: any) {
-          if (
-            fileRefErr.message?.includes('FILE_REFERENCE') ||
-            fileRefErr.message?.includes('LOCATION_INVALID') ||
-            fileRefErr.code === 400
-          ) {
-            this.locationCache.delete(docIdStr);
-            this.locationCache.delete(fileId);
-            await this.refreshLocations(fileId, messageId);
-
-            const freshCached = this.locationCache.get(docIdStr) || this.locationCache.get(fileId);
-            if (freshCached) {
-              inputLocation = freshCached.inputLocation;
-              dcId = freshCached.dcId;
-              continue;
-            }
-          }
-
-          if (attempt < 3) {
-            await new Promise((r) => setTimeout(r, 200 * attempt));
-          }
-        }
-      }
-
-      return null;
-    } catch {
-      return null;
+    if (this.inFlightChunks.has(cacheKey)) {
+      return this.inFlightChunks.get(cacheKey)!;
     }
+
+    const task = (async (): Promise<Buffer | null> => {
+      try {
+        const client = await this.getClient();
+        if (!client) return null;
+
+        let decoded: any = null;
+        let docIdStr = fileId;
+        try {
+          decoded = decodeFileId(fileId);
+          if (decoded && decoded.id) docIdStr = String(decoded.id);
+        } catch {}
+
+        let cached = this.locationCache.get(docIdStr) || this.locationCache.get(fileId);
+        if (!cached && !decoded) {
+          await this.refreshLocations(fileId, messageId);
+          cached = this.locationCache.get(docIdStr) || this.locationCache.get(fileId);
+        }
+
+        let inputLocation: any;
+        let dcId: number;
+
+        if (cached) {
+          inputLocation = cached.inputLocation;
+          dcId = cached.dcId;
+        } else if (decoded) {
+          dcId = decoded.dcId || 4;
+          const fileRefBuffer = decoded.fileReference
+            ? (Buffer.isBuffer(decoded.fileReference)
+                ? decoded.fileReference
+                : Buffer.from(decoded.fileReference, 'hex'))
+            : Buffer.alloc(0);
+
+          if (decoded.fileType === 'photo' || decoded.fileType === 'thumbnail') {
+            inputLocation = new Api.InputPhotoFileLocation({
+              id: bigInt(decoded.id) as any,
+              accessHash: bigInt(decoded.access_hash) as any,
+              fileReference: fileRefBuffer,
+              thumbSize: 'm',
+            });
+          } else {
+            inputLocation = new Api.InputDocumentFileLocation({
+              id: bigInt(decoded.id) as any,
+              accessHash: bigInt(decoded.access_hash) as any,
+              fileReference: fileRefBuffer,
+              thumbSize: '',
+            });
+          }
+        } else {
+          return null;
+        }
+
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          try {
+            const request = new Api.upload.GetFile({
+              location: inputLocation,
+              offset: bigInt(safeOffset) as any,
+              limit: safeLimit,
+            });
+
+            let res: any;
+            try {
+              res = await client.invoke(request);
+            } catch (invokeErr: any) {
+              if (
+                invokeErr?.message?.includes('AUTH_KEY_DUPLICATED') ||
+                invokeErr?.message?.includes('406') ||
+                invokeErr?.message?.includes('DISCONNECT')
+              ) {
+                console.warn('[TelegramStreamService] MTProto socket reset triggered for reconnect...');
+                this.client = null;
+                this.initPromise = null;
+              }
+              try {
+                const sender = await client.getSender(dcId);
+                res = await sender.send(request);
+              } catch {
+                throw invokeErr;
+              }
+            }
+
+            if (res && res.bytes) {
+              const buf = Buffer.from(res.bytes);
+              this.setCachedChunk(cacheKey, buf);
+              return buf;
+            }
+          } catch (fileRefErr: any) {
+            if (
+              fileRefErr.message?.includes('FILE_REFERENCE') ||
+              fileRefErr.message?.includes('LOCATION_INVALID') ||
+              fileRefErr.code === 400
+            ) {
+              this.locationCache.delete(docIdStr);
+              this.locationCache.delete(fileId);
+              await this.refreshLocations(fileId, messageId);
+
+              const freshCached = this.locationCache.get(docIdStr) || this.locationCache.get(fileId);
+              if (freshCached) {
+                inputLocation = freshCached.inputLocation;
+                dcId = freshCached.dcId;
+                continue;
+              }
+            }
+
+            if (attempt < 3) {
+              await new Promise((r) => setTimeout(r, 200 * attempt));
+            }
+          }
+        }
+
+        return null;
+      } catch {
+        return null;
+      } finally {
+        this.inFlightChunks.delete(cacheKey);
+      }
+    })();
+
+    this.inFlightChunks.set(cacheKey, task);
+    return task;
   }
 
   /**
@@ -386,11 +399,17 @@ class TelegramStreamService {
       const cacheKey = `${fileId}:${safeOffset}:${safeLimit}`;
       const cachedBuf = this.getCachedChunk(cacheKey);
 
-      // Pre-fetch next chunk asynchronously in RAM background
-      const nextOffset = safeOffset + safeLimit;
-      const nextCacheKey = `${fileId}:${nextOffset}:${safeLimit}`;
-      if (!this.getCachedChunk(nextCacheKey)) {
-        this.fetchAndCacheChunk(fileId, nextOffset, safeLimit, messageId).catch(() => {});
+      // Speculative parallel prefetch: fetch next 2 chunks in advance
+      const nextOffset1 = safeOffset + safeLimit;
+      const nextOffset2 = safeOffset + safeLimit * 2;
+      const nextKey1 = `${fileId}:${nextOffset1}:${safeLimit}`;
+      const nextKey2 = `${fileId}:${nextOffset2}:${safeLimit}`;
+
+      if (!this.getCachedChunk(nextKey1) && !this.inFlightChunks.has(nextKey1)) {
+        this.fetchAndCacheChunk(fileId, nextOffset1, safeLimit, messageId).catch(() => {});
+      }
+      if (!this.getCachedChunk(nextKey2) && !this.inFlightChunks.has(nextKey2)) {
+        this.fetchAndCacheChunk(fileId, nextOffset2, safeLimit, messageId).catch(() => {});
       }
 
       if (cachedBuf) {

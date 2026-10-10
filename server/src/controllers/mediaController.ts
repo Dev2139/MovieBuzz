@@ -139,6 +139,9 @@ export const proxyTelegramFileStream = async (req: Request, res: Response) => {
       if (parts[1]) {
         const requestedEnd = parseInt(parts[1], 10);
         reqSize = Math.min(requestedEnd - start + 1, 1024 * 1024);
+      } else {
+        // Open-ended Range requests (e.g. bytes=0-) get a full 1MB chunk for instant playback startup
+        reqSize = 1024 * 1024;
       }
     }
 
@@ -153,16 +156,20 @@ export const proxyTelegramFileStream = async (req: Request, res: Response) => {
     const rawBuffer = await telegramStreamService.getChunk(activeFileId, alignedOffset, chunkSize, messageId);
 
     if (rawBuffer && rawBuffer.length > 0) {
-      // Trigger speculative background prefetch of next chunk into RAM cache so subsequent Range requests resolve in 0ms!
-      const nextOffset = alignedOffset + chunkSize;
-      if (nextOffset < totalSize) {
-        telegramStreamService.getChunk(activeFileId, nextOffset, chunkSize, messageId).catch(() => {});
+      const sliceStart = start - alignedOffset;
+      let buffer: Buffer = rawBuffer.subarray(sliceStart);
+
+      // If more data was requested than 1 chunk, stitch next chunk from RAM cache for max throughput
+      if (buffer.length < reqSize && alignedOffset + chunkSize < totalSize) {
+        const nextBuf = await telegramStreamService.getChunk(activeFileId, alignedOffset + chunkSize, chunkSize, messageId);
+        if (nextBuf && nextBuf.length > 0) {
+          buffer = Buffer.concat([buffer, nextBuf]);
+        }
       }
 
-      // MTProto succeeded — slice to requested range and return
-      const sliceStart = start - alignedOffset;
-      const sliceEnd = Math.min(sliceStart + reqSize, rawBuffer.length);
-      const buffer = rawBuffer.subarray(sliceStart, sliceEnd);
+      if (buffer.length > reqSize) {
+        buffer = buffer.subarray(0, reqSize);
+      }
 
       if (buffer.length === 0) {
         res.writeHead(416, { 'Content-Range': `bytes */${totalSize}` });
