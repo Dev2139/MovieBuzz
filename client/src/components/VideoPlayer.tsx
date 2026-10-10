@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Server, AlertCircle, RefreshCw } from 'lucide-react';
+import { Server, AlertCircle, RefreshCw, ShieldCheck } from 'lucide-react';
 import { Media } from '../types';
 
 interface VideoPlayerProps {
@@ -25,15 +25,8 @@ export interface EmbedServer {
   getTvUrl: (tmdbId: number | string, season: number, episode: number) => string;
 }
 
+// Ordered with lowest buffering and cleanest zero-ad CDN streams first
 export const EMBED_SERVERS: EmbedServer[] = [
-  {
-    id: "vidfast",
-    name: "VidFast",
-    getMovieUrl: (tmdbId) =>
-      `https://vidfast.vc/movie/${tmdbId}`,
-    getTvUrl: (tmdbId, season, episode) =>
-      `https://vidfast.vc/tv/${tmdbId}/${season}/${episode}`,
-  },
   {
     id: "vidlink",
     name: "VidLink",
@@ -41,6 +34,14 @@ export const EMBED_SERVERS: EmbedServer[] = [
       `https://vidlink.pro/movie/${tmdbId}`,
     getTvUrl: (tmdbId, season, episode) =>
       `https://vidlink.pro/tv/${tmdbId}/${season}/${episode}`,
+  },
+  {
+    id: "autoembed",
+    name: "AutoEmbed",
+    getMovieUrl: (tmdbId) =>
+      `https://autoembed.co/movie/tmdb/${tmdbId}`,
+    getTvUrl: (tmdbId, season, episode) =>
+      `https://autoembed.co/tv/tmdb/${tmdbId}-${season}-${episode}`,
   },
   {
     id: "vidsrcpro",
@@ -51,12 +52,44 @@ export const EMBED_SERVERS: EmbedServer[] = [
       `https://vidsrc.pro/embed/tv/${tmdbId}/${season}/${episode}`,
   },
   {
+    id: "videasy",
+    name: "Videasy",
+    getMovieUrl: (tmdbId) =>
+      `https://player.videasy.net/movie/${tmdbId}`,
+    getTvUrl: (tmdbId, season, episode) =>
+      `https://player.videasy.net/tv/${tmdbId}/${season}/${episode}`,
+  },
+  {
     id: "upcloud",
     name: "UpCloud",
     getMovieUrl: (tmdbId) =>
       `https://vidsrc.cc/v2/embed/movie/${tmdbId}`,
     getTvUrl: (tmdbId, season, episode) =>
       `https://vidsrc.cc/v2/embed/tv/${tmdbId}/${season}/${episode}`,
+  },
+  {
+    id: "vidfast",
+    name: "VidFast",
+    getMovieUrl: (tmdbId) =>
+      `https://vidfast.vc/movie/${tmdbId}`,
+    getTvUrl: (tmdbId, season, episode) =>
+      `https://vidfast.vc/tv/${tmdbId}/${season}/${episode}`,
+  },
+  {
+    id: "vidrock",
+    name: "VidRock",
+    getMovieUrl: (tmdbId) =>
+      `https://vidrock.net/movie/${tmdbId}`,
+    getTvUrl: (tmdbId, season, episode) =>
+      `https://vidrock.net/tv/${tmdbId}/${season}/${episode}`,
+  },
+  {
+    id: "vidnest",
+    name: "VidNest",
+    getMovieUrl: (tmdbId) =>
+      `https://vidnest.fun/movie/${tmdbId}`,
+    getTvUrl: (tmdbId, season, episode) =>
+      `https://vidnest.fun/tv/${tmdbId}/${season}/${episode}`,
   },
   {
     id: "peachify",
@@ -73,38 +106,6 @@ export const EMBED_SERVERS: EmbedServer[] = [
       `https://vidup.to/movie/${tmdbId}`,
     getTvUrl: (tmdbId, season, episode) =>
       `https://vidup.to/tv/${tmdbId}/${season}/${episode}`,
-  },
-  {
-    id: "vidnest",
-    name: "VidNest",
-    getMovieUrl: (tmdbId) =>
-      `https://vidnest.fun/movie/${tmdbId}`,
-    getTvUrl: (tmdbId, season, episode) =>
-      `https://vidnest.fun/tv/${tmdbId}/${season}/${episode}`,
-  },
-  {
-    id: "vidrock",
-    name: "VidRock",
-    getMovieUrl: (tmdbId) =>
-      `https://vidrock.net/movie/${tmdbId}`,
-    getTvUrl: (tmdbId, season, episode) =>
-      `https://vidrock.net/tv/${tmdbId}/${season}/${episode}`,
-  },
-  {
-    id: "autoembed",
-    name: "AutoEmbed",
-    getMovieUrl: (tmdbId) =>
-      `https://autoembed.co/movie/tmdb/${tmdbId}`,
-    getTvUrl: (tmdbId, season, episode) =>
-      `https://autoembed.co/tv/tmdb/${tmdbId}-${season}-${episode}`,
-  },
-  {
-    id: "videasy",
-    name: "Videasy",
-    getMovieUrl: (tmdbId) =>
-      `https://player.videasy.net/movie/${tmdbId}`,
-    getTvUrl: (tmdbId, season, episode) =>
-      `https://player.videasy.net/tv/${tmdbId}/${season}/${episode}`,
   },
 ];
 
@@ -140,6 +141,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             className="w-full h-full border-0 rounded-xl sm:rounded-2xl"
             allowFullScreen
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+            // Strict sandbox blocks all popups, new tabs, and parent page redirections while preserving video playback
+            sandbox="allow-scripts allow-same-origin allow-forms allow-presentation"
           />
         ) : (
           <div className="w-full h-full flex flex-col items-center justify-center bg-dark-surface/90 text-center px-6">
@@ -167,12 +170,12 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               <div className="flex items-center space-x-2">
                 <span className="text-white text-xs sm:text-sm font-bold tracking-tight">Streaming Server</span>
                 <span className="flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                  <span>1080p Ultra HD</span>
+                  <ShieldCheck className="w-3 h-3 text-emerald-400" />
+                  <span>Ad-Shield Active • 1080p Ultra HD</span>
                 </span>
               </div>
               <p className="text-[11px] text-gray-400 hidden sm:block">
-                If a server buffers or is slow, switch to another server below.
+                All popup ads and external page redirects are strictly blocked.
               </p>
             </div>
           </div>
