@@ -20,6 +20,8 @@ export interface IContent extends Document {
   popularity: number; // view count or index
   featured: boolean;
   status: 'published' | 'draft';
+  tmdbId?: number;
+  imdbId?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -43,6 +45,8 @@ const ContentSchema: Schema = new Schema(
     popularity: { type: Number, default: 0, index: true },
     featured: { type: Boolean, default: false, index: true },
     status: { type: String, enum: ['published', 'draft'], default: 'published', index: true },
+    tmdbId: { type: Number, index: true },
+    imdbId: { type: String, index: true },
   },
   { timestamps: true }
 );

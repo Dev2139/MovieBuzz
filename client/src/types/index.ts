@@ -16,6 +16,8 @@ export interface Content {
   popularity: number;
   featured: boolean;
   status: 'published' | 'draft';
+  tmdbId?: number;
+  imdbId?: string;
   createdAt: string;
   updatedAt: string;
 }

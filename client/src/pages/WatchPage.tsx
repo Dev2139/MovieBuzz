@@ -62,12 +62,16 @@ export const WatchPage: React.FC = () => {
   let posterUrl = '';
   let playlist: any[] = [];
   let seriesObj: any = null;
+  let tmdbId: number | undefined = undefined;
+  let imdbId: string | undefined = undefined;
 
   if (isMovie && movieData?.content) {
     contentTitle = movieData.content.title;
     contentId = movieData.content._id;
     mediaList = movieData.media || [];
     posterUrl = movieData.content.posterUrl;
+    tmdbId = movieData.content.tmdbId;
+    imdbId = movieData.content.imdbId;
   } else if (isSeries && seriesData?.episode) {
     seriesObj = seriesData.series;
     contentTitle = `${seriesObj?.title || 'Series'} - S${season} E${episode}: ${seriesData.episode.title}`;
@@ -76,6 +80,8 @@ export const WatchPage: React.FC = () => {
     mediaList = seriesData.media || [];
     posterUrl = seriesData.episode.thumbnailUrl || seriesObj?.backdropUrl;
     playlist = seriesData.playlist || [];
+    tmdbId = seriesObj?.tmdbId;
+    imdbId = seriesObj?.imdbId;
   }
 
   const currentEpNum = Number(episode || 1);
@@ -133,6 +139,10 @@ export const WatchPage: React.FC = () => {
           contentSlug={slug || seriesSlug || ''}
           contentType={isMovie ? 'movie' : 'series'}
           initialPosition={initialPos}
+          tmdbId={tmdbId}
+          imdbId={imdbId}
+          seasonNumber={isSeries ? Number(season || 1) : 1}
+          episodeNumber={isSeries ? Number(episode || 1) : 1}
           onEnded={() => {
             if (nextEp) {
               navigate(`/watch/series/${seriesSlug}/${season}/${nextEp.episodeNumber}`);

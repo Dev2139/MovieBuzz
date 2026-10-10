@@ -16,12 +16,114 @@ import {
   Film,
   Download,
   HelpCircle,
+  Zap,
+  Server,
+  Sparkles,
 } from 'lucide-react';
 import { Media } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { saveLocalPlaybackPosition } from '../utils/localStorage';
 import { resolveMediaUrl } from '../utils/url';
 import { saveWatchProgress } from '../services/api';
+
+export type StreamServer = 'vidsrc' | 'autoembed' | 'superembed' | 'vidlink' | 'telegram';
+
+interface ServerOption {
+  id: StreamServer;
+  name: string;
+  badge: string;
+  subtext: string;
+  icon: string;
+  color: string;
+  isCdn: boolean;
+}
+
+export const SERVER_OPTIONS: ServerOption[] = [
+  {
+    id: 'vidsrc',
+    name: 'Server 1 (VidSrc)',
+    badge: '1080p Ultra',
+    subtext: 'High-speed cloud CDN • 0 buffer',
+    icon: '⚡',
+    color: 'text-amber-400 border-amber-500/40 bg-amber-500/10',
+    isCdn: true,
+  },
+  {
+    id: 'autoembed',
+    name: 'Server 2 (AutoEmbed)',
+    badge: 'Rapid CDN',
+    subtext: 'Instant responsive stream',
+    icon: '🚀',
+    color: 'text-cyan-400 border-cyan-500/40 bg-cyan-500/10',
+    isCdn: true,
+  },
+  {
+    id: 'superembed',
+    name: 'Server 3 (Multi-Server)',
+    badge: 'Multi-Audio',
+    subtext: 'Hindi, Tamil & World Audio',
+    icon: '🌐',
+    color: 'text-purple-400 border-purple-500/40 bg-purple-500/10',
+    isCdn: true,
+  },
+  {
+    id: 'vidlink',
+    name: 'Server 4 (VidLink)',
+    badge: 'Clean HD',
+    subtext: 'Lightweight cloud mirror',
+    icon: '✨',
+    color: 'text-emerald-400 border-emerald-500/40 bg-emerald-500/10',
+    isCdn: true,
+  },
+  {
+    id: 'telegram',
+    name: 'Server 5 (Telegram Direct)',
+    badge: 'Original File',
+    subtext: 'Original raw bot storage',
+    icon: '📱',
+    color: 'text-sky-400 border-sky-500/40 bg-sky-500/10',
+    isCdn: false,
+  },
+];
+
+export const getEmbedUrl = (
+  server: StreamServer,
+  tmdb?: number,
+  imdb?: string,
+  type: 'movie' | 'series' = 'movie',
+  sNum: number = 1,
+  eNum: number = 1
+): string | null => {
+  if (!tmdb && !imdb) return null;
+  const isMovie = type === 'movie';
+  const id = tmdb ? String(tmdb) : imdb!;
+
+  switch (server) {
+    case 'vidsrc':
+      return isMovie
+        ? `https://vidsrc.to/embed/movie/${id}`
+        : `https://vidsrc.to/embed/tv/${id}/${sNum}/${eNum}`;
+    case 'autoembed':
+      return isMovie
+        ? `https://player.autoembed.cc/embed/movie/${id}`
+        : `https://player.autoembed.cc/embed/tv/${id}/${sNum}/${eNum}`;
+    case 'superembed':
+      if (tmdb) {
+        return isMovie
+          ? `https://multiembed.mov/?video_id=${tmdb}&tmdb=1`
+          : `https://multiembed.mov/?video_id=${tmdb}&tmdb=1&s=${sNum}&e=${eNum}`;
+      }
+      return isMovie
+        ? `https://multiembed.mov/?video_id=${imdb}&imdb=1`
+        : `https://multiembed.mov/?video_id=${imdb}&imdb=1&s=${sNum}&e=${eNum}`;
+    case 'vidlink':
+      return isMovie
+        ? `https://vidlink.pro/movie/${id}`
+        : `https://vidlink.pro/tv/${id}/${sNum}/${eNum}`;
+    default:
+      return null;
+  }
+};
 
 interface VideoPlayerProps {
   mediaList: Media[];
@@ -33,6 +135,10 @@ interface VideoPlayerProps {
   contentType: 'movie' | 'series';
   initialPosition?: number;
   onEnded?: () => void;
+  tmdbId?: number;
+  imdbId?: string;
+  seasonNumber?: number;
+  episodeNumber?: number;
 }
 
 export const VideoPlayer: React.FC<VideoPlayerProps> = ({
@@ -45,10 +151,34 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   contentType,
   initialPosition = 0,
   onEnded,
+  tmdbId,
+  imdbId,
+  seasonNumber = 1,
+  episodeNumber = 1,
 }) => {
   const { user } = useAuth();
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  const hasCdn = Boolean(tmdbId || imdbId);
+  const [activeServer, setActiveServer] = useState<StreamServer>(() => {
+    return hasCdn ? 'vidsrc' : 'telegram';
+  });
+
+  useEffect(() => {
+    if (!hasCdn && activeServer !== 'telegram') {
+      setActiveServer('telegram');
+    }
+  }, [hasCdn, activeServer]);
+
+  const currentEmbedUrl = getEmbedUrl(
+    activeServer,
+    tmdbId,
+    imdbId,
+    contentType,
+    seasonNumber,
+    episodeNumber
+  );
 
   const [selectedQuality, setSelectedQuality] = useState<string>(
     mediaList && mediaList.length > 0 ? mediaList[0].quality : '1080p'
@@ -649,24 +779,63 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   }, [streamUrl, isTranscodeMode]);
 
   return (
-    <div
-      ref={containerRef}
-      onMouseMove={handleMouseMove}
-      onClick={handleContainerClick}
-      onTouchStart={handleTouchStart}
-      onTouchMove={handleTouchMove}
-      onTouchEnd={handleTouchEnd}
-      className="relative w-full aspect-video bg-black rounded-xl sm:rounded-2xl overflow-hidden group shadow-2xl select-none touch-none"
-    >
-      <video
-        ref={videoRef}
-        src={getEffectiveStreamUrl(streamUrl, isTranscodeMode)}
-        onTimeUpdate={handleTimeUpdate}
-        onLoadedMetadata={handleLoadedMetadata}
-        onLoadStart={() => setIsBuffering(true)}
-        onWaiting={handleStall}
-        onStalled={handleStall}
-        onSeeking={() => setIsBuffering(true)}
+    <div className="space-y-3 sm:space-y-4">
+      {/* Video Container Box */}
+      <div
+        ref={containerRef}
+        onMouseMove={activeServer === 'telegram' ? handleMouseMove : undefined}
+        onClick={activeServer === 'telegram' ? handleContainerClick : undefined}
+        onTouchStart={activeServer === 'telegram' ? handleTouchStart : undefined}
+        onTouchMove={activeServer === 'telegram' ? handleTouchMove : undefined}
+        onTouchEnd={activeServer === 'telegram' ? handleTouchEnd : undefined}
+        className="relative w-full aspect-video bg-black rounded-xl sm:rounded-2xl overflow-hidden group shadow-2xl select-none touch-none"
+      >
+        {activeServer !== 'telegram' ? (
+          <div className="relative w-full h-full bg-black">
+            {/* Top-right subtle stream info pill */}
+            <div className="absolute top-3 right-3 z-20 pointer-events-none opacity-80 group-hover:opacity-100 transition-opacity flex items-center space-x-1.5 px-2.5 py-1 bg-black/70 backdrop-blur-md rounded-lg border border-white/10 text-[11px] text-amber-400 font-semibold shadow-lg">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              <span>Fast CDN: {SERVER_OPTIONS.find((s) => s.id === activeServer)?.name}</span>
+            </div>
+
+            {currentEmbedUrl ? (
+              <iframe
+                key={`${activeServer}-${tmdbId || imdbId}-${seasonNumber}-${episodeNumber}`}
+                src={currentEmbedUrl}
+                title={contentTitle}
+                className="w-full h-full border-0 rounded-xl sm:rounded-2xl"
+                allowFullScreen
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              />
+            ) : (
+              <div className="w-full h-full flex flex-col items-center justify-center bg-black/95 text-center px-6">
+                <div className="w-14 h-14 rounded-full bg-amber-500/20 border border-amber-500/30 flex items-center justify-center mb-3">
+                  <Server className="w-7 h-7 text-amber-400" />
+                </div>
+                <h3 className="text-white font-bold text-lg mb-1">CDN Embed Unavailable</h3>
+                <p className="text-gray-400 text-xs max-w-sm mb-4 leading-relaxed">
+                  No TMDB match found for this title to generate high-speed CDN stream. Switch to direct Telegram stream below.
+                </p>
+                <button
+                  onClick={() => setActiveServer('telegram')}
+                  className="px-5 py-2.5 bg-brand-500 hover:bg-brand-600 text-white rounded-xl text-xs font-semibold shadow-lg shadow-brand-500/25 active:scale-95 transition-all"
+                >
+                  Switch to Telegram Stream
+                </button>
+              </div>
+            )}
+          </div>
+        ) : (
+          <>
+            <video
+              ref={videoRef}
+              src={getEffectiveStreamUrl(streamUrl, isTranscodeMode)}
+              onTimeUpdate={handleTimeUpdate}
+              onLoadedMetadata={handleLoadedMetadata}
+              onLoadStart={() => setIsBuffering(true)}
+              onWaiting={handleStall}
+              onStalled={handleStall}
+              onSeeking={() => setIsBuffering(true)}
         onSeeked={() => setIsBuffering(false)}
         onCanPlay={() => setIsBuffering(false)}
         onPlay={() => {
@@ -720,6 +889,19 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           <p className="text-gray-400 text-xs max-w-md mb-5 leading-relaxed">{streamError}</p>
 
           <div className="flex flex-wrap items-center justify-center gap-2.5 max-w-md">
+            {hasCdn && (
+              <button
+                onClick={() => {
+                  setStreamError(null);
+                  setActiveServer('vidsrc');
+                }}
+                className="px-4 py-2 bg-gradient-to-r from-amber-500 to-brand-500 hover:from-amber-600 hover:to-brand-600 text-white rounded-xl text-sm font-bold transition-all active:scale-95 shadow-lg shadow-brand-500/25 flex items-center gap-1.5"
+              >
+                <Zap className="w-4 h-4 fill-current" />
+                Switch to Fast CDN Server
+              </button>
+            )}
+
             <button
               onClick={() => {
                 setStreamError(null);
@@ -1249,6 +1431,119 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           </div>
         </div>
       )}
+          </>
+        )}
+      </div>
+
+      {/* Modern Server Selection & Fast CDN Switcher Bar */}
+      <div className="bg-dark-card/90 border border-dark-border/80 rounded-xl sm:rounded-2xl p-3 sm:p-4 shadow-xl backdrop-blur-md space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-white/5 pb-2.5">
+          <div className="flex items-center space-x-2">
+            <div className="w-7 h-7 rounded-lg bg-brand-500/10 border border-brand-500/20 flex items-center justify-center text-brand-400">
+              <Server className="w-4 h-4" />
+            </div>
+            <div>
+              <div className="flex items-center space-x-2">
+                <span className="text-white text-xs sm:text-sm font-bold tracking-tight">Streaming Server</span>
+                <span className="flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  <span>{activeServer === 'telegram' ? 'Telegram Mode' : 'Fast CDN Active'}</span>
+                </span>
+              </div>
+              <p className="text-[11px] text-gray-400 hidden sm:block">
+                Switch servers if video buffers, fails to load, or to access multi-language audio tracks.
+              </p>
+            </div>
+          </div>
+
+          {/* Quick status pill */}
+          <div className="text-[11px] text-gray-400 flex items-center space-x-2">
+            <span className="text-gray-500">Active:</span>
+            <span className="text-brand-400 font-medium">
+              {SERVER_OPTIONS.find((s) => s.id === activeServer)?.name}
+            </span>
+          </div>
+        </div>
+
+        {/* Server Buttons Grid */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
+          {SERVER_OPTIONS.map((server) => {
+            const isSelected = activeServer === server.id;
+            const isDisabled = server.isCdn && !hasCdn;
+
+            return (
+              <button
+                key={server.id}
+                type="button"
+                disabled={isDisabled}
+                onClick={() => {
+                  if (server.id !== activeServer) {
+                    setStreamError(null);
+                    setActiveServer(server.id);
+                  }
+                }}
+                className={`relative group flex flex-col items-start p-2.5 rounded-xl border text-left transition-all duration-200 active:scale-95 ${
+                  isSelected
+                    ? 'bg-gradient-to-b from-white/10 to-white/5 border-brand-500 shadow-lg shadow-brand-500/20 ring-1 ring-brand-500/50'
+                    : isDisabled
+                    ? 'bg-dark-surface/40 border-white/5 opacity-40 cursor-not-allowed'
+                    : 'bg-dark-surface/80 border-white/5 hover:border-white/20 hover:bg-dark-surface hover:-translate-y-0.5'
+                }`}
+              >
+                {/* Active indicator dot */}
+                {isSelected && (
+                  <div className="absolute top-2 right-2 w-2 h-2 rounded-full bg-brand-400 shadow-[0_0_8px_rgba(236,72,153,0.8)]" />
+                )}
+
+                <div className="flex items-center space-x-1.5 w-full">
+                  <span className="text-sm">{server.icon}</span>
+                  <span
+                    className={`text-xs font-semibold truncate ${
+                      isSelected ? 'text-white' : 'text-gray-300 group-hover:text-white'
+                    }`}
+                  >
+                    {server.name}
+                  </span>
+                </div>
+
+                <div className="mt-1 flex items-center space-x-1.5 w-full">
+                  <span
+                    className={`text-[10px] px-1.5 py-0.5 rounded font-medium border ${
+                      isSelected ? server.color : 'text-gray-400 border-white/10 bg-white/5'
+                    }`}
+                  >
+                    {server.badge}
+                  </span>
+                </div>
+
+                <span className="text-[10px] text-gray-400 mt-1 line-clamp-1">
+                  {isDisabled ? 'Needs TMDB ID' : server.subtext}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Informative footer */}
+        <div className="flex items-center justify-between text-[11px] text-gray-400 pt-1 border-t border-white/5">
+          <div className="flex items-center space-x-1.5">
+            <Zap className="w-3.5 h-3.5 text-amber-400" />
+            <span>
+              <strong>Fast CDN:</strong> Zero buffering & unlimited cloud bandwidth directly from multi-edge CDNs.
+            </span>
+          </div>
+          {currentDownloadUrl && (
+            <a
+              href={currentDownloadUrl}
+              download
+              className="text-emerald-400 hover:text-emerald-300 font-medium inline-flex items-center space-x-1"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Download File</span>
+            </a>
+          )}
+        </div>
+      </div>
     </div>
   );
 };

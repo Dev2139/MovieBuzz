@@ -74,6 +74,8 @@ export const getContentList = async (req: Request, res: Response) => {
               ...(meta.director ? { director: meta.director } : {}),
               ...(releaseDate ? { releaseDate } : {}),
               ...(meta.releaseYear ? { releaseYear: meta.releaseYear } : {}),
+              ...(meta.tmdbId ? { tmdbId: meta.tmdbId } : {}),
+              ...(meta.imdbId ? { imdbId: meta.imdbId } : {}),
             }).catch(() => {});
           }
         }).catch(() => {});
