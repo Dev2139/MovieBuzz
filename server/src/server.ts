@@ -14,7 +14,6 @@ import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import { connectDB } from './config/db';
-import { storageService } from './services/telegram/telegramService';
 
 import authRoutes from './routes/authRoutes';
 import contentRoutes from './routes/contentRoutes';
@@ -29,24 +28,8 @@ import streamingRoutes from './routes/streamingRoutes';
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Auto-connect MongoDB on incoming serverless / API requests & auto-sync Telegram posts
-let lastSyncTimestamp = 0;
-
 app.use(async (req, res, next) => {
   await connectDB();
-  const now = Date.now();
-  // Trigger Telegram channel/bot sync every 15s when API requests hit the server
-  if (now - lastSyncTimestamp > 15000) {
-    lastSyncTimestamp = now;
-    try {
-      const client = storageService.getTelegramClient();
-      if (client) {
-        client.syncChannelPosts().catch(() => {});
-      }
-    } catch {
-      // Ignore background sync error
-    }
-  }
   next();
 });
 
@@ -90,17 +73,13 @@ app.get(['/', '/api', '/api/health'], (req, res) => {
   res.json({
     status: 'ok',
     service: 'CineStream Backend API',
-    message: '🎬 CineStream API is active and running',
+    message: '🎬 CineStream API is active and running (MovieBox Direct Streaming Engine)',
     timestamp: new Date().toISOString(),
-    config: {
-      hasSession: !!process.env.TELEGRAM_SESSION_STRING,
-      sessionLength: process.env.TELEGRAM_SESSION_STRING?.length || 0,
-      hasBotToken: !!process.env.TELEGRAM_BOT_TOKEN,
-      hasApiId: !!process.env.TELEGRAM_API_ID,
-      hasApiHash: !!process.env.TELEGRAM_API_HASH,
-      channelId: process.env.TELEGRAM_CHANNEL_ID || 'none',
-      nodeEnv: process.env.NODE_ENV || 'development',
+    streaming: {
+      provider: 'MovieBox',
+      bridgeUrl: process.env.MOVIEBOX_API_URL || 'http://127.0.0.1:5055',
     },
+    nodeEnv: process.env.NODE_ENV || 'development',
   });
 });
 
@@ -111,30 +90,9 @@ if (!process.env.VERCEL) {
     const server = app.listen(PORT, async () => {
       console.log(`=======================================================`);
       console.log(` 🎬 CineStream Server running on http://localhost:${PORT}`);
+      console.log(` 🚀 Streaming Engine: MovieBox Direct`);
       console.log(` 🚀 Environment: ${process.env.NODE_ENV || 'development'}`);
       console.log(`=======================================================`);
-
-      try {
-        const client = storageService.getTelegramClient();
-        if (client) {
-          const count = await client.syncChannelPosts();
-          console.log(`[Server] Initial channel sync completed: ${count} posts loaded into website database!`);
-        }
-      } catch (err) {
-        console.warn('[Server] Notice during post sync:', err);
-      }
-
-      // Continuous automatic background polling every 60 seconds (no manual restart needed!)
-      setInterval(async () => {
-        try {
-          const client = storageService.getTelegramClient();
-          if (client) {
-            await client.syncChannelPosts();
-          }
-        } catch {
-          // Ignore background sync error
-        }
-      }, 60000);
     });
 
     server.on('error', (err: any) => {
