@@ -530,13 +530,15 @@ export const enrichCatalogMetadata = async (req: Request, res: Response) => {
     for (const item of allContent) {
       const tmdbMeta = await tmdbService.fetchMetadata(item.title, item.releaseYear, item.type as any);
       if (tmdbMeta) {
+        const releaseDate = tmdbMeta.releaseDate ? new Date(tmdbMeta.releaseDate) : (tmdbMeta.releaseYear ? new Date(`${tmdbMeta.releaseYear}-01-01`) : undefined);
         await Content.findByIdAndUpdate(item._id, {
           title: tmdbMeta.title || item.title,
           description: tmdbMeta.description || item.description,
-          posterUrl: tmdbMeta.posterUrl || item.posterUrl,
-          backdropUrl: tmdbMeta.backdropUrl || item.backdropUrl,
-          rating: tmdbMeta.rating || item.rating,
+          ...(tmdbMeta.posterUrl && !tmdbMeta.posterUrl.includes('unsplash') ? { posterUrl: tmdbMeta.posterUrl } : {}),
+          ...(tmdbMeta.backdropUrl && !tmdbMeta.backdropUrl.includes('unsplash') ? { backdropUrl: tmdbMeta.backdropUrl } : {}),
+          rating: tmdbMeta.rating > 0 ? tmdbMeta.rating : item.rating,
           releaseYear: tmdbMeta.releaseYear || item.releaseYear,
+          ...(releaseDate ? { releaseDate } : {}),
           genres: tmdbMeta.genres && tmdbMeta.genres.length > 0 ? tmdbMeta.genres : item.genres,
           cast: tmdbMeta.cast && tmdbMeta.cast.length > 0 ? tmdbMeta.cast : item.cast,
           languages: tmdbMeta.languages && tmdbMeta.languages.length > 0 ? tmdbMeta.languages : item.languages,

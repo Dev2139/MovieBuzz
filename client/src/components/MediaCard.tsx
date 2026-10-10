@@ -109,7 +109,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({ item, aspectRatio = 'poste
         {/* Rating Badge */}
         <div className="absolute top-2 left-2 bg-black/75 backdrop-blur-md px-2 py-0.5 rounded-md flex items-center space-x-1 border border-white/10 shadow">
           <Star className="w-3 h-3 text-amber-400 fill-amber-400" />
-          <span className="text-[11px] font-bold text-white">{item.rating?.toFixed(1) || '8.0'}</span>
+          <span className="text-[11px] font-bold text-white">{item.rating && item.rating > 0 ? item.rating.toFixed(1) : 'NR'}</span>
         </div>
 
         {/* Type Badge */}

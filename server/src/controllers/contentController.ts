@@ -30,15 +30,17 @@ export const getContentList = async (req: Request, res: Response) => {
       query.featured = true;
     }
 
-    let sortOptions: any = { createdAt: -1 };
+    let sortOptions: any = { releaseDate: -1, releaseYear: -1, createdAt: -1 };
     if (sort === 'popular') {
-      sortOptions = { createdAt: -1, popularity: -1 };
+      sortOptions = { popularity: -1, releaseDate: -1, releaseYear: -1 };
     } else if (sort === 'rating') {
-      sortOptions = { rating: -1, createdAt: -1 };
+      sortOptions = { rating: -1, releaseDate: -1, releaseYear: -1 };
     } else if (sort === 'title') {
       sortOptions = { title: 1 };
-    } else if (sort === 'latest') {
-      sortOptions = { createdAt: -1, releaseYear: -1 };
+    } else if (sort === 'latest' || sort === 'releaseDate' || !sort) {
+      sortOptions = { releaseDate: -1, releaseYear: -1, createdAt: -1 };
+    } else if (sort === 'recentlyAdded' || sort === 'posted') {
+      sortOptions = { createdAt: -1 };
     }
 
     const skip = (Number(page) - 1) * Number(limit);
@@ -48,18 +50,30 @@ export const getContentList = async (req: Request, res: Response) => {
       Content.countDocuments(query),
     ]);
 
-    // Auto-enrich any items asynchronously if they still use placeholder artwork
+    // Auto-enrich any items asynchronously if they still miss release date, real rating or real artwork
     for (const item of items) {
-      if (!item.posterUrl || item.posterUrl.includes('unsplash')) {
+      const needsEnrichment =
+        !item.releaseDate ||
+        !item.posterUrl ||
+        item.posterUrl.includes('unsplash') ||
+        item.rating === 0 ||
+        item.rating === 8.5 ||
+        item.rating === 10;
+
+      if (needsEnrichment) {
         tmdbService.fetchMetadata(item.title, item.releaseYear, item.type as any).then((meta) => {
           if (meta) {
+            const releaseDate = meta.releaseDate ? new Date(meta.releaseDate) : (meta.releaseYear ? new Date(`${meta.releaseYear}-01-01`) : undefined);
             Content.findByIdAndUpdate(item._id, {
-              posterUrl: meta.posterUrl,
-              backdropUrl: meta.backdropUrl,
-              rating: meta.rating,
-              description: meta.description,
-              genres: meta.genres,
-              cast: meta.cast,
+              ...(meta.posterUrl && !meta.posterUrl.includes('unsplash') ? { posterUrl: meta.posterUrl } : {}),
+              ...(meta.backdropUrl && !meta.backdropUrl.includes('unsplash') ? { backdropUrl: meta.backdropUrl } : {}),
+              ...(meta.rating > 0 ? { rating: meta.rating } : {}),
+              ...(meta.description ? { description: meta.description } : {}),
+              ...(meta.genres?.length ? { genres: meta.genres } : {}),
+              ...(meta.cast?.length ? { cast: meta.cast } : {}),
+              ...(meta.director ? { director: meta.director } : {}),
+              ...(releaseDate ? { releaseDate } : {}),
+              ...(meta.releaseYear ? { releaseYear: meta.releaseYear } : {}),
             }).catch(() => {});
           }
         }).catch(() => {});

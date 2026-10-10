@@ -79,11 +79,12 @@ export class TelegramImporter {
       const defaultPoster = tmdbMeta?.posterUrl || raw.posterUrl || 'https://images.unsplash.com/photo-1542751371-adc38448a05e?w=800';
       const defaultBackdrop = tmdbMeta?.backdropUrl || raw.backdropUrl || defaultPoster;
       const description = tmdbMeta?.description || raw.caption;
-      const rating = tmdbMeta?.rating || 8.5;
+      const rating = tmdbMeta?.rating !== undefined && tmdbMeta.rating > 0 ? tmdbMeta.rating : 0;
       const genres = tmdbMeta?.genres || (parsed.genres && parsed.genres.length > 0 ? parsed.genres : ['Action', 'Drama']);
       const cast = tmdbMeta?.cast || (parsed.cast && parsed.cast.length > 0 ? parsed.cast : ['Popular Cast']);
       const languages = tmdbMeta?.languages || [language];
       const releaseYear = tmdbMeta?.releaseYear || year;
+      const releaseDate = tmdbMeta?.releaseDate ? new Date(tmdbMeta.releaseDate) : new Date(`${releaseYear}-01-01`);
       const baseUrl = process.env.VERCEL_URL 
         ? `https://${process.env.VERCEL_URL}` 
         : (process.env.BACKEND_URL || 'http://localhost:5000');
@@ -103,6 +104,7 @@ export class TelegramImporter {
               posterUrl: defaultPoster,
               backdropUrl: defaultBackdrop,
               releaseYear,
+              releaseDate,
               genres,
               languages,
               cast,
@@ -113,6 +115,15 @@ export class TelegramImporter {
           } catch {
             series = await Content.findOne({ title, type: 'series' });
           }
+        } else if (tmdbMeta) {
+          // Keep existing series enriched with real data
+          await Content.findByIdAndUpdate(series._id, {
+            ...(tmdbMeta.rating > 0 ? { rating: tmdbMeta.rating } : {}),
+            ...(releaseDate ? { releaseDate } : {}),
+            ...(defaultPoster && !defaultPoster.includes('unsplash') ? { posterUrl: defaultPoster } : {}),
+            ...(defaultBackdrop && !defaultBackdrop.includes('unsplash') ? { backdropUrl: defaultBackdrop } : {}),
+            ...(tmdbMeta.description ? { description: tmdbMeta.description } : {}),
+          });
         }
 
         if (!series) return null;
@@ -202,6 +213,7 @@ export class TelegramImporter {
               posterUrl: defaultPoster,
               backdropUrl: defaultBackdrop,
               releaseYear,
+              releaseDate,
               genres,
               cast,
               languages,
@@ -212,6 +224,15 @@ export class TelegramImporter {
           } catch {
             movie = await Content.findOne({ title, type: 'movie' });
           }
+        } else if (tmdbMeta) {
+          // Keep existing movie enriched with real data
+          await Content.findByIdAndUpdate(movie._id, {
+            ...(tmdbMeta.rating > 0 ? { rating: tmdbMeta.rating } : {}),
+            ...(releaseDate ? { releaseDate } : {}),
+            ...(defaultPoster && !defaultPoster.includes('unsplash') ? { posterUrl: defaultPoster } : {}),
+            ...(defaultBackdrop && !defaultBackdrop.includes('unsplash') ? { backdropUrl: defaultBackdrop } : {}),
+            ...(tmdbMeta.description ? { description: tmdbMeta.description } : {}),
+          });
         }
 
         if (movie) {

@@ -8,6 +8,7 @@ export interface EnrichedMetadata {
   backdropUrl: string;
   rating: number;
   releaseYear: number;
+  releaseDate?: string;
   genres: string[];
   languages: string[];
   cast: string[];
@@ -96,32 +97,58 @@ class TMDBService {
     const { cleanTitle, coreTitle } = cleanMovieTitle(rawTitle);
 
     try {
-      // Step A: Search TMDB Multi search using cleanTitle
       let searchResults: any[] = [];
-      const multiUrl = `https://api.themoviedb.org/3/search/multi?api_key=${this.apiKey}&query=${encodeURIComponent(cleanTitle)}`;
-      const multiRes = await axios.get(multiUrl, { timeout: 6000 }).catch(() => null);
+      const isTvPreferred = preferType === 'series';
 
-      if (multiRes?.data?.results && multiRes.data.results.length > 0) {
-        searchResults = multiRes.data.results;
-      } else if (coreTitle && coreTitle !== cleanTitle) {
-        // Step B: Retry with coreTitle if full cleanTitle returned 0
-        const coreUrl = `https://api.themoviedb.org/3/search/multi?api_key=${this.apiKey}&query=${encodeURIComponent(coreTitle)}`;
-        const coreRes = await axios.get(coreUrl, { timeout: 6000 }).catch(() => null);
-        if (coreRes?.data?.results && coreRes.data.results.length > 0) {
-          searchResults = coreRes.data.results;
+      // Step 1: If year is known, search with exact release year filter
+      if (year) {
+        const endpoint = isTvPreferred ? 'search/tv' : 'search/movie';
+        const yearParam = isTvPreferred ? `&first_air_date_year=${year}` : `&primary_release_year=${year}`;
+        const yearUrl = `https://api.themoviedb.org/3/${endpoint}?api_key=${this.apiKey}&query=${encodeURIComponent(cleanTitle)}${yearParam}&include_adult=false`;
+        const res = await axios.get(yearUrl, { timeout: 6000 }).catch(() => null);
+        if (res?.data?.results && res.data.results.length > 0) {
+          searchResults = res.data.results.map((r: any) => ({ ...r, media_type: isTvPreferred ? 'tv' : 'movie' }));
         }
       }
 
-      // Step C: Fallback to movie-specific search
+      // Step 2: Try specific endpoint without year if step 1 returned no results
       if (searchResults.length === 0) {
-        const movieUrl = `https://api.themoviedb.org/3/search/movie?api_key=${this.apiKey}&query=${encodeURIComponent(cleanTitle)}`;
-        const movieRes = await axios.get(movieUrl, { timeout: 6000 }).catch(() => null);
-        if (movieRes?.data?.results && movieRes.data.results.length > 0) {
-          searchResults = movieRes.data.results;
+        const endpoint = isTvPreferred ? 'search/tv' : 'search/movie';
+        const url = `https://api.themoviedb.org/3/${endpoint}?api_key=${this.apiKey}&query=${encodeURIComponent(cleanTitle)}&include_adult=false`;
+        const res = await axios.get(url, { timeout: 6000 }).catch(() => null);
+        if (res?.data?.results && res.data.results.length > 0) {
+          searchResults = res.data.results.map((r: any) => ({ ...r, media_type: isTvPreferred ? 'tv' : 'movie' }));
+        }
+      }
+
+      // Step 3: Try multi search if still empty
+      if (searchResults.length === 0) {
+        const multiUrl = `https://api.themoviedb.org/3/search/multi?api_key=${this.apiKey}&query=${encodeURIComponent(cleanTitle)}&include_adult=false`;
+        const multiRes = await axios.get(multiUrl, { timeout: 6000 }).catch(() => null);
+        if (multiRes?.data?.results && multiRes.data.results.length > 0) {
+          searchResults = multiRes.data.results.filter((r: any) => r.media_type === 'movie' || r.media_type === 'tv');
+        }
+      }
+
+      // Step 4: Retry with coreTitle if cleanTitle gave 0 results
+      if (searchResults.length === 0 && coreTitle && coreTitle !== cleanTitle) {
+        const coreUrl = `https://api.themoviedb.org/3/search/multi?api_key=${this.apiKey}&query=${encodeURIComponent(coreTitle)}&include_adult=false`;
+        const coreRes = await axios.get(coreUrl, { timeout: 6000 }).catch(() => null);
+        if (coreRes?.data?.results && coreRes.data.results.length > 0) {
+          searchResults = coreRes.data.results.filter((r: any) => r.media_type === 'movie' || r.media_type === 'tv');
         }
       }
 
       if (searchResults.length > 0) {
+        // Sort candidate matches: prioritize matching release year, then by popularity (vote count / index)
+        searchResults.sort((a: any, b: any) => {
+          const aYear = parseInt((a.release_date || a.first_air_date || '').slice(0, 4), 10);
+          const bYear = parseInt((b.release_date || b.first_air_date || '').slice(0, 4), 10);
+          if (year && aYear === year && bYear !== year) return -1;
+          if (year && bYear === year && aYear !== year) return 1;
+          return (b.popularity || 0) - (a.popularity || 0);
+        });
+
         const resultItem = searchResults[0];
         const isTv = resultItem.media_type === 'tv' || preferType === 'series';
         const tmdbId = resultItem.id;
@@ -131,11 +158,11 @@ class TMDBService {
         const detailsRes = await axios.get(detailsUrl, { timeout: 6000 }).catch(() => null);
         const details = detailsRes?.data || resultItem;
 
-        const posterUrl = resultItem.poster_path
-          ? `${TMDB_IMAGE_BASE_POSTER}${resultItem.poster_path}`
+        const posterUrl = details.poster_path || resultItem.poster_path
+          ? `${TMDB_IMAGE_BASE_POSTER}${details.poster_path || resultItem.poster_path}`
           : FALLBACK_POSTERS[0];
 
-        const rawBackdrop = resultItem.backdrop_path || details.backdrop_path;
+        const rawBackdrop = details.backdrop_path || resultItem.backdrop_path;
         const backdropUrl = rawBackdrop && rawBackdrop !== 'null'
           ? `${TMDB_IMAGE_BASE_BACKDROP}${rawBackdrop}`
           : posterUrl;
@@ -145,26 +172,42 @@ class TMDBService {
           : (resultItem.genre_ids || []).map((id: number) => GENRE_MAP[id]).filter(Boolean);
 
         const cast: string[] = details.credits?.cast
-          ? details.credits.cast.slice(0, 5).map((c: any) => c.name)
+          ? details.credits.cast.slice(0, 6).map((c: any) => c.name)
           : [];
 
         const director = details.credits?.crew
           ? details.credits.crew.find((c: any) => c.job === 'Director')?.name || 'Director'
           : 'Director';
 
-        const releaseDateStr = isTv ? resultItem.first_air_date : resultItem.release_date;
-        const releaseYearResolved = releaseDateStr ? parseInt(releaseDateStr.split('-')[0], 10) : year || 2026;
+        const releaseDateStr = isTv
+          ? (details.first_air_date || resultItem.first_air_date)
+          : (details.release_date || resultItem.release_date);
+
+        const releaseYearResolved = releaseDateStr
+          ? parseInt(releaseDateStr.split('-')[0], 10)
+          : (year || 2026);
+
+        // Real TMDB Rating
+        let realRating = 0;
+        if (typeof details.vote_average === 'number' && details.vote_average > 0) {
+          realRating = Number(details.vote_average.toFixed(1));
+        } else if (typeof resultItem.vote_average === 'number' && resultItem.vote_average > 0) {
+          realRating = Number(resultItem.vote_average.toFixed(1));
+        }
 
         return {
-          title: isTv ? resultItem.name || cleanTitle : resultItem.title || cleanTitle,
-          originalTitle: isTv ? resultItem.original_name : resultItem.original_title,
-          description: resultItem.overview || details.overview || `Watch ${cleanTitle} online in high definition on CineStream.`,
+          title: isTv ? (details.name || resultItem.name || cleanTitle) : (details.title || resultItem.title || cleanTitle),
+          originalTitle: isTv ? (details.original_name || resultItem.original_name) : (details.original_title || resultItem.original_title),
+          description: details.overview || resultItem.overview || `Watch ${cleanTitle} online in high definition on CineStream.`,
           posterUrl,
           backdropUrl,
-          rating: Number(resultItem.vote_average ? resultItem.vote_average.toFixed(1) : 8.5),
+          rating: realRating,
           releaseYear: releaseYearResolved,
-          genres: genres.length > 0 ? genres : ['Action', 'Drama', 'Sci-Fi'],
-          languages: resultItem.original_language ? [resultItem.original_language.toUpperCase()] : ['English'],
+          releaseDate: releaseDateStr || undefined,
+          genres: genres.length > 0 ? genres : ['Action', 'Drama', 'Cinema'],
+          languages: (details.original_language || resultItem.original_language)
+            ? [(details.original_language || resultItem.original_language).toUpperCase()]
+            : ['English'],
           cast: cast.length > 0 ? cast : ['Popular Cast'],
           director,
           type: isTv ? 'series' : 'movie',

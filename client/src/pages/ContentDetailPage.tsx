@@ -163,7 +163,7 @@ export const ContentDetailPage: React.FC = () => {
               </span>
               <span className="bg-dark-card border border-dark-border text-amber-400 text-[10px] sm:text-xs font-bold px-2 py-0.5 rounded flex items-center space-x-1">
                 <Star className="w-3 h-3 fill-amber-400" />
-                <span>{content.rating?.toFixed(1) || '8.5'}</span>
+                <span>{content.rating && content.rating > 0 ? content.rating.toFixed(1) : 'NR'}</span>
               </span>
               <span className="text-gray-400 text-[10px] sm:text-xs font-medium flex items-center space-x-1">
                 <Calendar className="w-3 h-3" />

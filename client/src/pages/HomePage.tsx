@@ -120,10 +120,10 @@ export const HomePage: React.FC = () => {
     refetchInterval: 15000,
   });
 
-  // All Latest Content (Fallback query)
+  // All Latest Content (Sorted by actual theatrical and digital release date)
   const { data: allContentData, isLoading: isAllLoading } = useQuery({
     queryKey: ['all-latest-content'],
-    queryFn: () => fetchContentList({ limit: 20 }),
+    queryFn: () => fetchContentList({ sort: 'latest', limit: 20 }),
     refetchInterval: 15000,
   });
 
@@ -197,7 +197,7 @@ export const HomePage: React.FC = () => {
         allContentData?.items && allContentData.items.length > 0 && (
           <HorizontalCarousel
             title="Latest Movies & Posts"
-            subtitle="Recently added cinema, TV episodes, and Telegram streams"
+            subtitle="Sorted by actual release date — newest theatrical & digital premieres first"
             items={allContentData.items}
             icon={<Sparkles className="w-5 h-5 text-brand-500" />}
           />

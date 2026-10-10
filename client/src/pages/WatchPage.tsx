@@ -177,13 +177,13 @@ export const WatchPage: React.FC = () => {
                     {/* IMDb Badge */}
                     <div className="flex items-center space-x-1 px-2 py-0.5 rounded-md bg-amber-500/20 border border-amber-500/40 text-amber-400 font-bold text-[10px] sm:text-[11px]">
                       <span className="font-black text-amber-300">IMDb</span>
-                      <span>★ {(movieData?.content?.rating || seriesObj?.rating || 8.5).toFixed(1)}</span>
+                      <span>★ {(movieData?.content?.rating || seriesObj?.rating) ? (movieData?.content?.rating || seriesObj?.rating)!.toFixed(1) : 'NR'}</span>
                     </div>
 
                     {/* TMDB Badge */}
                     <div className="flex items-center space-x-1 px-2 py-0.5 rounded-md bg-cyan-500/20 border border-cyan-500/40 text-cyan-400 font-bold text-[10px] sm:text-[11px]">
                       <span className="font-black text-cyan-300">TMDB</span>
-                      <span>{Math.round((movieData?.content?.rating || seriesObj?.rating || 8.5) * 10)}%</span>
+                      <span>{(movieData?.content?.rating || seriesObj?.rating) ? `${Math.round((movieData?.content?.rating || seriesObj?.rating)! * 10)}%` : 'NR'}</span>
                     </div>
 
                     {/* OMDb Badge */}
@@ -428,7 +428,7 @@ export const WatchPage: React.FC = () => {
                         </div>
                       </div>
                       <div className="absolute top-2 right-2 px-1.5 py-0.5 bg-black/75 backdrop-blur-md text-amber-400 rounded text-[10px] font-bold">
-                        ★ {item.rating?.toFixed(1) || '8.5'}
+                        ★ {item.rating && item.rating > 0 ? item.rating.toFixed(1) : 'NR'}
                       </div>
                     </div>
                     <div className="p-2.5">

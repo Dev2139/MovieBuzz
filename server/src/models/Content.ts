@@ -11,6 +11,7 @@ export interface IContent extends Document {
   backdropUrl: string;
   trailerUrl?: string;
   releaseYear: number;
+  releaseDate?: Date;
   genres: string[];
   languages: string[];
   cast: string[];
@@ -33,6 +34,7 @@ const ContentSchema: Schema = new Schema(
     backdropUrl: { type: String, required: true },
     trailerUrl: { type: String, default: '' },
     releaseYear: { type: Number, required: true, index: true },
+    releaseDate: { type: Date, index: true },
     genres: [{ type: String, index: true }],
     languages: [{ type: String, index: true }],
     cast: [{ type: String }],
