@@ -1,5 +1,5 @@
 import React from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ToastProvider } from './context/ToastContext';
@@ -46,6 +46,56 @@ const AdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   return <>{children}</>;
 };
 
+const MainLayout: React.FC = () => {
+  const location = useLocation();
+  const isWatch = location.pathname.startsWith('/watch');
+
+  return (
+    <div className="flex flex-col min-h-screen bg-dark-base relative">
+      {!isWatch && <Navbar />}
+      <main className="flex-1">
+        <Routes>
+          <Route path="/" element={<HomePage />} />
+          <Route path="/movies" element={<MoviesPage />} />
+          <Route path="/series" element={<SeriesPage />} />
+          <Route path="/movie/:slug" element={<ContentDetailPage />} />
+          <Route path="/series/:slug" element={<ContentDetailPage />} />
+          <Route path="/watch/movie/:slug" element={<WatchPage />} />
+          <Route path="/watch/series/:seriesSlug/:season/:episode" element={<WatchPage />} />
+          <Route path="/search" element={<SearchPage />} />
+          <Route path="/watchlist" element={<WatchlistPage />} />
+          <Route path="/history" element={<HistoryPage />} />
+
+          {/* Admin Routes */}
+          <Route
+            path="/admin"
+            element={
+              <AdminRoute>
+                <AdminDashboardPage />
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/admin/telegram"
+            element={
+              <AdminRoute>
+                <AdminTelegramPage />
+              </AdminRoute>
+            }
+          />
+
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </main>
+      {!isWatch && <Footer />}
+      {!isWatch && <BottomNav />}
+      {!isWatch && <InstallBanner />}
+      <InstallModal />
+      <AuthModal />
+    </div>
+  );
+};
+
 export const App: React.FC = () => {
   return (
     <QueryClientProvider client={queryClient}>
@@ -56,55 +106,14 @@ export const App: React.FC = () => {
               <PWAProvider>
                 <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
                   <ScrollToTop />
-                  <div className="flex flex-col min-h-screen bg-dark-base relative">
-                  <Navbar />
-                  <main className="flex-1">
-                    <Routes>
-                      <Route path="/" element={<HomePage />} />
-                      <Route path="/movies" element={<MoviesPage />} />
-                      <Route path="/series" element={<SeriesPage />} />
-                      <Route path="/movie/:slug" element={<ContentDetailPage />} />
-                      <Route path="/series/:slug" element={<ContentDetailPage />} />
-                      <Route path="/watch/movie/:slug" element={<WatchPage />} />
-                      <Route path="/watch/series/:seriesSlug/:season/:episode" element={<WatchPage />} />
-                      <Route path="/search" element={<SearchPage />} />
-                      <Route path="/watchlist" element={<WatchlistPage />} />
-                      <Route path="/history" element={<HistoryPage />} />
-
-                      {/* Admin Routes */}
-                      <Route
-                        path="/admin"
-                        element={
-                          <AdminRoute>
-                            <AdminDashboardPage />
-                          </AdminRoute>
-                        }
-                      />
-                      <Route
-                        path="/admin/telegram"
-                        element={
-                          <AdminRoute>
-                            <AdminTelegramPage />
-                          </AdminRoute>
-                        }
-                      />
-
-                      <Route path="*" element={<Navigate to="/" replace />} />
-                    </Routes>
-                  </main>
-                  <Footer />
-                  <BottomNav />
-                  <InstallBanner />
-                  <InstallModal />
-                  <AuthModal />
-                </div>
-              </BrowserRouter>
-            </PWAProvider>
-          </ToastProvider>
-        </AuthProvider>
-      </ErrorBoundary>
-    </ServerErrorProvider>
-  </QueryClientProvider>
+                  <MainLayout />
+                </BrowserRouter>
+              </PWAProvider>
+            </ToastProvider>
+          </AuthProvider>
+        </ErrorBoundary>
+      </ServerErrorProvider>
+    </QueryClientProvider>
   );
 };
 
