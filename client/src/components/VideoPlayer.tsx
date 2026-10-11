@@ -1000,6 +1000,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         onSeeked={() => setIsBuffering(false)}
         onCanPlay={() => setIsBuffering(false)}
         onPlay={() => {
+          if (isPlayingAd) {
+            videoRef.current?.pause();
+            return;
+          }
           setIsPlaying(true);
           setIsBuffering(false);
           ensureAudioContext();
@@ -1812,8 +1816,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         <div className="absolute inset-0 z-50 bg-black flex items-center justify-center select-none no-player-click">
           <video
             ref={adVideoRef}
+            src="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4"
             autoPlay
             playsInline
+            preload="auto"
             muted={isAdMuted}
             poster="https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=1280&q=80"
             onCanPlay={() => {
@@ -1826,17 +1832,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               setAdCurrentTime(vid.currentTime);
               if (vid.duration && !isNaN(vid.duration)) setAdDuration(vid.duration);
             }}
-            onError={() => {
-              console.warn('Ad video source notice, proceeding to movie...');
-              handleSkipAd();
-            }}
             onEnded={handleSkipAd}
             className="w-full h-full object-contain cursor-pointer"
             onClick={() => setIsAdMuted((prev) => !prev)}
-          >
-            <source src="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4" type="video/mp4" />
-            <source src="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/WeAreGoingOnBullrun.mp4" type="video/mp4" />
-          </video>
+          />
 
           {/* Prominent Tap to Unmute Overlay */}
           {isAdMuted && (
