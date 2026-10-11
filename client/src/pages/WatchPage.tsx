@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { fetchContentBySlug, fetchSeriesEpisodeByNumber, fetchUserHistory, fetchContentList, resolveStreamingSourcesByTitle } from '../services/api';
@@ -12,6 +12,29 @@ export const WatchPage: React.FC = () => {
   const { user } = useAuth();
   const { slug, seriesSlug, season, episode } = useParams();
   const navigate = useNavigate();
+
+  // Dynamically load Monetag Ad script ONLY during video watch session
+  useEffect(() => {
+    if (user?.isPremium) return;
+
+    const scriptId = 'monetag-watch-tag';
+    if (!document.getElementById(scriptId)) {
+      const script = document.createElement('script');
+      script.id = scriptId;
+      script.src = 'https://quge5.com/88/tag.min.js';
+      script.dataset.zone = '294108';
+      script.async = true;
+      script.setAttribute('data-cfasync', 'false');
+      document.body.appendChild(script);
+    }
+
+    return () => {
+      const existing = document.getElementById(scriptId);
+      if (existing && existing.parentNode) {
+        existing.parentNode.removeChild(existing);
+      }
+    };
+  }, [user]);
 
   const isMovie = Boolean(slug);
   const isSeries = Boolean(seriesSlug && season && episode);

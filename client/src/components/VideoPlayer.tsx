@@ -261,7 +261,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [adCurrentTime, setAdCurrentTime] = useState<number>(0);
   const [canSkipAd, setCanSkipAd] = useState<boolean>(false);
   const [showPauseAd, setShowPauseAd] = useState<boolean>(true);
-  const [isAdMuted, setIsAdMuted] = useState<boolean>(false);
+  const [isAdMuted, setIsAdMuted] = useState<boolean>(true);
   const adVideoRef = useRef<HTMLVideoElement>(null);
 
   const handleSkipAd = useCallback(() => {
@@ -278,6 +278,16 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       }
     }, 100);
   }, []);
+
+  // Kickstart ad playback immediately upon mount
+  useEffect(() => {
+    if (isPlayingAd && adVideoRef.current) {
+      adVideoRef.current.muted = true;
+      adVideoRef.current.play().catch((err) => {
+        console.warn('Ad video play notice:', err);
+      });
+    }
+  }, [isPlayingAd]);
 
   // Ad countdown and skip availability timer
   useEffect(() => {
@@ -1802,19 +1812,45 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         <div className="absolute inset-0 z-50 bg-black flex items-center justify-center select-none no-player-click">
           <video
             ref={adVideoRef}
-            src="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4"
             autoPlay
             playsInline
             muted={isAdMuted}
+            poster="https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=1280&q=80"
+            onCanPlay={() => {
+              if (adVideoRef.current && isPlayingAd) {
+                adVideoRef.current.play().catch(() => {});
+              }
+            }}
             onTimeUpdate={(e) => {
               const vid = e.currentTarget;
               setAdCurrentTime(vid.currentTime);
               if (vid.duration && !isNaN(vid.duration)) setAdDuration(vid.duration);
             }}
+            onError={() => {
+              console.warn('Ad video source notice, proceeding to movie...');
+              handleSkipAd();
+            }}
             onEnded={handleSkipAd}
             className="w-full h-full object-contain cursor-pointer"
             onClick={() => setIsAdMuted((prev) => !prev)}
-          />
+          >
+            <source src="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4" type="video/mp4" />
+            <source src="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/WeAreGoingOnBullrun.mp4" type="video/mp4" />
+          </video>
+
+          {/* Prominent Tap to Unmute Overlay */}
+          {isAdMuted && (
+            <button
+              onClick={() => {
+                setIsAdMuted(false);
+                if (adVideoRef.current) adVideoRef.current.muted = false;
+              }}
+              className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 bg-black/80 hover:bg-black/95 text-white text-xs sm:text-sm font-semibold px-4 py-2.5 rounded-full border border-white/20 shadow-2xl flex items-center gap-2 backdrop-blur-md animate-pulse pointer-events-auto cursor-pointer"
+            >
+              <VolumeX className="w-4 h-4 text-amber-400" />
+              <span>Tap to Unmute Ad 🔊</span>
+            </button>
+          )}
 
           {/* Top Left: Ad Badge & Sponsor Info */}
           <div className="absolute top-3 sm:top-4 left-3 sm:left-4 z-50 flex items-center gap-2 pointer-events-auto">
@@ -1833,7 +1869,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               className="bg-black/70 hover:bg-black/90 backdrop-blur-md px-2.5 py-1 rounded text-[11px] text-white/80 hover:text-white border border-white/10 flex items-center gap-1 transition-all shadow-lg"
               onClick={(e) => e.stopPropagation()}
             >
-              <span>Visit Sponsor</span>
+              <span>Monetag Partner</span>
               <ExternalLink className="w-3 h-3 text-[#FFCC00]" />
             </a>
           </div>
