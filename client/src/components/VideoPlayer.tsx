@@ -254,8 +254,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   // Double click skip feedback indicator
   const [skipFeedback, setSkipFeedback] = useState<{ side: 'left' | 'right'; text: string; id: number } | null>(null);
 
-  // In-Player Video Ad States (Only inside movie player, 0 site-wide ads, 0 click redirects)
-  const [isPlayingAd, setIsPlayingAd] = useState<boolean>(!user?.isPremium);
+  // In-Player Video Ad States (Zero ads for Premium members and Admins)
+  const isAdFreeUser = Boolean(user?.isPremium || user?.role === 'admin');
+  const [isPlayingAd, setIsPlayingAd] = useState<boolean>(!isAdFreeUser);
   const [adCountdown, setAdCountdown] = useState<number>(5);
   const [adDuration, setAdDuration] = useState<number>(15);
   const [adCurrentTime, setAdCurrentTime] = useState<number>(0);
@@ -1768,7 +1769,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       )}
 
       {/* In-Player Pause Ad Card (Strictly in-player, Hulu/YouTube style, 0 site redirects) */}
-      {!isPlaying && !isPlayingAd && currentTime > 5 && showPauseAd && (
+      {!isPlaying && !isPlayingAd && !isAdFreeUser && currentTime > 5 && showPauseAd && (
         <div className="absolute bottom-16 sm:bottom-20 left-3 sm:left-6 max-w-xs sm:max-w-sm bg-gradient-to-r from-black/95 via-[#18181b]/95 to-black/90 backdrop-blur-md border border-white/15 rounded-xl p-3 shadow-2xl z-30 pointer-events-auto animate-fade-in no-player-click">
           <div className="flex items-start justify-between gap-2.5">
             <div className="flex items-center gap-2.5">

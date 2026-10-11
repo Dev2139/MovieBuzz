@@ -6,12 +6,13 @@
 
 <p align="center">
   <strong>Production-Ready, High-Performance Video Streaming Web Application</strong><br/>
-  <em>Engineered with React 18, TypeScript, Tailwind CSS, DashJS, HLS, Node.js, and MongoDB</em>
+  <em>Engineered with React 18, TypeScript, Tailwind CSS, Python 3, Node.js, Express, DashJS, HLS, and MongoDB</em>
 </p>
 
 [![License: Proprietary](https://img.shields.io/badge/License-All%20Rights%20Reserved-red.svg?style=for-the-badge)](file:///LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![React](https://img.shields.io/badge/React-18.x-61DAFB?style=for-the-badge&logo=react&logoColor=black)](https://react.dev/)
+[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-20.x-339933?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org/)
 [![MongoDB](https://img.shields.io/badge/MongoDB-Atlas-47A248?style=for-the-badge&logo=mongodb&logoColor=white)](https://www.mongodb.com/)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-3.4-06B6D4?style=for-the-badge&logo=tailwindcss&logoColor=white)](https://tailwindcss.com/)
@@ -35,7 +36,7 @@
 
 ```
 +----------------------------------------------------------------------------------------------------+
-|  [>] MOVIEBUZZ          Home    Movies    Series    Catalog    Search              [ Guest / VIP ] |
+|  [>] MOVIEBUZZ          Home    Movies    Series    Catalog    Search            [ VIP 👑 / Admin ]|
 +----------------------------------------------------------------------------------------------------+
 |                                                                                                    |
 |   FEATURED CINEMA RELEASE : 4K DOLBY ATMOS                                                         |
@@ -64,16 +65,24 @@
 - **Single-Click UI Toggle**: Seamlessly reveals or hides controllers on demand.
 - **Enhanced Settings Popover**: YouTube gear menu with live resolution selector (4K, 1080p, 720p, 480p), playback speeds (0.25x – 2x), and Dolby audio enhancements.
 
-### 2. 🔇 1-Click Dolby Digital Audio Decoders (E-AC-3 / AAC)
+### 2. 🐍 Python 3 High-Performance Media Resolution Engine
+- **Why Python was Chosen**:
+  - **Direct Stream Extraction & Manifest Generation**: Python powers the low-latency background media dispatching service. It handles dynamic video link resolution, deep stream manifest extraction (DASH/HLS), and format probing that would otherwise burden the primary Node.js event loop.
+  - **High-Concurrency Stream Dispatching**: The Python microservice interfaces with external content delivery networks to discover resilient high-bitrate streaming endpoints (1080p, 720p, 360p) in sub-second response times.
+  - **Asynchronous Caching**: Stream URLs and manifests are resolved and cached asynchronously so users experience instantaneous playback initialization without buffering stalls.
+
+### 3. 🛡️ Clean Website Policy & Role-Based Ad Monetization
+- **100% Clean Modern Website**: The entire site (browsing, catalog, search, details, user profile) is free of popunders, click redirects, or third-party ad scripts.
+- **In-Stream Video Ads for Free Guests**: Free viewers see a discrete pre-roll video ad strictly inside the player with a 5-second countdown, yellow progress track, and **`Skip Ad ⏩`** button.
+- **👑 100% ZERO ADS for Premium & Admin Users**:
+  - **Premium (VIP) Users**: Enjoy an uninterrupted, completely **ad-free** experience with zero pre-roll ads, zero pause cards, and instant movie playback.
+  - **Platform Administrators**: Full ad exemption across all players and pages on the platform.
+
+### 4. 🔇 1-Click Dolby Digital Audio Decoders (E-AC-3 / AAC)
 - **Universal Browser Compatibility**: Web browsers natively lack Dolby E-AC-3 licensing. MovieBuzz includes an on-the-fly audio transcoder and Web Audio API amplifier to boost volume up to **200%** and decode audio seamlessly.
 - **Direct VLC Media Player Download**: Direct download links for desktop playback with native Dolby Atmos & DTS support.
 
-### 3. 🛡️ Clean Website Policy (Zero Site Ads)
-- **No Popunders, No Click Hijacks, No Spam**: The entire website navigation (catalog, search, details, user profile) is 100% clean, modern, and free of redirects.
-- **In-Stream Video Ad Engine**: Discrete pre-roll video ads play strictly inside the player window before the movie starts, complete with a 5-second countdown, yellow progress track, and **`Skip Ad ⏩`** button.
-- **VIP Ad-Free Bypass**: Registered VIP members automatically skip all ads.
-
-### 4. ⚡ Instant Anonymous Guest Playback
+### 5. ⚡ Instant Anonymous Guest Playback
 - **No Mandatory Login Wall**: Visitors can immediately stream movies, explore TV series, and browse catalogs anonymously.
 - **Automated LocalStorage Progress**: Playback positions, watched percentages, and bookmarks persist locally.
 - **Seamless Account Migration**: When a guest logs in or registers, all local playback history automatically syncs to their cloud database account.
@@ -108,6 +117,8 @@
 +-----------------------------------------v-----------------------------------------+
 |                                 SERVER TIER                                       |
 |  Node.js · Express · TypeScript · Mongoose · JWT · Docker Containerization        |
+|                                         +                                         |
+|  Python 3 Microservice (High-Speed Direct Media Resolution & Stream Dispatching) |
 +-----------------------------------------+-----------------------------------------+
                                           |
                    +----------------------+----------------------+
@@ -120,8 +131,9 @@
 
 - **Frontend**: React 18, TypeScript, Tailwind CSS, Vite (Manual Chunk Splitting for fast cold loads), DashJS, HLS.js, Web Audio API.
 - **Backend**: Node.js, Express, TypeScript, Mongoose, JWT Authentication, Helmet security headers, CORS protection.
+- **Media Engine**: Python 3 service for direct high-speed video resolution, format extraction, and multi-profile streaming.
 - **Database**: MongoDB Atlas with optimized indexes on content, media, watch history, and user collections.
-- **Deployment**: Static SPA deployed on **Netlify**, Backend microservice containerized with **Docker** and deployed on **Render**.
+- **Deployment**: Static SPA deployed on **Netlify**, Backend microservice containerized with **Docker** (Node 20 + Python 3) and deployed on **Render**.
 
 ---
 
@@ -142,13 +154,14 @@ MovieBuzz/
 │   └── package.json
 │
 ├── server/                      # Node.js + Express Backend
+│   ├── python/                  # Python 3 Media Resolution & Stream Extraction Service
 │   ├── src/
 │   │   ├── config/              # Database Configuration
 │   │   ├── controllers/         # Streaming, Content, Series, User Controllers
 │   │   ├── models/              # Mongoose Schemas & Data Models
 │   │   ├── routes/              # Express API Routes
 │   │   └── server.ts            # Server Entry Point & Health Check Endpoints
-│   ├── Dockerfile               # Multi-Stage Docker Container Build
+│   ├── Dockerfile               # Multi-Stage Docker Container Build (Node 20 + Python 3)
 │   └── package.json
 │
 ├── assets/                      # Repository Documentation & Visual Graphics
