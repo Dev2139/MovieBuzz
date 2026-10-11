@@ -1,0 +1,167 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 440" width="100%" height="100%">
+  <defs>
+    <!-- Background Gradients -->
+    <linearGradient id="bgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0a0a0c"/>
+      <stop offset="45%" stop-color="#121217"/>
+      <stop offset="100%" stop-color="#09090b"/>
+    </linearGradient>
+    <linearGradient id="glowRed" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#E50914" stop-opacity="0.8"/>
+      <stop offset="100%" stop-color="#FF3B30" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="brandGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FF1E27"/>
+      <stop offset="50%" stop-color="#E50914"/>
+      <stop offset="100%" stop-color="#B20710"/>
+    </linearGradient>
+    <linearGradient id="accentGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#FFD700"/>
+      <stop offset="100%" stop-color="#FF9900"/>
+    </linearGradient>
+    <linearGradient id="playerBarGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#E50914"/>
+      <stop offset="68%" stop-color="#E50914"/>
+      <stop offset="68%" stop-color="#ffffff" stop-opacity="0.25"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0.25"/>
+    </linearGradient>
+
+    <!-- Filters -->
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="16" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <style>
+    .title { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-weight: 900; font-size: 56px; fill: #ffffff; letter-spacing: -1.5px; }
+    .subtitle { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-weight: 500; font-size: 18px; fill: #9ca3af; letter-spacing: 0.5px; }
+    .badge { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-weight: 700; font-size: 11px; fill: #ffffff; letter-spacing: 1.2px; text-transform: uppercase; }
+    .metric { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-weight: 800; font-size: 20px; fill: #ffffff; }
+    .metric-sub { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-weight: 500; font-size: 12px; fill: #9ca3af; text-transform: uppercase; letter-spacing: 0.8px; }
+  </style>
+
+  <!-- Background -->
+  <rect width="1200" height="440" fill="url(#bgGradient)" rx="16"/>
+
+  <!-- Ambient Light Halos -->
+  <circle cx="200" cy="120" r="180" fill="#E50914" opacity="0.12" filter="url(#glow)"/>
+  <circle cx="1020" cy="300" r="220" fill="#6366f1" opacity="0.08" filter="url(#glow)"/>
+  <circle cx="600" cy="380" r="160" fill="#FFD700" opacity="0.05" filter="url(#glow)"/>
+
+  <!-- Border Outline -->
+  <rect x="1" y="1" width="1198" height="438" rx="15" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="1.5"/>
+
+  <!-- Brand Logo Icon Disc -->
+  <g transform="translate(80, 75)">
+    <rect width="68" height="68" rx="18" fill="url(#brandGrad)" filter="url(#glow)"/>
+    <!-- Play Triangle -->
+    <path d="M26 21 L50 34 L26 47 Z" fill="#ffffff"/>
+  </g>
+
+  <!-- Main Title & Tagline -->
+  <text x="168" y="112" class="title">Movie<tspan fill="#E50914">Buzz</tspan></text>
+  <text x="168" y="138" class="badge" fill="#E50914" opacity="0.9">Ultra HD Direct Streaming Platform · Production Suite</text>
+  <text x="80" y="195" class="subtitle">Next-generation cinematic streaming architecture engineered with the MERN stack,</text>
+  <text x="80" y="222" class="subtitle">YouTube-grade responsive player controls, HLS/DashJS adaptive bitrate, and zero site-wide ads.</text>
+
+  <!-- Technology Feature Tags -->
+  <g transform="translate(80, 260)">
+    <!-- Pill 1: 4K HDR -->
+    <g transform="translate(0, 0)">
+      <rect width="108" height="32" rx="16" fill="rgba(255,255,255,0.06)" stroke="rgba(255,255,255,0.12)"/>
+      <text x="54" y="20" class="badge" text-anchor="middle">4K Ultra HD</text>
+    </g>
+    <!-- Pill 2: YouTube Controls -->
+    <g transform="translate(118, 0)">
+      <rect width="168" height="32" rx="16" fill="rgba(229,9,20,0.15)" stroke="rgba(229,9,20,0.3)"/>
+      <text x="84" y="20" class="badge" fill="#ff4d4f" text-anchor="middle">YouTube Scrubber UI</text>
+    </g>
+    <!-- Pill 3: Dolby Audio -->
+    <g transform="translate(296, 0)">
+      <rect width="134" height="32" rx="16" fill="rgba(255,255,255,0.06)" stroke="rgba(255,255,255,0.12)"/>
+      <text x="67" y="20" class="badge" text-anchor="middle">Dolby E-AC3/AAC</text>
+    </g>
+    <!-- Pill 4: Clean Ad Engine -->
+    <g transform="translate(440, 0)">
+      <rect width="154" height="32" rx="16" fill="rgba(255,215,0,0.12)" stroke="rgba(255,215,0,0.25)"/>
+      <text x="77" y="20" class="badge" fill="#FFD700" text-anchor="middle">In-Player Ads Only</text>
+    </g>
+    <!-- Pill 5: PWA App -->
+    <g transform="translate(604, 0)">
+      <rect width="118" height="32" rx="16" fill="rgba(255,255,255,0.06)" stroke="rgba(255,255,255,0.12)"/>
+      <text x="59" y="20" class="badge" text-anchor="middle">Offline PWA</text>
+    </g>
+  </g>
+
+  <!-- Player Preview Card (Right Side Mockup) -->
+  <g transform="translate(760, 55)">
+    <!-- Video Player Bezel -->
+    <rect width="360" height="210" rx="14" fill="#000000" stroke="rgba(255,255,255,0.12)" stroke-width="1.5"/>
+    <!-- Mockup Movie Backdrop -->
+    <rect x="2" y="2" width="356" height="206" rx="12" fill="#141419"/>
+    <!-- Cinema Light Beams -->
+    <path d="M20 180 L180 30 L340 180 Z" fill="url(#glowRed)" opacity="0.3"/>
+    
+    <!-- Player Center Play Disc -->
+    <circle cx="180" cy="100" r="28" fill="rgba(0,0,0,0.7)" stroke="rgba(255,255,255,0.2)" stroke-width="1.5"/>
+    <path d="M174 88 L192 100 L174 112 Z" fill="#ffffff"/>
+
+    <!-- Double Tap Feedback Arc Mockup (Right) -->
+    <path d="M290 50 Q330 100 290 150" fill="none" stroke="rgba(255,255,255,0.3)" stroke-width="3" stroke-linecap="round"/>
+    <text x="290" y="105" font-family="sans-serif" font-size="10" font-weight="700" fill="#ffffff" text-anchor="end">+10s</text>
+
+    <!-- Scrubber Bar Overlay -->
+    <g transform="translate(14, 182)">
+      <!-- Scrubber Track Base -->
+      <rect width="332" height="4" rx="2" fill="rgba(255,255,255,0.2)"/>
+      <!-- Scrubber Buffer -->
+      <rect width="250" height="4" rx="2" fill="rgba(255,255,255,0.4)"/>
+      <!-- Scrubber Played (YouTube Red) -->
+      <rect width="180" height="4" rx="2" fill="#E50914"/>
+      <!-- Red Circle Thumb -->
+      <circle cx="180" cy="2" r="5" fill="#E50914" stroke="#ffffff" stroke-width="1.5"/>
+    </g>
+
+    <!-- Ad Badge Overlay in Player -->
+    <g transform="translate(14, 16)">
+      <rect width="64" height="20" rx="4" fill="rgba(0,0,0,0.8)" stroke="rgba(255,255,255,0.15)"/>
+      <rect x="4" y="4" width="22" height="12" rx="2" fill="#FFD700"/>
+      <text x="15" y="13" font-family="sans-serif" font-size="8" font-weight="900" fill="#000000" text-anchor="middle">AD</text>
+      <text x="44" y="14" font-family="sans-serif" font-size="9" font-weight="700" fill="#ffffff" text-anchor="middle">1 of 1</text>
+    </g>
+
+    <!-- Quality Badge -->
+    <g transform="translate(300, 16)">
+      <rect width="46" height="20" rx="4" fill="rgba(229,9,20,0.85)"/>
+      <text x="323" y="14" font-family="sans-serif" font-size="9" font-weight="800" fill="#ffffff" text-anchor="middle">1080p</text>
+    </g>
+  </g>
+
+  <!-- Bottom Metric Bar Divider -->
+  <line x1="80" y1="330" x2="1120" y2="330" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+
+  <!-- Highlights Stats / Quality Grid -->
+  <g transform="translate(80, 360)">
+    <!-- Stat 1 -->
+    <g transform="translate(0, 0)">
+      <text x="0" y="20" class="metric">4K / 1080p / 720p</text>
+      <text x="0" y="38" class="metric-sub">Multi-Bitrate Profiles</text>
+    </g>
+    <!-- Stat 2 -->
+    <g transform="translate(280, 0)">
+      <text x="0" y="20" class="metric">10s Gesture Skip</text>
+      <text x="0" y="38" class="metric-sub">YouTube Player Controls</text>
+    </g>
+    <!-- Stat 3 -->
+    <g transform="translate(560, 0)">
+      <text x="0" y="20" class="metric">0 Site Ads / Clean UI</text>
+      <text x="0" y="38" class="metric-sub">In-Stream Playback Only</text>
+    </g>
+    <!-- Stat 4 -->
+    <g transform="translate(840, 0)">
+      <text x="0" y="20" class="metric">Free &amp; Open Deploy</text>
+      <text x="0" y="38" class="metric-sub">Netlify + Render Ready</text>
+    </g>
+  </g>
+</svg>
