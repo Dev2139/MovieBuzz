@@ -24,6 +24,8 @@ import {
   ChevronRight,
   ChevronLeft,
   Subtitles,
+  ExternalLink,
+  X,
 } from 'lucide-react';
 import { Media } from '../types';
 import { useAuth } from '../context/AuthContext';
@@ -251,6 +253,48 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
   // Double click skip feedback indicator
   const [skipFeedback, setSkipFeedback] = useState<{ side: 'left' | 'right'; text: string; id: number } | null>(null);
+
+  // In-Player Video Ad States (Only inside movie player, 0 site-wide ads, 0 click redirects)
+  const [isPlayingAd, setIsPlayingAd] = useState<boolean>(!user?.isPremium);
+  const [adCountdown, setAdCountdown] = useState<number>(5);
+  const [adDuration, setAdDuration] = useState<number>(15);
+  const [adCurrentTime, setAdCurrentTime] = useState<number>(0);
+  const [canSkipAd, setCanSkipAd] = useState<boolean>(false);
+  const [showPauseAd, setShowPauseAd] = useState<boolean>(true);
+  const [isAdMuted, setIsAdMuted] = useState<boolean>(false);
+  const adVideoRef = useRef<HTMLVideoElement>(null);
+
+  const handleSkipAd = useCallback(() => {
+    if (adVideoRef.current) {
+      try {
+        adVideoRef.current.pause();
+      } catch {}
+    }
+    setIsPlayingAd(false);
+    setTimeout(() => {
+      if (videoRef.current) {
+        videoRef.current.play().catch(() => {});
+        setIsPlaying(true);
+      }
+    }, 100);
+  }, []);
+
+  // Ad countdown and skip availability timer
+  useEffect(() => {
+    if (!isPlayingAd) return;
+
+    const timer = setInterval(() => {
+      setAdCountdown((prev) => {
+        if (prev <= 1) {
+          setCanSkipAd(true);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [isPlayingAd]);
 
   const controlsTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSavedTimeRef = useRef<number>(0);
@@ -544,6 +588,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   } | null>(null);
 
   const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (isPlayingAd) return;
     ensureAudioContext();
     if ((e.target as HTMLElement).closest('button, input, .no-player-click')) return;
 
@@ -561,7 +606,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   };
 
   const handleTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
-    if (!touchStartRef.current || !containerRef.current) return;
+    if (isPlayingAd || !touchStartRef.current || !containerRef.current) return;
     if ((e.target as HTMLElement).closest('button, input, .no-player-click')) return;
 
     const touch = e.touches[0];
@@ -605,6 +650,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
   // Container click handler: Left double-click rewind 10s, Right double-click forward 10s, Center double-click pause/play, Single-click toggle controls
   const handleContainerClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (isPlayingAd) return;
     if ((e.target as HTMLElement).closest('button, input, .no-player-click')) return;
 
     // Skip click action if touch gesture swipe occurred
@@ -673,6 +719,14 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement).tagName)) return;
+
+      if (isPlayingAd) {
+        if (e.key === ' ' || e.key === 'k' || e.key === 'K') {
+          e.preventDefault();
+          if (canSkipAd) handleSkipAd();
+        }
+        return;
+      }
 
       if (e.key === ' ' || e.key === 'k' || e.key === 'K') {
         e.preventDefault();
@@ -1695,6 +1749,132 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 Close
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* In-Player Pause Ad Card (Strictly in-player, Hulu/YouTube style, 0 site redirects) */}
+      {!isPlaying && !isPlayingAd && currentTime > 5 && showPauseAd && (
+        <div className="absolute bottom-16 sm:bottom-20 left-3 sm:left-6 max-w-xs sm:max-w-sm bg-gradient-to-r from-black/95 via-[#18181b]/95 to-black/90 backdrop-blur-md border border-white/15 rounded-xl p-3 shadow-2xl z-30 pointer-events-auto animate-fade-in no-player-click">
+          <div className="flex items-start justify-between gap-2.5">
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-amber-500 to-red-600 flex items-center justify-center text-white font-bold text-base shadow-md flex-none">
+                🎬
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5 mb-0.5">
+                  <span className="text-[9px] font-bold uppercase tracking-wider px-1 bg-[#FFCC00] text-black rounded-sm">Sponsored</span>
+                  <span className="text-white/50 text-[10px] truncate">Featured Partner</span>
+                </div>
+                <p className="text-white font-medium text-xs line-clamp-1">Stream in Ultra HD & Dolby Sound</p>
+              </div>
+            </div>
+            <button
+              onClick={() => setShowPauseAd(false)}
+              className="text-white/50 hover:text-white p-1 rounded-md hover:bg-white/10 transition-colors flex-none"
+              title="Close Ad"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+          <div className="mt-2.5 flex items-center justify-between pt-2 border-t border-white/10 text-xs">
+            <a
+              href="https://3nbf4.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#FFCC00] hover:underline"
+            >
+              <span>Visit Sponsor</span>
+              <ExternalLink className="w-3 h-3" />
+            </a>
+            <button
+              onClick={togglePlay}
+              className="px-2.5 py-1 bg-white/10 hover:bg-white/20 text-white rounded text-[11px] font-medium transition-colors"
+            >
+              Resume Movie ▶
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* In-Player Pre-Roll Video Ad (YouTube style, unskippable 5s countdown, then Skip Ad) */}
+      {isPlayingAd && (
+        <div className="absolute inset-0 z-50 bg-black flex items-center justify-center select-none no-player-click">
+          <video
+            ref={adVideoRef}
+            src="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4"
+            autoPlay
+            playsInline
+            muted={isAdMuted}
+            onTimeUpdate={(e) => {
+              const vid = e.currentTarget;
+              setAdCurrentTime(vid.currentTime);
+              if (vid.duration && !isNaN(vid.duration)) setAdDuration(vid.duration);
+            }}
+            onEnded={handleSkipAd}
+            className="w-full h-full object-contain cursor-pointer"
+            onClick={() => setIsAdMuted((prev) => !prev)}
+          />
+
+          {/* Top Left: Ad Badge & Sponsor Info */}
+          <div className="absolute top-3 sm:top-4 left-3 sm:left-4 z-50 flex items-center gap-2 pointer-events-auto">
+            <div className="bg-black/80 backdrop-blur-md px-2.5 py-1 rounded text-[11px] font-semibold text-white/90 border border-white/10 flex items-center gap-1.5 shadow-lg">
+              <span className="bg-[#FFCC00] text-black font-extrabold text-[9px] px-1 rounded-sm uppercase tracking-wide">Ad</span>
+              <span>1 of 1</span>
+              <span className="text-white/40">·</span>
+              <span className="text-white/70">
+                {adCountdown > 0 ? `Video starts in ${adCountdown}s` : 'Ad playing'}
+              </span>
+            </div>
+            <a
+              href="https://3nbf4.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="bg-black/70 hover:bg-black/90 backdrop-blur-md px-2.5 py-1 rounded text-[11px] text-white/80 hover:text-white border border-white/10 flex items-center gap-1 transition-all shadow-lg"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <span>Visit Sponsor</span>
+              <ExternalLink className="w-3 h-3 text-[#FFCC00]" />
+            </a>
+          </div>
+
+          {/* Top Right: Sound Mute/Unmute Toggle */}
+          <div className="absolute top-3 sm:top-4 right-3 sm:right-4 z-50 pointer-events-auto">
+            <button
+              onClick={() => setIsAdMuted((prev) => !prev)}
+              className="bg-black/80 hover:bg-black/95 backdrop-blur-md px-2.5 py-1.5 rounded-lg text-white/90 border border-white/10 shadow-lg flex items-center gap-1.5 text-xs transition-colors"
+            >
+              {isAdMuted ? <VolumeX className="w-4 h-4 text-red-400" /> : <Volume2 className="w-4 h-4 text-emerald-400" />}
+              <span className="text-[11px] font-medium">{isAdMuted ? 'Unmute' : 'Mute'}</span>
+            </button>
+          </div>
+
+          {/* Bottom Right: Skip Ad Control (YouTube exact format) */}
+          <div className="absolute bottom-6 right-3 sm:right-6 z-50 pointer-events-auto">
+            {canSkipAd ? (
+              <button
+                onClick={handleSkipAd}
+                className="group bg-black/85 hover:bg-[#FF0000] text-white font-semibold text-xs sm:text-sm px-4 sm:px-5 py-2.5 rounded-md border border-white/20 hover:border-transparent flex items-center gap-2 shadow-2xl backdrop-blur-md transition-all active:scale-95 cursor-pointer"
+              >
+                <span>Skip Ad</span>
+                <SkipForward className="w-4 h-4 fill-current group-hover:translate-x-0.5 transition-transform" />
+              </button>
+            ) : (
+              <div className="bg-black/80 text-white/90 text-xs sm:text-sm font-medium px-3.5 py-2 rounded-md border border-white/10 shadow-lg backdrop-blur-md flex items-center gap-2 select-none">
+                <span>Skip ad in</span>
+                <span className="font-bold text-[#FFCC00] w-3 text-center">{adCountdown}</span>
+              </div>
+            )}
+          </div>
+
+          {/* Yellow Ad Progress Track at bottom */}
+          <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/20 z-50">
+            <div
+              className="h-full bg-[#FFCC00] transition-all duration-150"
+              style={{
+                width: `${adDuration > 0 ? (adCurrentTime / adDuration) * 100 : (5 - adCountdown) * 20}%`,
+              }}
+            />
           </div>
         </div>
       )}
