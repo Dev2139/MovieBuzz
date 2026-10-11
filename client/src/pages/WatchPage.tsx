@@ -21,6 +21,8 @@ export const WatchPage: React.FC = () => {
     queryKey: ['watch-movie', slug],
     queryFn: () => fetchContentBySlug(slug!),
     enabled: isMovie,
+    refetchOnWindowFocus: false,
+    staleTime: Infinity,
   });
 
   // Series Watch Query
@@ -28,6 +30,8 @@ export const WatchPage: React.FC = () => {
     queryKey: ['watch-series', seriesSlug, season, episode],
     queryFn: () => fetchSeriesEpisodeByNumber(seriesSlug!, Number(season!), Number(episode!)),
     enabled: isSeries,
+    refetchOnWindowFocus: false,
+    staleTime: Infinity,
   });
 
   // User History Query for authenticated saved playback position
@@ -35,12 +39,16 @@ export const WatchPage: React.FC = () => {
     queryKey: ['user-history', user?.id],
     queryFn: fetchUserHistory,
     enabled: !!user,
+    refetchOnWindowFocus: false,
+    staleTime: 60 * 1000,
   });
 
   // Related Movies & Catalog Query
   const { data: relatedData } = useQuery({
     queryKey: ['related-catalog', slug, seriesSlug],
     queryFn: () => fetchContentList({ limit: 10 }),
+    refetchOnWindowFocus: false,
+    staleTime: 5 * 60 * 1000,
   });
 
   const currentEpNum = Number(episode || 1);
@@ -61,7 +69,8 @@ export const WatchPage: React.FC = () => {
         currentEpNum
       ),
     enabled: Boolean(rawTitle),
-    staleTime: 10 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    staleTime: Infinity,
   });
 
   const [isPlaylistOpen, setIsPlaylistOpen] = useState(false);
@@ -105,19 +114,28 @@ export const WatchPage: React.FC = () => {
   const prevEp = playlist.find((e) => e.episodeNumber === currentEpNum - 1);
   const nextEp = playlist.find((e) => e.episodeNumber === currentEpNum + 1);
 
-  // Exclusive MovieBox High-Speed Direct Sources
-  const effectiveMediaList: any[] = (movieboxData?.sources || []).map((s: any) => ({
-    _id: `moviebox-${s.resourceId || s.quality}`,
-    quality: s.quality,
-    resolution: s.resolution,
-    fileSize: s.fileSize,
-    mimeType: s.format === 'DASH' ? 'application/dash+xml' : (s.mimeType || 'video/mp4'),
-    format: s.format || 'MP4',
-    provider: 'moviebox',
-    providerMediaId: s.resourceId,
-    streamUrl: s.streamUrl,
-    downloadUrl: s.streamUrl,
-  }));
+  // Exclusive MovieBox High-Speed Direct Sources with stable memoization
+  const effectiveMediaList: any[] = React.useMemo(() => {
+    if (movieboxData?.sources && movieboxData.sources.length > 0) {
+      return movieboxData.sources.map((s: any) => ({
+        _id: `moviebox-${s.resourceId || s.quality}`,
+        quality: s.quality,
+        resolution: s.resolution,
+        fileSize: s.fileSize,
+        mimeType: s.format === 'DASH' ? 'application/dash+xml' : (s.mimeType || 'video/mp4'),
+        format: s.format || 'MP4',
+        provider: 'moviebox',
+        providerMediaId: s.resourceId,
+        streamUrl: s.streamUrl,
+        downloadUrl: s.streamUrl,
+      }));
+    }
+    const directFallback = isMovie ? movieData?.media : seriesData?.media;
+    if (directFallback && Array.isArray(directFallback) && directFallback.length > 0) {
+      return directFallback;
+    }
+    return [];
+  }, [movieboxData?.sources, isMovie, movieData?.media, seriesData?.media]);
 
   // Saved position lookup (Cloud authenticated history first, fallback to local storage)
   let initialPos = 0;

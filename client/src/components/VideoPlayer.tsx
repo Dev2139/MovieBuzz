@@ -134,10 +134,12 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           return q === lower;
         }) || mediaList[0];
       const resolved = resolveMediaUrl(found.streamUrl);
-      setStreamUrl(resolved);
-      setStreamError(null);
+      if (resolved && resolved !== streamUrl) {
+        setStreamUrl(resolved);
+        setStreamError(null);
+      }
     }
-  }, [mediaList, selectedQuality]);
+  }, [mediaList, selectedQuality, streamUrl]);
 
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [isBuffering, setIsBuffering] = useState<boolean>(true);
@@ -357,7 +359,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
   // In-Player Video Ad States (Zero ads for Premium members and Admins)
   const isAdFreeUser = Boolean(user?.isPremium || user?.role === 'admin');
-  const [isPlayingAd, setIsPlayingAd] = useState<boolean>(!isAdFreeUser);
+  const adCompletedRef = useRef<boolean>(isAdFreeUser);
+  const [isPlayingAd, setIsPlayingAd] = useState<boolean>(!isAdFreeUser && !adCompletedRef.current);
   const [adCountdown, setAdCountdown] = useState<number>(5);
   const [adDuration, setAdDuration] = useState<number>(15);
   const [adCurrentTime, setAdCurrentTime] = useState<number>(0);
@@ -367,6 +370,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const adVideoRef = useRef<HTMLVideoElement>(null);
 
   const handleSkipAd = useCallback(() => {
+    adCompletedRef.current = true;
     if (adVideoRef.current) {
       try {
         adVideoRef.current.pause();
@@ -375,11 +379,15 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     setIsPlayingAd(false);
     setTimeout(() => {
       if (videoRef.current) {
+        const resumePos = playbackPositionRef.current > 0 ? playbackPositionRef.current : initialPosition;
+        if (resumePos > 0 && Math.abs(videoRef.current.currentTime - resumePos) > 1.5) {
+          videoRef.current.currentTime = resumePos;
+        }
         videoRef.current.play().catch(() => {});
         setIsPlaying(true);
       }
     }, 100);
-  }, []);
+  }, [initialPosition]);
 
   // Kickstart ad playback immediately upon mount
   useEffect(() => {
@@ -594,7 +602,15 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     [syncSubtitles, showToast]
   );
 
+  const playbackPositionRef = useRef<number>(initialPosition || 0);
+  const wasPlayingBeforeHiddenRef = useRef<boolean>(false);
   const hasAppliedInitialPosRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    if (initialPosition > 0 && playbackPositionRef.current === 0) {
+      playbackPositionRef.current = initialPosition;
+    }
+  }, [initialPosition]);
 
   // Reset initial position applied flag if stream or content changes
   useEffect(() => {
@@ -603,9 +619,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
   // Immediately save position without throttle (for unmount, page hide, reload, pause)
   const saveCurrentPositionImmediately = useCallback(() => {
-    if (videoRef.current && videoRef.current.currentTime > 0) {
-      const pos = videoRef.current.currentTime;
-      const dur = videoRef.current.duration || duration;
+    const pos = videoRef.current?.currentTime || playbackPositionRef.current || 0;
+    if (pos > 0) {
+      const dur = videoRef.current?.duration || duration;
 
       if (user) {
         saveWatchProgress({
@@ -640,7 +656,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     [saveCurrentPositionImmediately]
   );
 
-  // Save on page reload, tab switch, unmount
+  // Save on page reload, tab switch, unmount & RESTORE ON TAB SWITCH RETURN
   useEffect(() => {
     const handleUnload = () => {
       saveCurrentPositionImmediately();
@@ -648,7 +664,28 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
     const handleVisibility = () => {
       if (document.visibilityState === 'hidden') {
+        // Tab switched away: remember current time and playing state
+        if (videoRef.current && videoRef.current.currentTime > 0) {
+          playbackPositionRef.current = videoRef.current.currentTime;
+        }
+        wasPlayingBeforeHiddenRef.current = Boolean(
+          videoRef.current && !videoRef.current.paused && !videoRef.current.ended
+        );
         saveCurrentPositionImmediately();
+      } else if (document.visibilityState === 'visible') {
+        // Tab switched back: preserve & restore playback position without restarting!
+        const targetPos = playbackPositionRef.current > 0 ? playbackPositionRef.current : initialPosition;
+        if (videoRef.current && targetPos > 0) {
+          if (videoRef.current.currentTime === 0 || Math.abs(videoRef.current.currentTime - targetPos) > 1.5) {
+            videoRef.current.currentTime = targetPos;
+            setCurrentTime(targetPos);
+          }
+          if (wasPlayingBeforeHiddenRef.current) {
+            ensureAudioContext();
+            videoRef.current.play().catch(() => {});
+            setIsPlaying(true);
+          }
+        }
       }
     };
 
@@ -662,18 +699,19 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       window.removeEventListener('pagehide', handleUnload);
       document.removeEventListener('visibilitychange', handleVisibility);
     };
-  }, [saveCurrentPositionImmediately]);
+  }, [saveCurrentPositionImmediately, ensureAudioContext, initialPosition]);
 
-  // Apply initial position whenever video is ready or initialPosition prop updates
+  // Apply initial / resume position whenever video is ready or stream loads
   useEffect(() => {
+    const targetPos = playbackPositionRef.current > 0 ? playbackPositionRef.current : initialPosition;
     if (
       !hasAppliedInitialPosRef.current &&
-      initialPosition > 0 &&
+      targetPos > 0 &&
       videoRef.current &&
       videoRef.current.readyState >= 1
     ) {
-      videoRef.current.currentTime = initialPosition;
-      setCurrentTime(initialPosition);
+      videoRef.current.currentTime = targetPos;
+      setCurrentTime(targetPos);
       hasAppliedInitialPosRef.current = true;
     }
   }, [initialPosition, streamUrl]);
@@ -695,6 +733,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     if (videoRef.current) {
       const cur = videoRef.current.currentTime;
       const dur = videoRef.current.duration || duration;
+      if (cur > 0) {
+        playbackPositionRef.current = cur;
+      }
       setCurrentTime(cur);
       if (dur > 0) setDuration(dur);
       updateBuffered();
@@ -706,9 +747,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     if (videoRef.current) {
       const dur = videoRef.current.duration;
       setDuration(dur);
-      if (!hasAppliedInitialPosRef.current && initialPosition > 0) {
-        videoRef.current.currentTime = initialPosition;
-        setCurrentTime(initialPosition);
+      const targetPos = playbackPositionRef.current > 0 ? playbackPositionRef.current : initialPosition;
+      if (targetPos > 0) {
+        videoRef.current.currentTime = targetPos;
+        setCurrentTime(targetPos);
         hasAppliedInitialPosRef.current = true;
       }
       checkAudioTracks();
@@ -751,6 +793,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newTime = parseFloat(e.target.value);
+    playbackPositionRef.current = newTime;
     setCurrentTime(newTime);
     setIsBuffering(true);
     if (videoRef.current) {
@@ -762,6 +805,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     const rect = e.currentTarget.getBoundingClientRect();
     const clickFraction = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
     const newTime = clickFraction * (duration || 0);
+    playbackPositionRef.current = newTime;
     setCurrentTime(newTime);
     setIsBuffering(true);
     if (videoRef.current) {
@@ -1216,8 +1260,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
         player.on(dashjs.MediaPlayer.events.STREAM_INITIALIZED, () => {
           setIsBuffering(false);
-          if (videoRef.current && initialPosition > 0 && !hasAppliedInitialPosRef.current) {
-            videoRef.current.currentTime = initialPosition;
+          const targetPos = playbackPositionRef.current > 0 ? playbackPositionRef.current : initialPosition;
+          if (videoRef.current && targetPos > 0) {
+            videoRef.current.currentTime = targetPos;
             hasAppliedInitialPosRef.current = true;
           }
         });
@@ -1244,8 +1289,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         setIsBuffering(false);
-        if (videoRef.current && initialPosition > 0 && !hasAppliedInitialPosRef.current) {
-          videoRef.current.currentTime = initialPosition;
+        const targetPos = playbackPositionRef.current > 0 ? playbackPositionRef.current : initialPosition;
+        if (videoRef.current && targetPos > 0) {
+          videoRef.current.currentTime = targetPos;
           hasAppliedInitialPosRef.current = true;
         }
       });
@@ -1275,12 +1321,16 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       hlsRef.current = hls;
     } else if (isHls && videoRef.current.canPlayType('application/vnd.apple.mpegurl')) {
       // Native Apple HLS (Safari, iOS)
-      videoRef.current.src = effectiveUrl;
-      videoRef.current.load();
+      if (videoRef.current.src !== effectiveUrl) {
+        videoRef.current.src = effectiveUrl;
+        videoRef.current.load();
+      }
     } else {
       // Direct MP4 or proxy stream
-      videoRef.current.src = effectiveUrl;
-      videoRef.current.load();
+      if (videoRef.current.src !== effectiveUrl) {
+        videoRef.current.src = effectiveUrl;
+        videoRef.current.load();
+      }
     }
 
     return () => {
@@ -1300,7 +1350,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         dashRef.current = null;
       }
     };
-  }, [streamUrl, isTranscodeMode, initialPosition]);
+  }, [streamUrl, isTranscodeMode]);
 
   return (
     <div
