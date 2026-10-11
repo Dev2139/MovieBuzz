@@ -3,11 +3,23 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig({
   plugins: [react()],
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+          'vendor-dashjs': ['dashjs'],
+          'vendor-icons': ['lucide-react'],
+        },
+      },
+    },
+    chunkSizeWarningLimit: 2000,
+  },
   server: {
     port: 5173,
     proxy: {
       '/api': {
-        target: 'https://movie-buzz-kappa.vercel.app',
+        target: 'https://moviebuzz-server.onrender.com',
         changeOrigin: true,
       },
     },
