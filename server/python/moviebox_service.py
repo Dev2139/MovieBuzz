@@ -223,20 +223,38 @@ class MovieBoxHandler(BaseHTTPRequestHandler):
             sources = []
             seen_dash_urls = set()
 
-            # 1. Fetch play-info for target subject (and dubs if needed) to get genuine DASH MPD manifests
+            # 1. Fetch play-info for target subject (and discover all available audio dubs)
             target_ids = [subject_id]
-            # If movie has alternative dubs that provide higher quality streams, also discover them
+            formatted_dubs = []
+            dub_map = {}
             try:
                 details_res = await _client.get_from_api("/wefeed-mobile-bff/subject-api/get", params={"subjectId": subject_id})
-                dubs = details_res.get("dubs", [])
-                for d in dubs:
+                raw_dubs = details_res.get("dubs", [])
+                for d in raw_dubs:
                     did = str(d.get("subjectId", "")).strip()
-                    if did and did not in target_ids:
-                        target_ids.append(did)
+                    lan_code = str(d.get("lanCode") or d.get("lan") or "en").lower()
+                    lan_name = d.get("lanName") or d.get("title") or "Original Audio"
+                    is_orig = bool(d.get("original", False))
+                    dub_obj = {
+                        "subjectId": did,
+                        "name": lan_name,
+                        "code": lan_code,
+                        "original": is_orig,
+                    }
+                    if did:
+                        dub_map[did] = dub_obj
+                        formatted_dubs.append(dub_obj)
+                        if did not in target_ids:
+                            target_ids.append(did)
             except Exception as e:
                 logger.debug("Could not query dubs for %s: %s", subject_id, e)
 
-            for tid in target_ids[:3]:
+            for tid in target_ids[:5]:
+                dub_info = dub_map.get(tid, {
+                    "code": "en",
+                    "name": "Original Audio",
+                    "original": tid == subject_id,
+                })
                 try:
                     play_params = {"subjectId": tid, "se": season_num, "ep": ep_num}
                     play_res = await _client.get_from_api("/wefeed-mobile-bff/subject-api/play-info", params=play_params)
@@ -276,6 +294,10 @@ class MovieBoxHandler(BaseHTTPRequestHandler):
                                     "episode": ep_num,
                                     "title": title_name,
                                     "isDash": True,
+                                    "audioLang": dub_info.get("code", "en"),
+                                    "audioName": dub_info.get("name", "Original Audio"),
+                                    "dubSubjectId": tid,
+                                    "isOriginal": dub_info.get("original", False),
                                 })
 
                         # If there is a legitimate non-deprecation direct MP4 stream
@@ -293,6 +315,10 @@ class MovieBoxHandler(BaseHTTPRequestHandler):
                                 "episode": ep_num,
                                 "title": title_name,
                                 "isDash": False,
+                                "audioLang": dub_info.get("code", "en"),
+                                "audioName": dub_info.get("name", "Original Audio"),
+                                "dubSubjectId": tid,
+                                "isOriginal": dub_info.get("original", False),
                             })
                 except Exception as e:
                     logger.warning("Error fetching play-info for %s: %s", tid, e)
@@ -332,6 +358,10 @@ class MovieBoxHandler(BaseHTTPRequestHandler):
                         "episode": v.get("ep", 0),
                         "title": v.get("title", ""),
                         "isDash": False,
+                        "audioLang": "en",
+                        "audioName": "Original Audio",
+                        "dubSubjectId": subject_id,
+                        "isOriginal": True,
                     })
             except Exception as e:
                 logger.warning("Error fetching resource list for %s: %s", subject_id, e)
@@ -352,7 +382,12 @@ class MovieBoxHandler(BaseHTTPRequestHandler):
                 return (res, -is_retran, bitrate, size)
 
             sources.sort(key=source_sort_key, reverse=True)
-            return 200, {"subjectId": subject_id, "sources": sources, "count": len(sources)}
+            return 200, {
+                "subjectId": subject_id,
+                "sources": sources,
+                "dubs": formatted_dubs,
+                "count": len(sources)
+            }
 
         elif path == "/captions":
             subject_id = query.get("id", [""])[0].strip()

@@ -244,6 +244,7 @@ class MovieBoxService {
     return {
       subject: match,
       sources: sourcesRes.sources || [],
+      dubs: sourcesRes.dubs || [],
     };
   }
 }

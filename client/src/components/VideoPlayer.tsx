@@ -50,6 +50,7 @@ interface VideoPlayerProps {
   seasonNumber?: number;
   episodeNumber?: number;
   subtitles?: Array<{ label: string; language: string; src: string; default?: boolean }>;
+  dubs?: Array<{ subjectId: string; name: string; code: string; original?: boolean }>;
 }
 
 export const QUALITY_TIERS = [
@@ -60,8 +61,16 @@ export const QUALITY_TIERS = [
   { label: 'Auto', value: 'auto', badge: 'Adaptive', height: 0 },
 ];
 
-export const PRESET_AUDIO_LANGUAGES = [
-  { code: 'en', label: 'English', detail: 'Original (AAC Stereo)' },
+export interface AudioTrackOption {
+  code: string;
+  label: string;
+  detail: string;
+  subjectId?: string;
+  original?: boolean;
+}
+
+export const PRESET_AUDIO_LANGUAGES: AudioTrackOption[] = [
+  { code: 'en', label: 'Original', detail: 'Original (AAC Stereo)' },
   { code: 'hi', label: 'Hindi (हिंदी)', detail: 'Dubbed (5.1 HD)' },
   { code: 'es', label: 'Spanish (Español)', detail: 'Castellano / Latino' },
   { code: 'fr', label: 'French (Français)', detail: 'Doublé' },
@@ -93,6 +102,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   initialPosition = 0,
   onEnded,
   subtitles,
+  dubs = [],
 }) => {
   const { user } = useAuth();
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -109,12 +119,18 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [selectedQuality, setSelectedQuality] = useState<string>(
     mediaList && mediaList.length > 0 ? mediaList[0].quality : '1080p'
   );
+  const [selectedAudioLang, setSelectedAudioLang] = useState<string>('en');
   const [streamUrl, setStreamUrl] = useState<string>(
     resolveMediaUrl(mediaList && mediaList.length > 0 ? mediaList[0].streamUrl : undefined)
   );
 
   const activeMedia = mediaList && mediaList.length > 0
     ? (mediaList.find((m) => {
+        const matchesAudio =
+          !selectedAudioLang ||
+          m.audioLang?.toLowerCase() === selectedAudioLang.toLowerCase() ||
+          (selectedAudioLang === 'en' && (m.isOriginal || m.audioLang === 'en'));
+        if (!matchesAudio) return false;
         const lower = selectedQuality.toLowerCase();
         const q = (m.quality || '').toLowerCase();
         if (lower === '4k' || lower === '2160p') return q.includes('4k') || q.includes('2160');
@@ -122,7 +138,12 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         if (lower === '720p') return q.includes('720');
         if (lower === '420p') return q.includes('420') || q.includes('480') || q.includes('360');
         return q === lower;
-      }) || mediaList[0])
+      }) ||
+      mediaList.find((m) =>
+        m.audioLang?.toLowerCase() === selectedAudioLang.toLowerCase() ||
+        (selectedAudioLang === 'en' && (m.isOriginal || m.audioLang === 'en'))
+      ) ||
+      mediaList[0])
     : null;
   const currentDownloadUrl = resolveMediaUrl(activeMedia?.downloadUrl);
 
@@ -131,20 +152,30 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       const lower = selectedQuality.toLowerCase();
       const found =
         mediaList.find((m) => {
+          const matchesAudio =
+            !selectedAudioLang ||
+            m.audioLang?.toLowerCase() === selectedAudioLang.toLowerCase() ||
+            (selectedAudioLang === 'en' && (m.isOriginal || m.audioLang === 'en'));
+          if (!matchesAudio) return false;
           const q = (m.quality || '').toLowerCase();
           if (lower === '4k' || lower === '2160p') return q.includes('4k') || q.includes('2160');
           if (lower === '1080p') return q.includes('1080');
           if (lower === '720p') return q.includes('720');
           if (lower === '420p') return q.includes('420') || q.includes('480') || q.includes('360');
           return q === lower;
-        }) || mediaList[0];
+        }) ||
+        mediaList.find((m) =>
+          m.audioLang?.toLowerCase() === selectedAudioLang.toLowerCase() ||
+          (selectedAudioLang === 'en' && (m.isOriginal || m.audioLang === 'en'))
+        ) ||
+        mediaList[0];
       const resolved = resolveMediaUrl(found.streamUrl);
       if (resolved && resolved !== streamUrl) {
         setStreamUrl(resolved);
         setStreamError(null);
       }
     }
-  }, [mediaList, selectedQuality, streamUrl]);
+  }, [mediaList, selectedQuality, selectedAudioLang, streamUrl]);
 
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [isBuffering, setIsBuffering] = useState<boolean>(true);
@@ -306,8 +337,70 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [isScrubbing, setIsScrubbing] = useState<boolean>(false);
   const [centerFlash, setCenterFlash] = useState<{ type: 'play' | 'pause'; id: number } | null>(null);
   const [showCaptions, setShowCaptions] = useState<boolean>(false);
-  const [selectedAudioLang, setSelectedAudioLang] = useState<string>('en');
   const [selectedSubtitleLang, setSelectedSubtitleLang] = useState<string>('off');
+
+  // Dynamic Audio Track & Dubbing Options based on MovieBox dub catalog and sources
+  const availableAudioOptions = React.useMemo(() => {
+    const list: Array<{ code: string; label: string; detail: string; subjectId?: string; original?: boolean }> = [];
+    const seenCodes = new Set<string>();
+
+    // 1. Dub Catalog
+    if (dubs && dubs.length > 0) {
+      dubs.forEach((d) => {
+        const code = d.code?.toLowerCase() || 'en';
+        if (!seenCodes.has(code)) {
+          seenCodes.add(code);
+          list.push({
+            code,
+            label: d.name || (code === 'en' ? 'Original Audio' : `${code.toUpperCase()} Dub`),
+            detail: d.original ? 'Original Audio' : 'Dubbed Audio',
+            subjectId: d.subjectId,
+            original: d.original,
+          });
+        }
+      });
+    }
+
+    // 2. Sources in mediaList tagged with audio
+    if (mediaList && mediaList.length > 0) {
+      mediaList.forEach((m) => {
+        if (m.audioLang) {
+          const code = m.audioLang.toLowerCase();
+          if (!seenCodes.has(code)) {
+            seenCodes.add(code);
+            list.push({
+              code,
+              label: m.audioName || (code === 'en' ? 'Original Audio' : `${code.toUpperCase()} Dub`),
+              detail: m.isOriginal ? 'Original Audio' : 'Dubbed Audio',
+              subjectId: m.dubSubjectId,
+              original: m.isOriginal,
+            });
+          }
+        }
+      });
+    }
+
+    // 3. Embedded Dash/HLS tracks
+    if (audioTracksList && audioTracksList.length > 0) {
+      audioTracksList.forEach((t) => {
+        const code = (t.language || `track-${t.index}`).toLowerCase();
+        if (!seenCodes.has(code)) {
+          seenCodes.add(code);
+          list.push({
+            code,
+            label: t.label,
+            detail: 'Embedded Audio',
+          });
+        }
+      });
+    }
+
+    if (list.length === 0) {
+      return PRESET_AUDIO_LANGUAGES;
+    }
+
+    return list;
+  }, [dubs, mediaList, audioTracksList]);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const toastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -528,22 +621,69 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
   // Audio Language / Dubbing Selector
   const handleSelectAudioLanguage = useCallback(
-    (langCode: string) => {
+    (langCode: string, targetSubjectId?: string) => {
       setSelectedAudioLang(langCode);
-      const matched = PRESET_AUDIO_LANGUAGES.find((l) => l.code === langCode);
+      const matched = availableAudioOptions.find((l) => l.code === langCode);
       const langLabel = matched ? matched.label : langCode;
+      const currentPos = videoRef.current?.currentTime || playbackPositionRef.current || currentTime || 0;
+      const wasPlaying = isPlaying;
 
-      // 1. Dash.js audio track selection
+      // 1. Check if mediaList has a source matching this language or dub
+      if (mediaList && mediaList.length > 0) {
+        const lowerQuality = selectedQuality.toLowerCase();
+        const found =
+          mediaList.find((m) => {
+            const matchesLang =
+              (targetSubjectId && m.dubSubjectId === targetSubjectId) ||
+              m.audioLang?.toLowerCase() === langCode.toLowerCase() ||
+              (langCode === 'en' && (m.isOriginal || m.audioLang === 'en')) ||
+              (matched?.label && m.audioName?.toLowerCase().includes(matched.label.toLowerCase()));
+            if (!matchesLang) return false;
+
+            const q = (m.quality || '').toLowerCase();
+            if (lowerQuality === '4k' || lowerQuality === '2160p') return q.includes('4k') || q.includes('2160');
+            if (lowerQuality === '1080p') return q.includes('1080');
+            if (lowerQuality === '720p') return q.includes('720');
+            if (lowerQuality === '420p') return q.includes('420') || q.includes('480') || q.includes('360');
+            return true;
+          }) ||
+          mediaList.find((m) =>
+            (targetSubjectId && m.dubSubjectId === targetSubjectId) ||
+            m.audioLang?.toLowerCase() === langCode.toLowerCase() ||
+            (langCode === 'en' && (m.isOriginal || m.audioLang === 'en'))
+          );
+
+        if (found) {
+          const resolved = resolveMediaUrl(found.streamUrl);
+          if (resolved && resolved !== streamUrl) {
+            playbackPositionRef.current = currentPos;
+            setIsBuffering(true);
+            setStreamUrl(resolved);
+            setTimeout(() => {
+              if (videoRef.current) {
+                videoRef.current.currentTime = currentPos;
+                if (wasPlaying) videoRef.current.play().catch(() => {});
+              }
+            }, 200);
+            showToast(`Audio: ${langLabel}`);
+            return;
+          }
+        }
+      }
+
+      // 2. Dash.js audio track selection
       if (dashRef.current) {
         try {
           const audioTracks = dashRef.current.getTracksFor('audio');
           if (audioTracks && audioTracks.length > 0) {
-            const found = audioTracks.find((t: any) =>
+            const foundTrack = audioTracks.find((t: any) =>
               t.lang?.toLowerCase().startsWith(langCode.toLowerCase()) ||
               t.labels?.some((l: any) => l.text?.toLowerCase().includes(langCode.toLowerCase()))
             );
-            if (found) {
-              dashRef.current.setCurrentTrack(found);
+            if (foundTrack) {
+              dashRef.current.setCurrentTrack(foundTrack);
+              showToast(`Audio: ${langLabel}`);
+              return;
             }
           }
         } catch (err) {
@@ -551,7 +691,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         }
       }
 
-      // 2. Hls.js audio track selection
+      // 3. Hls.js audio track selection
       if (hlsRef.current && hlsRef.current.audioTracks) {
         try {
           const hlsTracks = hlsRef.current.audioTracks;
@@ -561,13 +701,15 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           );
           if (trackIdx !== -1) {
             hlsRef.current.audioTrack = trackIdx;
+            showToast(`Audio: ${langLabel}`);
+            return;
           }
         } catch (err) {
           console.warn('Hls audio switch notice:', err);
         }
       }
 
-      // 3. HTML5 AudioTracks
+      // 4. HTML5 AudioTracks
       const vid = videoRef.current as any;
       if (vid && vid.audioTracks && vid.audioTracks.length > 1) {
         let switched = false;
@@ -589,7 +731,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
       showToast(`Audio: ${langLabel}`);
     },
-    [showToast]
+    [availableAudioOptions, mediaList, selectedQuality, streamUrl, isPlaying, currentTime, showToast]
   );
 
   // Subtitle Language Selector
@@ -1269,6 +1411,17 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             videoRef.current.currentTime = targetPos;
             hasAppliedInitialPosRef.current = true;
           }
+          try {
+            const dashAudio = player.getTracksFor('audio');
+            if (dashAudio && dashAudio.length > 0) {
+              const tracks = dashAudio.map((t: any, idx: number) => ({
+                index: idx,
+                label: t.labels?.[0]?.text || t.lang || `Audio Track ${idx + 1}`,
+                language: t.lang || '',
+              }));
+              setAudioTracksList(tracks);
+            }
+          } catch {}
         });
 
         player.on(dashjs.MediaPlayer.events.CAN_PLAY, () => {
@@ -1953,7 +2106,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                   </div>
                   <div className="flex items-center space-x-1 text-white/60 text-[11px]">
                     <span className="truncate max-w-[80px]">
-                      {PRESET_AUDIO_LANGUAGES.find((a) => a.code === selectedAudioLang)?.label.split(' ')[0] || 'English'}
+                      {availableAudioOptions.find((a) => a.code === selectedAudioLang)?.label.split(' ')[0] || 'English'}
                     </span>
                     <ChevronRight className="w-3.5 h-3.5" />
                   </div>
@@ -2081,13 +2234,13 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                       <span className="text-white/40 text-[10px]">Instant</span>
                     </div>
                     <div className="space-y-0.5 mt-0.5">
-                      {PRESET_AUDIO_LANGUAGES.map((lang) => {
+                      {availableAudioOptions.map((lang) => {
                         const isSelected = selectedAudioLang === lang.code;
                         return (
                           <button
                             key={lang.code}
                             onClick={() => {
-                              handleSelectAudioLanguage(lang.code);
+                              handleSelectAudioLanguage(lang.code, lang.subjectId);
                               setShowSettings(false);
                               setSettingsTab('main');
                             }}

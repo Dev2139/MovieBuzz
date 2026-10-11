@@ -414,7 +414,7 @@ export const ContentDetailPage: React.FC = () => {
               {isMovieboxLoading && (
                 <div className="py-12 flex flex-col items-center justify-center space-y-3 bg-dark-card border border-dark-border rounded-xl">
                   <Sparkles className="w-8 h-8 text-brand-500 animate-spin" />
-                  <p className="text-xs font-semibold text-gray-300">Loading complete episode list from MovieBox...</p>
+                  <p className="text-xs font-semibold text-gray-300">Loading complete episode catalog...</p>
                 </div>
               )}
 

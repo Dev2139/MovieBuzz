@@ -312,7 +312,11 @@ export const resolveStreamingSourcesByTitle = async (
   season: number = 1,
   episode: number = 1
 ) => {
-  const res = await api.get<{ subject: any; sources: any[] }>('/streaming/resolve', {
+  const res = await api.get<{
+    subject: any;
+    sources: any[];
+    dubs?: Array<{ subjectId: string; name: string; code: string; original?: boolean }>;
+  }>('/streaming/resolve', {
     params: { title, year, type, season, episode },
   });
   return res.data;

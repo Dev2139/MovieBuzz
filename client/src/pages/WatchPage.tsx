@@ -154,20 +154,24 @@ export const WatchPage: React.FC = () => {
       ? { episodeNumber: currentEpNum + 1 }
       : playlist.find((e) => e.episodeNumber === currentEpNum + 1);
 
-  // Exclusive MovieBox High-Speed Direct Sources with stable memoization
+  // High-Speed Direct Sources with stable memoization
   const effectiveMediaList: any[] = React.useMemo(() => {
     if (movieboxData?.sources && movieboxData.sources.length > 0) {
       return movieboxData.sources.map((s: any) => ({
-        _id: `moviebox-${s.resourceId || s.quality}`,
+        _id: `src-${s.resourceId || s.quality}`,
         quality: s.quality,
         resolution: s.resolution,
         fileSize: s.fileSize,
         mimeType: s.format === 'DASH' ? 'application/dash+xml' : (s.mimeType || 'video/mp4'),
         format: s.format || 'MP4',
-        provider: 'moviebox',
+        provider: 'cinestream',
         providerMediaId: s.resourceId,
         streamUrl: s.streamUrl,
         downloadUrl: s.streamUrl,
+        audioLang: s.audioLang || 'en',
+        audioName: s.audioName || 'Original Audio',
+        dubSubjectId: s.dubSubjectId,
+        isOriginal: s.isOriginal,
       }));
     }
     const directFallback = isMovie ? movieData?.media : seriesData?.media;
@@ -236,14 +240,8 @@ export const WatchPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Reusable Video Player or Resolution States */}
-        {isMovieboxLoading ? (
-          <div className="w-full aspect-video bg-dark-card border border-dark-border rounded-xl flex flex-col items-center justify-center space-y-3">
-            <Sparkles className="w-8 h-8 text-emerald-400 animate-spin" />
-            <p className="text-sm font-semibold text-gray-200">Resolving High-Speed Direct Stream...</p>
-            <p className="text-xs text-gray-400">Fetching streaming links for {contentTitle}</p>
-          </div>
-        ) : effectiveMediaList.length === 0 ? (
+        {/* Reusable Video Player */}
+        {!isMovieboxLoading && effectiveMediaList.length === 0 ? (
           <div className="w-full aspect-video bg-dark-card border border-dark-border rounded-xl flex flex-col items-center justify-center space-y-3 p-6 text-center">
             <Film className="w-10 h-10 text-gray-500" />
             <p className="text-sm font-semibold text-gray-300">No Streaming Sources Found</p>
@@ -265,6 +263,7 @@ export const WatchPage: React.FC = () => {
             imdbId={imdbId}
             seasonNumber={isSeries ? Number(season || 1) : 1}
             episodeNumber={isSeries ? Number(episode || 1) : 1}
+            dubs={movieboxData?.dubs || []}
             onEnded={() => {
               if (nextEp) {
                 navigate(`/watch/series/${seriesSlug}/${season}/${nextEp.episodeNumber}`);

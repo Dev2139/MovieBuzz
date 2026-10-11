@@ -62,6 +62,10 @@ export interface Media {
   streamUrl: string;
   downloadUrl?: string;
   status?: string;
+  audioLang?: string;
+  audioName?: string;
+  dubSubjectId?: string;
+  isOriginal?: boolean;
 }
 
 export interface User {

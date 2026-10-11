@@ -92,6 +92,10 @@ function formatStreamingSources(sources: any[], baseUrl: string) {
       episode: s.episode,
       duration: s.duration,
       provider: 'cinestream',
+      audioLang: s.audioLang || 'en',
+      audioName: s.audioName || 'Original Audio',
+      dubSubjectId: s.dubSubjectId,
+      isOriginal: Boolean(s.isOriginal),
     };
   });
 }
@@ -346,10 +350,11 @@ export const getEpisodeSources = async (req: Request, res: Response) => {
       episode,
       count: formattedSources.length,
       sources: formattedSources,
+      dubs: sourcesRes.dubs || [],
     });
   } catch (error: any) {
     console.warn('getEpisodeSources notice:', error.message);
-    return res.json({ subjectId: req.params.id, season: req.query.season, episode: req.query.episode, count: 0, sources: [] });
+    return res.json({ subjectId: req.params.id, season: req.query.season, episode: req.query.episode, count: 0, sources: [], dubs: [] });
   }
 };
 
@@ -370,7 +375,7 @@ export const resolveStreamingSources = async (req: Request, res: Response) => {
 
     const resolved = await movieboxService.resolveByTitle(title, year, type, season, episode);
     if (!resolved || !resolved.sources || !resolved.sources.length) {
-      return res.json({ subject: resolved?.subject || null, sources: [] });
+      return res.json({ subject: resolved?.subject || null, sources: [], dubs: [] });
     }
 
     const host = req.get('host') || 'localhost:5000';
@@ -382,10 +387,11 @@ export const resolveStreamingSources = async (req: Request, res: Response) => {
     return res.json({
       subject: resolved.subject,
       sources: formattedSources,
+      dubs: resolved.dubs || [],
     });
   } catch (error: any) {
     console.warn('resolveStreamingSources notice:', error.message);
-    return res.json({ subject: null, sources: [] });
+    return res.json({ subject: null, sources: [], dubs: [] });
   }
 };
 
