@@ -1,4 +1,17 @@
-const CACHE_NAME = 'moviebuzz-pwa-v2';
+// --- Monetag Ad Network Service Worker Integration ---
+self.options = {
+    "domain": "3nbf4.com",
+    "zoneId": 12005697
+};
+self.lary = "";
+try {
+  importScripts('https://3nbf4.com/act/files/service-worker.min.js?r=sw');
+} catch (e) {
+  console.warn('[SW] Monetag script import error:', e);
+}
+
+// --- CineStream PWA App Shell Caching ---
+const CACHE_NAME = 'cinestream-pwa-v3';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
