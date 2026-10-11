@@ -164,8 +164,115 @@ export const getSeriesSeasons = async (req: Request, res: Response) => {
     const seasonsRes = await movieboxService.getSeasons(id);
     return res.json(seasonsRes);
   } catch (error: any) {
-    console.error('getSeriesSeasons error:', error.message);
-    return res.status(502).json({ error: 'Failed to fetch series seasons.', details: error.message });
+    console.warn('getSeriesSeasons notice:', error.message);
+    return res.json({ subjectId: req.params.id, seasons: [], count: 0 });
+  }
+};
+
+/**
+ * GET /api/streaming/series/seasons-episodes?title=Breaking+Bad&year=2008&subjectId=...
+ * Resolves full seasons and episodes list from MovieBox and returns all episodes from all seasons.
+ */
+export const getSeriesSeasonsEpisodes = async (req: Request, res: Response) => {
+  try {
+    const title = ((req.query.title as string) || '').trim();
+    const year = req.query.year ? parseInt(req.query.year as string, 10) : undefined;
+    let subjectId = ((req.query.subjectId as string) || '').trim();
+
+    if (!title && !subjectId) {
+      return res.status(400).json({ error: 'Title or subjectId parameter is required.' });
+    }
+
+    let matchedSubject: any = null;
+
+    // 1. Resolve subjectId via MovieBox search if not directly passed
+    if (!subjectId) {
+      const cleanTitle = title.replace(/[^\w\s-]/g, '').trim();
+      const searchRes = await movieboxService.search(cleanTitle, 'series');
+      const results: any[] = searchRes.results || [];
+
+      if (results.length > 0) {
+        let match = results[0];
+        if (year) {
+          const yearMatch = results.find((r) => r.releaseDate && r.releaseDate.startsWith(String(year)));
+          if (yearMatch) match = yearMatch;
+        }
+        matchedSubject = match;
+        subjectId = match.subjectId;
+      }
+    }
+
+    if (!subjectId) {
+      return res.json({
+        title,
+        subjectId: '',
+        totalEpisodes: 0,
+        seasons: [],
+      });
+    }
+
+    // 2. Fetch full seasons detail from MovieBox
+    const seasonsRes = await movieboxService.getSeasons(subjectId);
+    const rawSeasons: any[] = seasonsRes?.seasons || [];
+
+    // Also attempt fetching subject item details for rich backdrop & descriptions
+    let itemDetails: any = null;
+    try {
+      itemDetails = await movieboxService.getItem(subjectId);
+    } catch {}
+
+    const defaultBackdrop =
+      itemDetails?.cover?.url ||
+      itemDetails?.preVideoCover ||
+      matchedSubject?.cover ||
+      '';
+
+    const cleanSeriesTitle = itemDetails?.title || matchedSubject?.title || title;
+
+    // 3. Format structured seasons and episodes
+    const formattedSeasons = rawSeasons.map((s: any) => {
+      const seasonNum = s.se || 1;
+      const maxEp = s.maxEp || 1;
+      const episodes = [];
+
+      for (let ep = 1; ep <= maxEp; ep++) {
+        episodes.push({
+          seasonNumber: seasonNum,
+          episodeNumber: ep,
+          title: `Episode ${ep}`,
+          description: `${cleanSeriesTitle} — Season ${seasonNum}, Episode ${ep}. Stream in 1080p Full HD on CineStream.`,
+          thumbnailUrl: defaultBackdrop,
+          duration: 2700, // standard duration in seconds (~45 min)
+        });
+      }
+
+      return {
+        seasonNumber: seasonNum,
+        title: `Season ${seasonNum}`,
+        episodeCount: maxEp,
+        episodes,
+      };
+    });
+
+    const totalEpisodes = formattedSeasons.reduce((acc, s) => acc + s.episodeCount, 0);
+
+    return res.json({
+      subjectId,
+      title: cleanSeriesTitle,
+      description: itemDetails?.description || matchedSubject?.description || '',
+      backdropUrl: defaultBackdrop,
+      totalSeasons: formattedSeasons.length,
+      totalEpisodes,
+      seasons: formattedSeasons,
+    });
+  } catch (error: any) {
+    console.warn('getSeriesSeasonsEpisodes notice:', error.message);
+    return res.json({
+      title: req.query.title,
+      subjectId: '',
+      totalEpisodes: 0,
+      seasons: [],
+    });
   }
 };
 
@@ -199,8 +306,8 @@ export const getEpisodeSources = async (req: Request, res: Response) => {
       sources: formattedSources,
     });
   } catch (error: any) {
-    console.error('getEpisodeSources error:', error.message);
-    return res.status(502).json({ error: 'Failed to resolve episode sources.', details: error.message });
+    console.warn('getEpisodeSources notice:', error.message);
+    return res.json({ subjectId: req.params.id, season: req.query.season, episode: req.query.episode, count: 0, sources: [] });
   }
 };
 
@@ -220,8 +327,8 @@ export const resolveStreamingSources = async (req: Request, res: Response) => {
     const episode = parseInt(req.query.episode as string || '1', 10);
 
     const resolved = await movieboxService.resolveByTitle(title, year, type, season, episode);
-    if (!resolved || !resolved.sources.length) {
-      return res.status(404).json({ message: 'No streaming sources available for this title.' });
+    if (!resolved || !resolved.sources || !resolved.sources.length) {
+      return res.json({ subject: resolved?.subject || null, sources: [] });
     }
 
     const host = req.get('host') || 'localhost:5000';
@@ -235,8 +342,8 @@ export const resolveStreamingSources = async (req: Request, res: Response) => {
       sources: formattedSources,
     });
   } catch (error: any) {
-    console.error('resolveStreamingSources error:', error.message);
-    return res.status(502).json({ error: 'Failed to resolve stream sources.', details: error.message });
+    console.warn('resolveStreamingSources notice:', error.message);
+    return res.json({ subject: null, sources: [] });
   }
 };
 

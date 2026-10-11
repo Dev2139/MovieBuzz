@@ -1,9 +1,16 @@
 import React, { useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { fetchContentBySlug, fetchSeriesEpisodeByNumber, fetchUserHistory, fetchContentList, resolveStreamingSourcesByTitle } from '../services/api';
+import {
+  fetchContentBySlug,
+  fetchSeriesEpisodeByNumber,
+  fetchUserHistory,
+  fetchContentList,
+  resolveStreamingSourcesByTitle,
+  fetchSeriesMovieBoxSeasonsEpisodes,
+} from '../services/api';
 import { VideoPlayer } from '../components/VideoPlayer';
-import { ChevronLeft, ChevronRight, List, Film, Tv, Play, Sparkles } from 'lucide-react';
+import { ChevronLeft, ChevronRight, List, Film, Tv, Play, Sparkles, Layers } from 'lucide-react';
 import { getLocalPlaybackItem } from '../utils/localStorage';
 import { resolveMediaUrl } from '../utils/url';
 import { useAuth } from '../context/AuthContext';
@@ -15,6 +22,10 @@ export const WatchPage: React.FC = () => {
 
   const isMovie = Boolean(slug);
   const isSeries = Boolean(seriesSlug && season && episode);
+
+  const currentEpNum = Number(episode || 1);
+  const currentSeasonNum = Number(season || 1);
+  const [selectedDrawerSeason, setSelectedDrawerSeason] = useState<number>(currentSeasonNum);
 
   // Movie Watch Query
   const { data: movieData, isLoading: isMovieLoading } = useQuery({
@@ -51,9 +62,6 @@ export const WatchPage: React.FC = () => {
     staleTime: 5 * 60 * 1000,
   });
 
-  const currentEpNum = Number(episode || 1);
-  const currentSeasonNum = Number(season || 1);
-
   // MovieBox Dynamic Playback Source Resolution
   const rawTitle = isMovie ? movieData?.content?.title : seriesData?.series?.title;
   const rawYear = isMovie ? movieData?.content?.releaseYear : seriesData?.series?.releaseYear;
@@ -71,6 +79,15 @@ export const WatchPage: React.FC = () => {
     enabled: Boolean(rawTitle),
     refetchOnWindowFocus: false,
     staleTime: Infinity,
+  });
+
+  // Fetch Full MovieBox Series Seasons & Episodes Catalog
+  const seriesLookupTitle = isSeries ? (seriesData?.series?.title || seriesSlug?.replace(/-/g, ' ')) : undefined;
+  const { data: movieboxSeriesData } = useQuery({
+    queryKey: ['moviebox-series-episodes', seriesLookupTitle, rawYear],
+    queryFn: () => fetchSeriesMovieBoxSeasonsEpisodes(seriesLookupTitle!, rawYear),
+    enabled: Boolean(isSeries && seriesLookupTitle),
+    staleTime: 15 * 60 * 1000,
   });
 
   const [isPlaylistOpen, setIsPlaylistOpen] = useState(false);
@@ -100,19 +117,51 @@ export const WatchPage: React.FC = () => {
     posterUrl = movieData.content.posterUrl;
     tmdbId = movieData.content.tmdbId;
     imdbId = movieData.content.imdbId;
-  } else if (isSeries && seriesData?.episode) {
-    seriesObj = seriesData.series;
-    contentTitle = `${seriesObj?.title || 'Series'} - S${season} E${episode}: ${seriesData.episode.title}`;
+  } else if (isSeries) {
+    seriesObj = seriesData?.series;
+    contentTitle = `${seriesObj?.title || seriesLookupTitle || 'Series'} - S${season} E${episode}: ${seriesData?.episode?.title || `Episode ${episode}`}`;
     contentId = seriesObj?._id || '';
-    episodeId = seriesData.episode._id;
-    posterUrl = seriesData.episode.thumbnailUrl || seriesObj?.backdropUrl;
-    playlist = seriesData.playlist || [];
+    episodeId = seriesData?.episode?._id;
+    posterUrl = seriesData?.episode?.thumbnailUrl || seriesObj?.backdropUrl;
+    playlist = seriesData?.playlist || [];
     tmdbId = seriesObj?.tmdbId;
     imdbId = seriesObj?.imdbId;
   }
 
-  const prevEp = playlist.find((e) => e.episodeNumber === currentEpNum - 1);
-  const nextEp = playlist.find((e) => e.episodeNumber === currentEpNum + 1);
+  // Multi-season catalog according to MovieBox
+  const effectivePlaylistSeasons = React.useMemo(() => {
+    if (movieboxSeriesData?.seasons && movieboxSeriesData.seasons.length > 0) {
+      return movieboxSeriesData.seasons;
+    }
+    return [
+      {
+        seasonNumber: currentSeasonNum,
+        title: `Season ${currentSeasonNum}`,
+        episodeCount: playlist.length || 1,
+        episodes: playlist.map((p) => ({
+          seasonNumber: currentSeasonNum,
+          episodeNumber: p.episodeNumber,
+          title: p.title || `Episode ${p.episodeNumber}`,
+          duration: p.duration || 2700,
+          thumbnailUrl: p.thumbnailUrl,
+        })),
+      },
+    ];
+  }, [movieboxSeriesData, playlist, currentSeasonNum]);
+
+  const activeDrawerSeasonGroup =
+    effectivePlaylistSeasons.find((s) => s.seasonNumber === selectedDrawerSeason) ||
+    effectivePlaylistSeasons.find((s) => s.seasonNumber === currentSeasonNum) ||
+    effectivePlaylistSeasons[0];
+
+  const currentPlayingSeasonGroup =
+    effectivePlaylistSeasons.find((s) => s.seasonNumber === currentSeasonNum) || effectivePlaylistSeasons[0];
+
+  const prevEp = currentEpNum > 1 ? { episodeNumber: currentEpNum - 1 } : null;
+  const nextEp =
+    currentPlayingSeasonGroup && currentEpNum < currentPlayingSeasonGroup.episodeCount
+      ? { episodeNumber: currentEpNum + 1 }
+      : playlist.find((e) => e.episodeNumber === currentEpNum + 1);
 
   // Exclusive MovieBox High-Speed Direct Sources with stable memoization
   const effectiveMediaList: any[] = React.useMemo(() => {
@@ -446,31 +495,73 @@ export const WatchPage: React.FC = () => {
             </p>
 
             {/* Playlist Drawer */}
-            {isPlaylistOpen && playlist.length > 0 && (
-              <div className="pt-3 border-t border-dark-border/60 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-3 animate-fade-in">
-                {playlist.map((ep) => {
-                  const isCurrent = ep.episodeNumber === Number(episode);
-                  return (
-                    <div
-                      key={ep._id}
-                      onClick={() => navigate(`/watch/series/${seriesSlug}/${season}/${ep.episodeNumber}`)}
-                      className={`flex items-center space-x-3 p-2.5 rounded-xl cursor-pointer border transition-all active:scale-95 ${
-                        isCurrent
-                          ? 'bg-brand-500/20 border-brand-500 text-white'
-                          : 'bg-dark-surface border-dark-border hover:border-gray-500 text-gray-300'
-                      }`}
-                    >
-                      <div className="w-7 h-7 rounded-lg bg-black/40 flex items-center justify-center font-bold text-xs flex-none">
-                        {ep.episodeNumber}
+            {isPlaylistOpen && (
+              <div className="pt-3 border-t border-dark-border/60 space-y-3 animate-fade-in">
+                {/* Season Switcher in Drawer if multiple seasons */}
+                {effectivePlaylistSeasons.length > 1 && (
+                  <div className="flex space-x-2 overflow-x-auto scrollbar-none pb-1">
+                    {effectivePlaylistSeasons.map((s) => (
+                      <button
+                        key={s.seasonNumber}
+                        onClick={() => setSelectedDrawerSeason(s.seasonNumber)}
+                        className={`px-3 py-1 rounded-lg text-xs font-bold whitespace-nowrap transition-all active:scale-95 ${
+                          selectedDrawerSeason === s.seasonNumber
+                            ? 'bg-brand-500 text-white shadow-md shadow-brand-500/30'
+                            : 'bg-dark-surface border border-dark-border text-gray-300 hover:bg-dark-hover'
+                        }`}
+                      >
+                        Season {s.seasonNumber} ({s.episodeCount})
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {/* Episodes Grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-3">
+                  {(activeDrawerSeasonGroup?.episodes || playlist).map((ep) => {
+                    const isCurrent =
+                      ep.episodeNumber === currentEpNum &&
+                      activeDrawerSeasonGroup.seasonNumber === currentSeasonNum;
+                    return (
+                      <div
+                        key={`drawer-s${activeDrawerSeasonGroup.seasonNumber}-e${ep.episodeNumber}`}
+                        onClick={() =>
+                          navigate(
+                            `/watch/series/${seriesSlug}/${activeDrawerSeasonGroup.seasonNumber}/${ep.episodeNumber}`
+                          )
+                        }
+                        className={`flex items-center space-x-3 p-2.5 rounded-xl cursor-pointer border transition-all active:scale-95 ${
+                          isCurrent
+                            ? 'bg-brand-500/20 border-brand-500 text-white shadow-md shadow-brand-500/20'
+                            : 'bg-dark-surface border-dark-border hover:border-gray-500 text-gray-300'
+                        }`}
+                      >
+                        <div
+                          className={`w-7 h-7 rounded-lg flex items-center justify-center font-bold text-xs flex-none ${
+                            isCurrent ? 'bg-brand-500 text-white' : 'bg-black/40 text-gray-400'
+                          }`}
+                        >
+                          {ep.episodeNumber}
+                        </div>
+                        <div className="flex-1 truncate">
+                          <p className={`font-semibold text-xs truncate ${isCurrent ? 'text-white' : 'text-gray-300'}`}>
+                            {ep.title}
+                          </p>
+                          <p className="text-[10px] text-gray-400">
+                            Season {activeDrawerSeasonGroup.seasonNumber} • {Math.floor((ep.duration || 2700) / 60)} mins
+                          </p>
+                        </div>
+                        {isCurrent ? (
+                          <span className="text-[10px] bg-brand-500/30 border border-brand-500/50 text-brand-400 px-1.5 py-0.5 rounded font-bold">
+                            Playing
+                          </span>
+                        ) : (
+                          <Play className="w-3.5 h-3.5 text-gray-500 hover:text-white flex-none" />
+                        )}
                       </div>
-                      <div className="flex-1 truncate">
-                        <p className="font-semibold text-xs truncate">{ep.title}</p>
-                        <p className="text-[10px] text-gray-400">{Math.floor(ep.duration / 60)} mins</p>
-                      </div>
-                      {isCurrent && <Play className="w-4 h-4 text-brand-500 fill-brand-500 flex-none" />}
-                    </div>
-                  );
-                })}
+                    );
+                  })}
+                </div>
               </div>
             )}
           </div>

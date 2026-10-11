@@ -100,6 +100,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const hlsRef = useRef<Hls | null>(null);
   const dashRef = useRef<dashjs.MediaPlayerClass | null>(null);
   const dashHevcCleanupRef = useRef<(() => void) | null>(null);
+  const autoRetryAttemptsRef = useRef<number>(0);
+  const isRetryingRef = useRef<boolean>(false);
 
   const [selectedQuality, setSelectedQuality] = useState<string>(
     mediaList && mediaList.length > 0 ? mediaList[0].quality : '1080p'
@@ -1372,8 +1374,14 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         onStalled={handleStall}
         onSeeking={() => setIsBuffering(true)}
         onSeeked={() => setIsBuffering(false)}
-        onCanPlay={() => setIsBuffering(false)}
+        onCanPlay={() => {
+          setIsBuffering(false);
+          autoRetryAttemptsRef.current = 0;
+          setStreamError(null);
+        }}
         onPlay={() => {
+          autoRetryAttemptsRef.current = 0;
+          setStreamError(null);
           if (isPlayingAd) {
             videoRef.current?.pause();
             return;
@@ -1396,6 +1404,44 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         crossOrigin="anonymous"
         onError={(e) => {
           const vid = e.currentTarget;
+          const currentSrc = vid.src || '';
+
+          // If no stream URL or src is empty or not attached yet, ignore false alarm
+          if (!streamUrl || !currentSrc || currentSrc === window.location.href) {
+            return;
+          }
+
+          // If DASH player is managing the stream, let DASH handle its own errors
+          const isDashStream =
+            streamUrl.includes('.mpd') ||
+            streamUrl.includes('/dash/') ||
+            activeMedia?.mimeType === 'application/dash+xml' ||
+            activeMedia?.format === 'DASH';
+
+          if (isDashStream && dashRef.current) {
+            return;
+          }
+
+          // Silent transparent auto-retry on initial load before ever showing an error popup
+          if (autoRetryAttemptsRef.current < 2 && !isRetryingRef.current) {
+            autoRetryAttemptsRef.current += 1;
+            isRetryingRef.current = true;
+            setIsBuffering(true);
+            setTimeout(() => {
+              isRetryingRef.current = false;
+              const effectiveUrl = getEffectiveStreamUrl(streamUrl, isTranscodeMode);
+              if (hlsRef.current) {
+                hlsRef.current.loadSource(effectiveUrl);
+                hlsRef.current.startLoad();
+              } else if (videoRef.current) {
+                videoRef.current.src = effectiveUrl;
+                videoRef.current.load();
+                videoRef.current.play().catch(() => {});
+              }
+            }, 800);
+            return;
+          }
+
           const errCode = vid.error?.code;
           const errMsg = vid.error?.message || '';
           let userMsg = 'Video failed to load.';
