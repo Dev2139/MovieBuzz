@@ -36,15 +36,6 @@ export const ContentDetailPage: React.FC = () => {
   const content = data?.content;
   const mediaList = data?.media || [];
 
-  // Fetch Local MongoDB Seasons if content type is 'series'
-  const { data: seasonsData } = useQuery({
-    queryKey: ['series-seasons', content?._id],
-    queryFn: () => fetchSeriesSeasons(content!._id),
-    enabled: !!content && content.type === 'series',
-  });
-
-  const localSeasons = seasonsData?.seasons || [];
-
   // Fetch MovieBox Complete Seasons & Episodes Catalog
   const { data: movieboxSeriesData, isLoading: isMovieboxLoading } = useQuery({
     queryKey: ['moviebox-series-episodes', content?.title, content?.releaseYear],
@@ -53,7 +44,7 @@ export const ContentDetailPage: React.FC = () => {
     staleTime: 15 * 60 * 1000,
   });
 
-  // Build unified, complete season-wise episode list
+  // Build unified, complete season-wise episode list from MovieBox
   const effectiveSeasons = React.useMemo(() => {
     if (movieboxSeriesData?.seasons && movieboxSeriesData.seasons.length > 0) {
       return movieboxSeriesData.seasons.map((mbS) => ({
@@ -64,50 +55,15 @@ export const ContentDetailPage: React.FC = () => {
           seasonNumber: mbS.seasonNumber,
           episodeNumber: mbEp.episodeNumber,
           title: mbEp.title || `Episode ${mbEp.episodeNumber}`,
-          description: mbEp.description || `${content?.title || 'Series'} Season ${mbS.seasonNumber} Episode ${mbEp.episodeNumber}`,
+          description: mbEp.description || `${content?.title || 'Series'} — Season ${mbS.seasonNumber}, Episode ${mbEp.episodeNumber}`,
           thumbnailUrl: mbEp.thumbnailUrl || content?.backdropUrl || content?.posterUrl,
           duration: mbEp.duration || 2700,
         })),
       }));
     }
 
-    if (localSeasons.length > 0) {
-      return localSeasons.map((ls) => ({
-        seasonNumber: ls.seasonNumber,
-        title: ls.title || `Season ${ls.seasonNumber}`,
-        episodeCount: 1,
-        episodes: [
-          {
-            seasonNumber: ls.seasonNumber,
-            episodeNumber: 1,
-            title: `Episode 1`,
-            description: `${content?.title || 'Series'} Season ${ls.seasonNumber}`,
-            thumbnailUrl: ls.posterUrl || content?.backdropUrl || content?.posterUrl,
-            duration: 2700,
-          },
-        ],
-      }));
-    }
-
-    // Default Season 1 placeholder if series has no explicit list yet
-    return [
-      {
-        seasonNumber: 1,
-        title: 'Season 1',
-        episodeCount: 1,
-        episodes: [
-          {
-            seasonNumber: 1,
-            episodeNumber: 1,
-            title: 'Episode 1',
-            description: `${content?.title || 'Series'} Season 1 Episode 1`,
-            thumbnailUrl: content?.backdropUrl || content?.posterUrl,
-            duration: 2700,
-          },
-        ],
-      },
-    ];
-  }, [movieboxSeriesData, localSeasons, content]);
+    return [];
+  }, [movieboxSeriesData, content]);
 
   const totalEpisodesCount = effectiveSeasons.reduce((acc, s) => acc + s.episodeCount, 0);
 
@@ -455,7 +411,14 @@ export const ContentDetailPage: React.FC = () => {
                   </div>
                 ))}
 
-              {effectiveSeasons.length === 0 && (
+              {isMovieboxLoading && (
+                <div className="py-12 flex flex-col items-center justify-center space-y-3 bg-dark-card border border-dark-border rounded-xl">
+                  <Sparkles className="w-8 h-8 text-brand-500 animate-spin" />
+                  <p className="text-xs font-semibold text-gray-300">Loading complete episode list from MovieBox...</p>
+                </div>
+              )}
+
+              {!isMovieboxLoading && effectiveSeasons.length === 0 && (
                 <div className="py-12 text-center text-gray-400 bg-dark-card border border-dark-border rounded-xl text-xs space-y-2">
                   <Film className="w-8 h-8 text-gray-500 mx-auto" />
                   <p>No episodes currently found for this title.</p>

@@ -252,6 +252,81 @@ class TMDBService {
 
     return null;
   }
+
+  /**
+   * Fetch complete real-world TV seasons & episodes list with official titles, stills and descriptions
+   */
+  async fetchSeriesSeasonsEpisodes(rawTitle: string, year?: number, knownTmdbId?: number) {
+    const { cleanTitle } = cleanMovieTitle(rawTitle);
+    try {
+      let tmdbId = knownTmdbId;
+      if (!tmdbId) {
+        const searchUrl = `https://api.themoviedb.org/3/search/tv?api_key=${this.apiKey}&query=${encodeURIComponent(cleanTitle)}&include_adult=false`;
+        const res = await axios.get(searchUrl, { timeout: 6000 }).catch(() => null);
+        const results = res?.data?.results || [];
+        if (results.length > 0) {
+          if (year) {
+            const yMatch = results.find((r: any) => (r.first_air_date || '').startsWith(String(year)));
+            tmdbId = yMatch ? yMatch.id : results[0].id;
+          } else {
+            tmdbId = results[0].id;
+          }
+        }
+      }
+
+      if (!tmdbId) return null;
+
+      const tvDetailsUrl = `https://api.themoviedb.org/3/tv/${tmdbId}?api_key=${this.apiKey}`;
+      const tvRes = await axios.get(tvDetailsUrl, { timeout: 6000 }).catch(() => null);
+      if (!tvRes?.data) return null;
+
+      const tvData = tvRes.data;
+      const rawSeasons: any[] = (tvData.seasons || []).filter((s: any) => s.season_number > 0);
+      const defaultBackdrop = tvData.backdrop_path
+        ? `${TMDB_IMAGE_BASE_BACKDROP}${tvData.backdrop_path}`
+        : (tvData.poster_path ? `${TMDB_IMAGE_BASE_POSTER}${tvData.poster_path}` : '');
+
+      const seasons = await Promise.all(
+        rawSeasons.slice(0, 10).map(async (s: any) => {
+          const sNum = s.season_number;
+          const sUrl = `https://api.themoviedb.org/3/tv/${tmdbId}/season/${sNum}?api_key=${this.apiKey}`;
+          const sRes = await axios.get(sUrl, { timeout: 6000 }).catch(() => null);
+          const rawEpisodes: any[] = sRes?.data?.episodes || [];
+
+          const episodes = rawEpisodes.map((ep: any) => ({
+            seasonNumber: sNum,
+            episodeNumber: ep.episode_number,
+            title: ep.name || `Episode ${ep.episode_number}`,
+            description: ep.overview || `${tvData.name} — Season ${sNum}, Episode ${ep.episode_number}`,
+            thumbnailUrl: ep.still_path
+              ? `https://image.tmdb.org/t/p/w500${ep.still_path}`
+              : (s.poster_path ? `https://image.tmdb.org/t/p/w500${s.poster_path}` : defaultBackdrop),
+            duration: (ep.runtime || 45) * 60,
+          }));
+
+          return {
+            seasonNumber: sNum,
+            title: s.name || `Season ${sNum}`,
+            episodeCount: s.episode_count || episodes.length,
+            episodes,
+          };
+        })
+      );
+
+      return {
+        tmdbId,
+        title: tvData.name || cleanTitle,
+        description: tvData.overview,
+        backdropUrl: defaultBackdrop,
+        totalSeasons: seasons.length,
+        totalEpisodes: seasons.reduce((sum: number, s: any) => sum + s.episodeCount, 0),
+        seasons,
+      };
+    } catch (err: any) {
+      console.warn('fetchSeriesSeasonsEpisodes err:', err.message);
+      return null;
+    }
+  }
 }
 
 export const tmdbService = new TMDBService();

@@ -92,15 +92,6 @@ export const WatchPage: React.FC = () => {
 
   const [isPlaylistOpen, setIsPlaylistOpen] = useState(false);
 
-  if (isMovieLoading || isSeriesLoading) {
-    return (
-      <div className="min-h-screen bg-dark-base flex flex-col items-center justify-center text-gray-400 space-y-3">
-        <Sparkles className="w-8 h-8 text-brand-500 animate-spin" />
-        <p className="text-xs font-semibold">Loading Video Player...</p>
-      </div>
-    );
-  }
-
   // Determine active media & title parameters
   let contentTitle = '';
   let contentId = '';
@@ -205,6 +196,16 @@ export const WatchPage: React.FC = () => {
     if (localSavedItem && localSavedItem.position > 0) {
       initialPos = localSavedItem.position;
     }
+  }
+
+  // Early loading return ONLY after all hooks are evaluated
+  if (isMovieLoading || isSeriesLoading) {
+    return (
+      <div className="min-h-screen bg-dark-base flex flex-col items-center justify-center text-gray-400 space-y-3">
+        <Sparkles className="w-8 h-8 text-brand-500 animate-spin" />
+        <p className="text-xs font-semibold">Loading Video Player...</p>
+      </div>
+    );
   }
 
   return (

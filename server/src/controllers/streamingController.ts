@@ -3,6 +3,7 @@ import http from 'http';
 import https from 'https';
 import axios from 'axios';
 import { movieboxService } from '../services/movieboxService';
+import { tmdbService, cleanMovieTitle } from '../services/tmdb/tmdbService';
 
 // Persistent HTTP/HTTPS connection pooling to prevent TLS handshake overhead on every DASH segment
 const httpAgent = new http.Agent({ keepAlive: true, maxSockets: 50 });
@@ -175,81 +176,122 @@ export const getSeriesSeasons = async (req: Request, res: Response) => {
  */
 export const getSeriesSeasonsEpisodes = async (req: Request, res: Response) => {
   try {
-    const title = ((req.query.title as string) || '').trim();
+    const rawTitle = ((req.query.title as string) || '').trim();
     const year = req.query.year ? parseInt(req.query.year as string, 10) : undefined;
     let subjectId = ((req.query.subjectId as string) || '').trim();
 
-    if (!title && !subjectId) {
+    if (!rawTitle && !subjectId) {
       return res.status(400).json({ error: 'Title or subjectId parameter is required.' });
     }
 
+    const { cleanTitle, coreTitle } = cleanMovieTitle(rawTitle);
     let matchedSubject: any = null;
 
     // 1. Resolve subjectId via MovieBox search if not directly passed
     if (!subjectId) {
-      const cleanTitle = title.replace(/[^\w\s-]/g, '').trim();
-      const searchRes = await movieboxService.search(cleanTitle, 'series');
-      const results: any[] = searchRes.results || [];
-
-      if (results.length > 0) {
-        let match = results[0];
-        if (year) {
-          const yearMatch = results.find((r) => r.releaseDate && r.releaseDate.startsWith(String(year)));
-          if (yearMatch) match = yearMatch;
+      // Try searching cleanTitle first, then coreTitle, then rawTitle
+      for (const queryVariant of [cleanTitle, coreTitle, rawTitle].filter(Boolean)) {
+        const searchRes = await movieboxService.search(queryVariant, 'series');
+        const results: any[] = searchRes.results || [];
+        if (results.length > 0) {
+          let match = results[0];
+          if (year) {
+            const yearMatch = results.find((r) => r.releaseDate && r.releaseDate.startsWith(String(year)));
+            if (yearMatch) match = yearMatch;
+          }
+          matchedSubject = match;
+          subjectId = match.subjectId;
+          break;
         }
-        matchedSubject = match;
-        subjectId = match.subjectId;
       }
     }
 
-    if (!subjectId) {
-      return res.json({
-        title,
-        subjectId: '',
-        totalEpisodes: 0,
-        seasons: [],
-      });
+    // 2. Fetch full seasons detail from MovieBox (if subjectId resolved)
+    let rawMovieBoxSeasons: any[] = [];
+    let itemDetails: any = null;
+    if (subjectId) {
+      try {
+        const seasonsRes = await movieboxService.getSeasons(subjectId);
+        rawMovieBoxSeasons = seasonsRes?.seasons || [];
+      } catch (err: any) {
+        console.warn('[getSeriesSeasonsEpisodes] MovieBox getSeasons notice:', err.message);
+      }
+      try {
+        itemDetails = await movieboxService.getItem(subjectId);
+      } catch {}
     }
 
-    // 2. Fetch full seasons detail from MovieBox
-    const seasonsRes = await movieboxService.getSeasons(subjectId);
-    const rawSeasons: any[] = seasonsRes?.seasons || [];
-
-    // Also attempt fetching subject item details for rich backdrop & descriptions
-    let itemDetails: any = null;
+    // 3. Concurrently fetch official television episode metadata from TMDB
+    let tmdbSeriesData: any = null;
     try {
-      itemDetails = await movieboxService.getItem(subjectId);
-    } catch {}
+      tmdbSeriesData = await tmdbService.fetchSeriesSeasonsEpisodes(cleanTitle, year);
+    } catch (err: any) {
+      console.warn('[getSeriesSeasonsEpisodes] TMDB fetch notice:', err.message);
+    }
 
     const defaultBackdrop =
+      tmdbSeriesData?.backdropUrl ||
       itemDetails?.cover?.url ||
       itemDetails?.preVideoCover ||
       matchedSubject?.cover ||
       '';
 
-    const cleanSeriesTitle = itemDetails?.title || matchedSubject?.title || title;
+    const cleanSeriesTitle = tmdbSeriesData?.title || itemDetails?.title || matchedSubject?.title || cleanTitle;
+    const cleanSeriesDescription = tmdbSeriesData?.description || itemDetails?.description || matchedSubject?.description || '';
 
-    // 3. Format structured seasons and episodes
-    const formattedSeasons = rawSeasons.map((s: any) => {
-      const seasonNum = s.se || 1;
-      const maxEp = s.maxEp || 1;
+    // 4. Combine and build structured seasons and episodes
+    // Map existing TMDB seasons for quick lookup by seasonNumber
+    const tmdbSeasonMap = new Map<number, any>();
+    if (tmdbSeriesData?.seasons) {
+      for (const s of tmdbSeriesData.seasons) {
+        tmdbSeasonMap.set(s.seasonNumber, s);
+      }
+    }
+
+    // Determine the set of season numbers to include
+    const seasonNumbersSet = new Set<number>();
+    if (tmdbSeriesData?.seasons) {
+      tmdbSeriesData.seasons.forEach((s: any) => seasonNumbersSet.add(s.seasonNumber));
+    }
+    rawMovieBoxSeasons.forEach((s: any) => {
+      const sNum = s.se || 1;
+      if (sNum > 0) seasonNumbersSet.add(sNum);
+    });
+
+    if (seasonNumbersSet.size === 0) {
+      seasonNumbersSet.add(1);
+    }
+
+    const sortedSeasonNumbers = Array.from(seasonNumbersSet).sort((a, b) => a - b);
+
+    const formattedSeasons = sortedSeasonNumbers.map((seasonNum) => {
+      const tmdbSeason = tmdbSeasonMap.get(seasonNum);
+      const mbSeason = rawMovieBoxSeasons.find((s: any) => s.se === seasonNum);
+
+      const mbEpCount = mbSeason?.maxEp || 0;
+      const tmdbEpCount = tmdbSeason?.episodes?.length || tmdbSeason?.episodeCount || 0;
+      const targetEpCount = Math.max(mbEpCount, tmdbEpCount, 1);
+
       const episodes = [];
+      for (let ep = 1; ep <= targetEpCount; ep++) {
+        const tmdbEp = tmdbSeason?.episodes?.find((e: any) => e.episodeNumber === ep);
 
-      for (let ep = 1; ep <= maxEp; ep++) {
         episodes.push({
           seasonNumber: seasonNum,
           episodeNumber: ep,
-          title: `Episode ${ep}`,
-          description: `${cleanSeriesTitle} — Season ${seasonNum}, Episode ${ep}. Stream in 1080p Full HD on CineStream.`,
-          thumbnailUrl: defaultBackdrop,
-          duration: 2700, // standard duration in seconds (~45 min)
+          title: tmdbEp?.title || `Episode ${ep}`,
+          description:
+            tmdbEp?.description ||
+            `${cleanSeriesTitle} — Season ${seasonNum}, Episode ${ep}. Stream in 1080p Full HD on CineStream.`,
+          thumbnailUrl: tmdbEp?.thumbnailUrl || defaultBackdrop,
+          duration: tmdbEp?.duration || 2700,
         });
       }
 
       return {
         seasonNumber: seasonNum,
-        title: `Season ${seasonNum}`,
-        episodeCount: maxEp,
+        title: tmdbSeason?.title || `Season ${seasonNum}`,
+        episodeCount: targetEpCount,
         episodes,
       };
     });
@@ -257,9 +299,9 @@ export const getSeriesSeasonsEpisodes = async (req: Request, res: Response) => {
     const totalEpisodes = formattedSeasons.reduce((acc, s) => acc + s.episodeCount, 0);
 
     return res.json({
-      subjectId,
+      subjectId: subjectId || '',
       title: cleanSeriesTitle,
-      description: itemDetails?.description || matchedSubject?.description || '',
+      description: cleanSeriesDescription,
       backdropUrl: defaultBackdrop,
       totalSeasons: formattedSeasons.length,
       totalEpisodes,

@@ -166,9 +166,18 @@ class MovieBoxHandler(BaseHTTPRequestHandler):
             searcher = SearchV2(_client, query=q, subject_type=subject_type)
             try:
                 res = await searcher.get_content()
-                items = res.get("items", [])
+                subjects = []
+                if isinstance(res.get("items"), dict):
+                    subjects = res["items"].get("subjects", [])
+                elif isinstance(res.get("items"), list):
+                    subjects = res["items"]
+                if not subjects and isinstance(res.get("results"), list):
+                    subjects = res["results"]
+
                 formatted = []
-                for it in items:
+                for it in subjects:
+                    if not isinstance(it, dict):
+                        continue
                     formatted.append({
                         "subjectId": str(it.get("subjectId", "")),
                         "title": it.get("title", ""),
