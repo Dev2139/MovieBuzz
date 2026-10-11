@@ -1,6 +1,12 @@
-# CineStream — Authorized Movie & TV Series Streaming Platform
+# MovieBuzz — High-Performance Streaming Platform
 
-**CineStream** is a complete, production-quality streaming web application built using the **MERN Stack** (MongoDB, Express.js, React.js, Node.js, TypeScript, Tailwind CSS, React Router, TanStack Query, Axios, Mongoose).
+> [!IMPORTANT]
+> **PROPRIETARY & ALL RIGHTS RESERVED**
+> This repository and its contents are the exclusive intellectual property of the author. It is published publicly on GitHub **strictly for portfolio review and technical demonstration purposes**.
+> 
+> **You do NOT have permission to copy, clone, reproduce, modify, redistribute, sublicense, or deploy this code or any of its components without prior explicit written authorization.** Any unauthorized reproduction or use constitutes copyright infringement. For full terms, refer to the [LICENSE](file:///LICENSE) file.
+
+**MovieBuzz** is a complete, production-quality streaming web application built using the **MERN Stack** (MongoDB, Express.js, React.js, Node.js, TypeScript, Tailwind CSS, React Router, TanStack Query, Axios, Mongoose).
 
 The platform is designed exclusively for **movies and TV series that the platform operator has the legal right to distribute**, sourcing media from an existing Telegram channel while providing a completely standalone, premium web user experience without requiring website users to interact with Telegram or hold a Telegram account.
 
@@ -178,3 +184,15 @@ npm run dev:client
 - **Helmet & CORS**: Hardened HTTP security headers.
 - **Sanitized Inputs**: Defense against Mongo injection attacks.
 - **Storage Credential Shielding**: Private storage tokens and channel IDs remain on the server.
+
+---
+
+## 📜 Copyright & Legal License
+
+Copyright © 2026 DevRanjan / MovieBuzz. All Rights Reserved.
+
+- **No Unauthorized Use**: This codebase is proprietary software. You may not copy, reproduce, fork for public re-use, distribute, sublicense, modify, or create derivative works from this code.
+- **No Commercial or Production Deployment**: Deploying this software or using its architecture for any commercial or unauthorized service is strictly forbidden.
+- **Source-Available Portfolio Viewing Only**: Access is provided exclusively for portfolio inspection and technical demonstration on GitHub.
+
+For full legal terms and conditions, see the [LICENSE](file:///LICENSE) file.
