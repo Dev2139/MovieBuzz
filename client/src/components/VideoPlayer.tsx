@@ -915,17 +915,121 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }
   };
 
-  const handleTouchEnd = () => {
+  const handleTouchEnd = (e: React.TouchEvent<HTMLDivElement>) => {
     if (gestureTimeoutRef.current) clearTimeout(gestureTimeoutRef.current);
     gestureTimeoutRef.current = setTimeout(() => {
       setGestureHUD(null);
     }, 700);
+
+    const start = touchStartRef.current;
+    touchStartRef.current = null;
+
+    if (isPlayingAd) return;
+    if (!start) return;
+
+    // Check if touch target was a button or interactive element
+    if ((e.target as HTMLElement).closest('button, input, a, .no-player-click')) {
+      resetControlsTimeout();
+      return;
+    }
+
+    // If it was a vertical swipe gesture for brightness/volume, don't trigger tap
+    if (start.isGesture) {
+      return;
+    }
+
+    // Single touch tap on mobile
+    const touch = e.changedTouches[0];
+    const clientX = touch ? touch.clientX : (containerRef.current?.getBoundingClientRect().left || 0);
+
+    // Suppress subsequent synthetic click for 400ms to avoid double toggling
+    singleClickTimerRef.current = setTimeout(() => {}, 0);
+    handleScreenTap(clientX);
   };
 
-  // Container click handler: Left double-click rewind 10s, Right double-click forward 10s, Center double-click pause/play, Single-click toggle controls
+  // Helper to reset the 5-second auto-hide timer on control interaction
+  const resetControlsTimeout = useCallback(() => {
+    if (controlsTimeoutRef.current) {
+      clearTimeout(controlsTimeoutRef.current);
+    }
+    controlsTimeoutRef.current = setTimeout(() => {
+      if (isPlaying) setShowControls(false);
+    }, 5000);
+  }, [isPlaying]);
+
+  // Screen Tap / Click Handler:
+  // If controllers are hidden: show for 5 seconds and auto-hide.
+  // If controllers are shown (within those 5 seconds or whenever shown): immediately turn them off ("oof it").
+  const lastTapTimeRef = useRef<number>(0);
+  const handleScreenTap = useCallback(
+    (clientX: number) => {
+      const now = Date.now();
+      // Deduplicate rapid dual events (e.g. touchEnd + simulated click)
+      if (now - lastTapTimeRef.current < 250) {
+        return;
+      }
+      lastTapTimeRef.current = now;
+
+      const rect = containerRef.current?.getBoundingClientRect();
+      const clickX = clientX - (rect?.left || 0);
+      const width = rect?.width || 1;
+
+      // Double-tap skip within 300ms on outer edges (left 30% or right 30%)
+      if (now - lastClickRef.current.time < 300) {
+        if (clickX < width * 0.3) {
+          // Left side double-click: Rewind 10s
+          if (videoRef.current) {
+            videoRef.current.currentTime = Math.max(0, videoRef.current.currentTime - 10);
+          }
+          setSkipFeedback({ side: 'left', text: '10 seconds', id: Date.now() });
+          setTimeout(() => setSkipFeedback(null), 800);
+          lastClickRef.current = { time: 0, x: 0 };
+          resetControlsTimeout();
+          return;
+        } else if (clickX > width * 0.7) {
+          // Right side double-click: Fast-forward 10s
+          if (videoRef.current) {
+            videoRef.current.currentTime = Math.min(duration, videoRef.current.currentTime + 10);
+          }
+          setSkipFeedback({ side: 'right', text: '10 seconds', id: Date.now() });
+          setTimeout(() => setSkipFeedback(null), 800);
+          lastClickRef.current = { time: 0, x: 0 };
+          resetControlsTimeout();
+          return;
+        }
+      }
+
+      lastClickRef.current = { time: now, x: clickX };
+
+      // Core toggle:
+      // If controls are hidden -> show for 5 seconds and auto-hide
+      // If controls are shown -> turn off immediately ("oof it")
+      setShowControls((prev) => {
+        if (!prev) {
+          if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
+          controlsTimeoutRef.current = setTimeout(() => {
+            setShowControls(false);
+          }, 5000);
+          return true;
+        } else {
+          if (controlsTimeoutRef.current) {
+            clearTimeout(controlsTimeoutRef.current);
+            controlsTimeoutRef.current = null;
+          }
+          return false;
+        }
+      });
+    },
+    [duration, resetControlsTimeout]
+  );
+
+  // Container click handler (desktop mouse or fallback)
   const handleContainerClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (isPlayingAd) return;
-    if ((e.target as HTMLElement).closest('button, input, .no-player-click')) return;
+    if ((e.target as HTMLElement).closest('button, input, a, .no-player-click')) {
+      resetControlsTimeout();
+      return;
+    }
 
     // Skip click action if touch gesture swipe occurred
     if (touchStartRef.current?.isGesture) {
@@ -933,60 +1037,16 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       return;
     }
 
-    const now = Date.now();
-    const rect = containerRef.current?.getBoundingClientRect();
-    const clickX = e.clientX - (rect?.left || 0);
-    const width = rect?.width || 1;
-
-    if (now - lastClickRef.current.time < 300) {
-      // Double Tap Detected
-      if (singleClickTimerRef.current) clearTimeout(singleClickTimerRef.current);
-
-      if (clickX < width * 0.35) {
-        // Left side double-click: Rewind 10s
-        if (videoRef.current) {
-          videoRef.current.currentTime = Math.max(0, videoRef.current.currentTime - 10);
-        }
-        setSkipFeedback({ side: 'left', text: '10 seconds', id: Date.now() });
-        setTimeout(() => setSkipFeedback(null), 800);
-      } else if (clickX > width * 0.65) {
-        // Right side double-click: Fast-forward 10s
-        if (videoRef.current) {
-          videoRef.current.currentTime = Math.min(duration, videoRef.current.currentTime + 10);
-        }
-        setSkipFeedback({ side: 'right', text: '10 seconds', id: Date.now() });
-        setTimeout(() => setSkipFeedback(null), 800);
-      } else {
-        // Center double-click: Toggle Pause/Play
-        togglePlay();
-      }
-
-      lastClickRef.current = { time: 0, x: 0 };
-    } else {
-      // Single Click: Show / toggle controllers
-      lastClickRef.current = { time: now, x: clickX };
-      singleClickTimerRef.current = setTimeout(() => {
-        setShowControls((prev) => {
-          const next = !prev;
-          if (next && isPlaying) {
-            if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
-            controlsTimeoutRef.current = setTimeout(() => {
-              setShowControls(false);
-            }, 3500);
-          }
-          return next;
-        });
-      }, 280);
-    }
+    handleScreenTap(e.clientX);
   };
 
-  // Auto-hide controls
+  // Auto-hide controls on desktop mouse movement (5 seconds)
   const handleMouseMove = () => {
     setShowControls(true);
     if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
     controlsTimeoutRef.current = setTimeout(() => {
       if (isPlaying) setShowControls(false);
-    }, 3500);
+    }, 5000);
   };
 
   // YouTube Keyboard shortcuts
@@ -1250,7 +1310,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
-      className="relative w-full aspect-video bg-black rounded-xl sm:rounded-2xl overflow-hidden group shadow-2xl select-none touch-none"
+      className="relative w-full aspect-video bg-black rounded-xl sm:rounded-2xl overflow-hidden group shadow-2xl select-none touch-manipulation"
     >
       <video
         ref={videoRef}

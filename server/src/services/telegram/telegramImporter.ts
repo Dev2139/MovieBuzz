@@ -128,54 +128,79 @@ export class TelegramImporter {
 
         if (!series) return null;
 
-        const seasonNum = parsed.season || 1;
-        const episodeNum = parsed.episode || 1;
+        // Determine seasons and episodes to store season-wise
+        const seasonsToProcess: Array<{ seasonNumber: number; episodes: number[] }> =
+          parsed.seasonsList && parsed.seasonsList.length > 0
+            ? parsed.seasonsList
+            : [
+                {
+                  seasonNumber: parsed.season || 1,
+                  episodes: (() => {
+                    const sEp = parsed.episode || 1;
+                    const eEp = Math.max(sEp, parsed.episodeEnd || sEp);
+                    const list: number[] = [];
+                    for (let i = sEp; i <= eEp; i++) list.push(i);
+                    return list;
+                  })(),
+                },
+              ];
 
-        let season = await Season.findOne({ seriesId: series._id, seasonNumber: seasonNum });
-        if (!season) {
-          season = new Season({
-            seriesId: series._id,
-            seasonNumber: seasonNum,
-            title: `Season ${seasonNum}`,
-            releaseYear,
-          });
-          await season.save().catch(() => {});
-        }
+        const savedEpisodes: any[] = [];
+        const savedSeasons: any[] = [];
 
-        if (!season) season = await Season.findOne({ seriesId: series._id, seasonNumber: seasonNum });
-        if (!season) return null;
+        for (const seasonInfo of seasonsToProcess) {
+          const sNum = seasonInfo.seasonNumber;
+          let season = await Season.findOne({ seriesId: series._id, seasonNumber: sNum });
+          if (!season) {
+            season = new Season({
+              seriesId: series._id,
+              seasonNumber: sNum,
+              title: `Season ${sNum}`,
+              releaseYear,
+              posterUrl: defaultPoster,
+            });
+            await season.save().catch(() => {});
+          }
 
-        let episodeDoc = await Episode.findOne({ seasonId: season._id, episodeNumber: episodeNum });
-        if (!episodeDoc) {
-          episodeDoc = new Episode({
-            seriesId: series._id,
-            seasonId: season._id,
-            episodeNumber: episodeNum,
-            title: `Episode ${episodeNum}`,
-            description: raw.caption,
-            thumbnailUrl: defaultPoster,
-            duration: 2700,
-          });
-          await episodeDoc.save().catch(() => {});
-        }
+          if (!season) season = await Season.findOne({ seriesId: series._id, seasonNumber: sNum });
+          if (!season) continue;
+          savedSeasons.push(season);
 
-        if (!episodeDoc) episodeDoc = await Episode.findOne({ seasonId: season._id, episodeNumber: episodeNum });
+          for (const epNum of seasonInfo.episodes) {
+            let episodeDoc = await Episode.findOne({ seasonId: season._id, episodeNumber: epNum });
+            if (!episodeDoc) {
+              episodeDoc = new Episode({
+                seriesId: series._id,
+                seasonId: season._id,
+                episodeNumber: epNum,
+                title: `Episode ${epNum}`,
+                description: raw.caption,
+                thumbnailUrl: defaultPoster,
+                duration: 2700,
+              });
+              await episodeDoc.save().catch(() => {});
+            }
 
-        if (episodeDoc) {
-          await Media.findOneAndUpdate(
-            { episodeId: episodeDoc._id, quality },
-            {
-              resolution: quality === '4K' ? '3840x2160' : '1920x1080',
-              fileSize: raw.fileSize || '1.2 GB',
-              streamUrl: defaultStream,
-              downloadUrl: defaultDownload,
-              provider: 'telegram',
-              providerMediaId: raw.mediaId,
-              providerMessageId: raw.messageId,
-              status: 'active',
-            },
-            { upsert: true }
-          );
+            if (!episodeDoc) episodeDoc = await Episode.findOne({ seasonId: season._id, episodeNumber: epNum });
+
+            if (episodeDoc) {
+              savedEpisodes.push(episodeDoc);
+              await Media.findOneAndUpdate(
+                { episodeId: episodeDoc._id, quality },
+                {
+                  resolution: quality === '4K' ? '3840x2160' : '1920x1080',
+                  fileSize: raw.fileSize || '1.2 GB',
+                  streamUrl: defaultStream,
+                  downloadUrl: defaultDownload,
+                  provider: 'telegram',
+                  providerMediaId: raw.mediaId,
+                  providerMessageId: raw.messageId,
+                  status: 'active',
+                },
+                { upsert: true }
+              );
+            }
+          }
         }
 
         await TelegramImport.findOneAndUpdate(
@@ -194,12 +219,12 @@ export class TelegramImporter {
             detectedLanguage: language,
             status: 'IMPORTED',
             mappedContentId: series._id,
-            mappedEpisodeId: episodeDoc?._id,
+            mappedEpisodeId: savedEpisodes[0]?._id,
           },
           { upsert: true }
         );
 
-        return { type: 'series', series, season, episode: episodeDoc };
+        return { type: 'series', series, seasons: savedSeasons, episodes: savedEpisodes };
       } else {
         // Movie Post
         let movie = await Content.findOne({ $or: [{ title }, { slug: `${baseSlug}-${releaseYear}` }], type: 'movie' });

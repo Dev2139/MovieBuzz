@@ -233,6 +233,11 @@ export const publishTelegramImportApi = async (payload: any) => {
   return res.data;
 };
 
+export const storeSeriesEpisodesApi = async (payload: any) => {
+  const res = await api.post('/admin/series/store-episodes', payload);
+  return res.data;
+};
+
 export const enrichCatalogApi = async () => {
   const res = await api.post<{ message: string; enrichedCount: number }>('/admin/enrich');
   return res.data;

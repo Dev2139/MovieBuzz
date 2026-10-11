@@ -110,6 +110,8 @@ export const AdminDashboardPage: React.FC = () => {
   const [seriesBackdrop, setSeriesBackdrop] = useState('');
   const [seriesYear, setSeriesYear] = useState('2026');
   const [seriesGenres, setSeriesGenres] = useState('Drama, Sci-Fi');
+  const [seriesSeasonCount, setSeriesSeasonCount] = useState('1');
+  const [seriesEpisodeCount, setSeriesEpisodeCount] = useState('8');
 
   // Add Movie Mutation
   const addMovieMutation = useMutation({
@@ -221,6 +223,26 @@ export const AdminDashboardPage: React.FC = () => {
 
   const handleSeriesSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    const sCount = Math.max(1, Number(seriesSeasonCount) || 1);
+    const epCount = Math.max(1, Number(seriesEpisodeCount) || 1);
+
+    const seasons = [];
+    for (let s = 1; s <= sCount; s++) {
+      const episodes = [];
+      for (let ep = 1; ep <= epCount; ep++) {
+        episodes.push({
+          episodeNumber: ep,
+          title: `Episode ${ep}`,
+          duration: 2700,
+        });
+      }
+      seasons.push({
+        seasonNumber: s,
+        title: `Season ${s}`,
+        episodes,
+      });
+    }
+
     addSeriesMutation.mutate({
       title: seriesTitle,
       description: seriesDescription,
@@ -229,6 +251,7 @@ export const AdminDashboardPage: React.FC = () => {
       releaseYear: Number(seriesYear),
       genres: seriesGenres,
       languages: 'English',
+      seasons,
     });
   };
 
@@ -512,6 +535,35 @@ export const AdminDashboardPage: React.FC = () => {
               />
             </div>
           </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-gray-400 uppercase mb-1">Number of Seasons</label>
+              <input
+                type="number"
+                min="1"
+                max="25"
+                value={seriesSeasonCount}
+                onChange={(e) => setSeriesSeasonCount(e.target.value)}
+                className="w-full bg-dark-surface border border-dark-border rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:border-brand-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-400 uppercase mb-1">Episodes per Season</label>
+              <input
+                type="number"
+                min="1"
+                max="100"
+                value={seriesEpisodeCount}
+                onChange={(e) => setSeriesEpisodeCount(e.target.value)}
+                className="w-full bg-dark-surface border border-dark-border rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:border-brand-500"
+              />
+            </div>
+          </div>
+
+          <p className="text-[11px] text-gray-400">
+            💡 Episodes will be automatically stored season-wise with full player and playlist support.
+          </p>
 
           <button
             type="submit"
