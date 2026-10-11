@@ -153,11 +153,11 @@ export const WatchPage: React.FC = () => {
             <span>Back</span>
           </button>
 
-          {/* MovieBox Stream Indicator */}
+          {/* CineStream HD Stream Indicator */}
           <div className="flex items-center gap-2">
             <span className="flex items-center gap-1 text-[10px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-2 py-1 rounded-md">
               <Sparkles className="w-3 h-3 text-emerald-400" />
-              <span>MovieBox Direct Stream</span>
+              <span>CineStream HD Direct</span>
             </span>
 
             <div className="flex items-center space-x-2 font-medium">
@@ -168,19 +168,19 @@ export const WatchPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Reusable Video Player or MovieBox Resolution States */}
+        {/* Reusable Video Player or Resolution States */}
         {isMovieboxLoading ? (
           <div className="w-full aspect-video bg-dark-card border border-dark-border rounded-xl flex flex-col items-center justify-center space-y-3">
             <Sparkles className="w-8 h-8 text-emerald-400 animate-spin" />
-            <p className="text-sm font-semibold text-gray-200">Resolving MovieBox High-Speed Stream...</p>
-            <p className="text-xs text-gray-400">Fetching direct streaming links for {contentTitle}</p>
+            <p className="text-sm font-semibold text-gray-200">Resolving High-Speed Direct Stream...</p>
+            <p className="text-xs text-gray-400">Fetching streaming links for {contentTitle}</p>
           </div>
         ) : effectiveMediaList.length === 0 ? (
           <div className="w-full aspect-video bg-dark-card border border-dark-border rounded-xl flex flex-col items-center justify-center space-y-3 p-6 text-center">
             <Film className="w-10 h-10 text-gray-500" />
-            <p className="text-sm font-semibold text-gray-300">No MovieBox Streaming Sources Found</p>
+            <p className="text-sm font-semibold text-gray-300">No Streaming Sources Found</p>
             <p className="text-xs text-gray-500 max-w-md">
-              We couldn't resolve a stream for "{contentTitle}". Please verify that this title is available on MovieBox.
+              We couldn't resolve a stream for "{contentTitle}". Please check back soon or try another title.
             </p>
           </div>
         ) : (
@@ -339,12 +339,12 @@ export const WatchPage: React.FC = () => {
                 </div>
               </div>
 
-              {/* Compact MovieBox Download & Quality Options */}
+              {/* Compact Download & Quality Options */}
               {effectiveMediaList && effectiveMediaList.length > 0 && (
                 <div className="border-t border-dark-border/50 pt-3 space-y-2">
                   <h3 className="text-xs font-bold text-white flex items-center space-x-1.5">
                     <Film className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>MovieBox Direct Quality Streams & Fast Downloads</span>
+                    <span>CineStream High-Speed Quality Streams & Downloads</span>
                   </h3>
 
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">

@@ -603,7 +603,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }, 700);
   };
 
-  // Container click handler with Double-Tap Skip (-10s / +10s) and Single-Tap Toggle Controls
+  // Container click handler: Left double-click rewind 10s, Right double-click forward 10s, Center double-click pause/play, Single-click toggle controls
   const handleContainerClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if ((e.target as HTMLElement).closest('button, input, .no-player-click')) return;
 
@@ -619,31 +619,44 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     const width = rect?.width || 1;
 
     if (now - lastClickRef.current.time < 300) {
-      // Double Tap Detected (-10s / +10s)
+      // Double Tap Detected
       if (singleClickTimerRef.current) clearTimeout(singleClickTimerRef.current);
 
-      if (clickX < width / 2) {
-        // Rewind -10s
+      if (clickX < width * 0.35) {
+        // Left side double-click: Rewind 10s
         if (videoRef.current) {
           videoRef.current.currentTime = Math.max(0, videoRef.current.currentTime - 10);
         }
-        setSkipFeedback({ side: 'left', text: '-10s', id: Date.now() });
-      } else {
-        // Fast-Forward +10s
+        setSkipFeedback({ side: 'left', text: '10 seconds', id: Date.now() });
+        setTimeout(() => setSkipFeedback(null), 800);
+      } else if (clickX > width * 0.65) {
+        // Right side double-click: Fast-forward 10s
         if (videoRef.current) {
           videoRef.current.currentTime = Math.min(duration, videoRef.current.currentTime + 10);
         }
-        setSkipFeedback({ side: 'right', text: '+10s', id: Date.now() });
+        setSkipFeedback({ side: 'right', text: '10 seconds', id: Date.now() });
+        setTimeout(() => setSkipFeedback(null), 800);
+      } else {
+        // Center double-click: Toggle Pause/Play
+        togglePlay();
       }
 
-      setTimeout(() => setSkipFeedback(null), 800);
       lastClickRef.current = { time: 0, x: 0 };
     } else {
-      // Single Tap: Toggle Controls overlay without pausing movie
+      // Single Click: Show / toggle controllers
       lastClickRef.current = { time: now, x: clickX };
       singleClickTimerRef.current = setTimeout(() => {
-        setShowControls((prev) => !prev);
-      }, 300);
+        setShowControls((prev) => {
+          const next = !prev;
+          if (next && isPlaying) {
+            if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
+            controlsTimeoutRef.current = setTimeout(() => {
+              setShowControls(false);
+            }, 3500);
+          }
+          return next;
+        });
+      }, 280);
     }
   };
 
@@ -1114,17 +1127,21 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         </div>
       )}
 
-      {/* Double Tap Skip Feedback Indicators */}
+      {/* YouTube Double-Tap Curved Feedback Arcs */}
       {skipFeedback?.side === 'left' && (
-        <div className="absolute left-6 sm:left-16 top-1/2 -translate-y-1/2 flex flex-col items-center justify-center w-16 h-16 sm:w-20 sm:h-20 bg-black/80 backdrop-blur-md rounded-full border border-white/20 text-white z-30 pointer-events-none shadow-2xl animate-bounce">
-          <RotateCcw className="w-6 h-6 sm:w-7 sm:h-7 text-brand-500" />
-          <span className="text-[11px] sm:text-xs font-black font-mono mt-0.5">{skipFeedback.text}</span>
+        <div className="absolute left-0 top-0 bottom-0 w-[38%] bg-white/10 rounded-r-[140px] flex flex-col items-center justify-center text-white z-30 pointer-events-none animate-fade-in backdrop-blur-[2px]">
+          <div className="flex items-center space-x-1 mb-1 animate-pulse">
+            <RotateCcw className="w-8 h-8 sm:w-10 sm:h-10 text-white" />
+          </div>
+          <span className="text-xs sm:text-sm font-bold tracking-wide text-white drop-shadow">10 seconds</span>
         </div>
       )}
       {skipFeedback?.side === 'right' && (
-        <div className="absolute right-6 sm:right-16 top-1/2 -translate-y-1/2 flex flex-col items-center justify-center w-16 h-16 sm:w-20 sm:h-20 bg-black/80 backdrop-blur-md rounded-full border border-white/20 text-white z-30 pointer-events-none shadow-2xl animate-bounce">
-          <RotateCw className="w-6 h-6 sm:w-7 sm:h-7 text-brand-500" />
-          <span className="text-[11px] sm:text-xs font-black font-mono mt-0.5">{skipFeedback.text}</span>
+        <div className="absolute right-0 top-0 bottom-0 w-[38%] bg-white/10 rounded-l-[140px] flex flex-col items-center justify-center text-white z-30 pointer-events-none animate-fade-in backdrop-blur-[2px]">
+          <div className="flex items-center space-x-1 mb-1 animate-pulse">
+            <RotateCw className="w-8 h-8 sm:w-10 sm:h-10 text-white" />
+          </div>
+          <span className="text-xs sm:text-sm font-bold tracking-wide text-white drop-shadow">10 seconds</span>
         </div>
       )}
 
@@ -1136,19 +1153,55 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       >
         <div className="pr-4 min-w-0">
           <h3 className="text-white font-bold text-xs sm:text-lg drop-shadow truncate max-w-[200px] sm:max-w-md">{contentTitle}</h3>
-          <p className="text-[10px] sm:text-[11px] text-brand-500 font-semibold uppercase tracking-wider">{selectedQuality} Streaming</p>
+          <p className="text-[10px] sm:text-[11px] text-[#FF0000] font-semibold uppercase tracking-wider">{selectedQuality} HD Stream</p>
         </div>
       </div>
 
-      {/* Center Big Play Button when paused */}
-      {!isPlaying && !isBuffering && (
-        <button
-          onClick={togglePlay}
-          className="no-player-click absolute inset-0 m-auto w-14 h-14 sm:w-20 sm:h-20 bg-brand-500/90 hover:bg-brand-500 rounded-full flex items-center justify-center text-white shadow-2xl transition-transform hover:scale-110 z-20"
-          aria-label="Play video"
-        >
-          <Play className="w-7 h-7 sm:w-10 sm:h-10 fill-white ml-0.5" />
-        </button>
+      {/* YouTube On-Screen Center Controls (Play/Pause & 10s Rewind/Forward) */}
+      {showControls && !isBuffering && (
+        <div className="absolute inset-0 m-auto flex items-center justify-center space-x-8 sm:space-x-14 z-20 pointer-events-none">
+          {/* Rewind 10s */}
+          <button
+            onClick={() => {
+              if (videoRef.current) videoRef.current.currentTime = Math.max(0, videoRef.current.currentTime - 10);
+              setSkipFeedback({ side: 'left', text: '10 seconds', id: Date.now() });
+              setTimeout(() => setSkipFeedback(null), 800);
+            }}
+            className="no-player-click pointer-events-auto w-10 h-10 sm:w-12 sm:h-12 bg-black/60 hover:bg-black/80 rounded-full flex items-center justify-center text-white/90 hover:text-white backdrop-blur-md transition-all hover:scale-110 active:scale-95 shadow-xl border border-white/10"
+            title="Seek back 10s"
+            aria-label="Seek back 10s"
+          >
+            <RotateCcw className="w-5 h-5 sm:w-6 sm:h-6" />
+          </button>
+
+          {/* Center Play / Pause Disc Button */}
+          <button
+            onClick={togglePlay}
+            className="no-player-click pointer-events-auto w-14 h-14 sm:w-16 sm:h-16 bg-black/70 hover:bg-black/90 rounded-full flex items-center justify-center text-white backdrop-blur-md shadow-2xl transition-all hover:scale-110 active:scale-95 border border-white/15"
+            title={isPlaying ? 'Pause' : 'Play'}
+            aria-label={isPlaying ? 'Pause' : 'Play'}
+          >
+            {isPlaying ? (
+              <Pause className="w-7 h-7 sm:w-8 sm:h-8 fill-white" />
+            ) : (
+              <Play className="w-7 h-7 sm:w-8 sm:h-8 fill-white ml-0.5 sm:ml-1" />
+            )}
+          </button>
+
+          {/* Forward 10s */}
+          <button
+            onClick={() => {
+              if (videoRef.current) videoRef.current.currentTime = Math.min(duration, videoRef.current.currentTime + 10);
+              setSkipFeedback({ side: 'right', text: '10 seconds', id: Date.now() });
+              setTimeout(() => setSkipFeedback(null), 800);
+            }}
+            className="no-player-click pointer-events-auto w-10 h-10 sm:w-12 sm:h-12 bg-black/60 hover:bg-black/80 rounded-full flex items-center justify-center text-white/90 hover:text-white backdrop-blur-md transition-all hover:scale-110 active:scale-95 shadow-xl border border-white/10"
+            title="Seek forward 10s"
+            aria-label="Seek forward 10s"
+          >
+            <RotateCw className="w-5 h-5 sm:w-6 sm:h-6" />
+          </button>
+        </div>
       )}
 
       {/* Center Animated Flash Indicator (YouTube style on play/pause) */}
@@ -1157,7 +1210,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           key={centerFlash.id}
           className="absolute inset-0 flex items-center justify-center pointer-events-none z-30"
         >
-          <div className="w-16 h-16 sm:w-20 sm:h-20 bg-black/60 backdrop-blur-md rounded-full flex items-center justify-center text-white shadow-2xl animate-ping opacity-75">
+          <div className="w-16 h-16 sm:w-20 sm:h-20 bg-black/70 backdrop-blur-md rounded-full flex items-center justify-center text-white shadow-2xl animate-ping opacity-75">
             {centerFlash.type === 'play' ? (
               <Play className="w-8 h-8 sm:w-10 sm:h-10 fill-white ml-1" />
             ) : (

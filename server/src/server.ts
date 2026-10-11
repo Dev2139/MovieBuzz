@@ -74,11 +74,11 @@ app.get(['/', '/api', '/api/health', '/healthz'], (req, res) => {
   res.status(200).json({
     status: 'ok',
     service: 'CineStream Backend API',
-    message: '🎬 CineStream API is active and running (MovieBox Direct Streaming Engine)',
+    message: '🎬 CineStream API is active and running (CineStream Edge Streaming Engine)',
     timestamp: new Date().toISOString(),
     streaming: {
-      provider: 'MovieBox',
-      bridgeUrl: process.env.MOVIEBOX_API_URL || 'http://127.0.0.1:5055',
+      provider: 'CineStream Edge',
+      status: 'active',
     },
     nodeEnv: process.env.NODE_ENV || 'development',
   });
@@ -91,7 +91,7 @@ if (!process.env.VERCEL) {
     const server = app.listen(PORT, async () => {
       console.log(`=======================================================`);
       console.log(` 🎬 CineStream Server running on http://localhost:${PORT}`);
-      console.log(` 🚀 Streaming Engine: MovieBox Direct`);
+      console.log(` 🚀 Streaming Engine: CineStream Edge`);
       console.log(` 🚀 Environment: ${process.env.NODE_ENV || 'development'}`);
       console.log(`=======================================================`);
     });

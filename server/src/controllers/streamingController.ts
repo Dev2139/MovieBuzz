@@ -90,7 +90,7 @@ function formatStreamingSources(sources: any[], baseUrl: string) {
       season: s.season,
       episode: s.episode,
       duration: s.duration,
-      provider: 'moviebox',
+      provider: 'cinestream',
     };
   });
 }
