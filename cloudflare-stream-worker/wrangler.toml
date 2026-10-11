@@ -1,0 +1,6 @@
+name = "cinestream-stream-proxy"
+main = "src/index.ts"
+compatibility_date = "2024-04-01"
+
+[placement]
+mode = "smart"

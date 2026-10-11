@@ -6,6 +6,7 @@ import {
   getEpisodeSources,
   resolveStreamingSources,
   proxyVideoStream,
+  proxyDashStream,
   proxySubtitle,
 } from '../controllers/streamingController';
 
@@ -19,6 +20,7 @@ router.get('/episodes/:id/sources', getEpisodeSources);
 router.get('/resolve', resolveStreamingSources);
 
 // Media & subtitle streaming proxies
+router.get('/dash/:token/*', proxyDashStream);
 router.get('/proxy', proxyVideoStream);
 router.get('/subtitle', proxySubtitle);
 

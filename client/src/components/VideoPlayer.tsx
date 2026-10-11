@@ -1,5 +1,7 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react';
 import Hls from 'hls.js';
+import * as dashjs from 'dashjs';
+import { attachHevcSupport } from '@hevcjs/dashjs-plugin';
 import {
   Play,
   Pause,
@@ -57,6 +59,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const hlsRef = useRef<Hls | null>(null);
+  const dashRef = useRef<dashjs.MediaPlayerClass | null>(null);
+  const dashHevcCleanupRef = useRef<(() => void) | null>(null);
 
   const [selectedQuality, setSelectedQuality] = useState<string>(
     mediaList && mediaList.length > 0 ? mediaList[0].quality : '1080p'
@@ -650,21 +654,102 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   }, [volume, isMuted]);
 
   useEffect(() => {
+    let isCancelled = false;
     const effectiveUrl = getEffectiveStreamUrl(streamUrl, isTranscodeMode);
     if (!videoRef.current || !effectiveUrl) return;
 
     setIsBuffering(true);
     setStreamError(null);
 
-    // Clean up previous HLS instance if active
+    // Clean up previous player instances if active
+    if (dashHevcCleanupRef.current) {
+      dashHevcCleanupRef.current();
+      dashHevcCleanupRef.current = null;
+    }
     if (hlsRef.current) {
       hlsRef.current.destroy();
       hlsRef.current = null;
     }
+    if (dashRef.current) {
+      try {
+        dashRef.current.destroy();
+      } catch {}
+      dashRef.current = null;
+    }
 
-    const isHls = effectiveUrl.includes('.m3u8') || effectiveUrl.includes('/hls/');
+    const isDash =
+      effectiveUrl.includes('.mpd') ||
+      effectiveUrl.includes('/dash/') ||
+      activeMedia?.mimeType === 'application/dash+xml' ||
+      activeMedia?.format === 'DASH';
+    const isHls = !isDash && (effectiveUrl.includes('.m3u8') || effectiveUrl.includes('/hls/'));
 
-    if (isHls && Hls.isSupported()) {
+    if (isDash) {
+      const player = dashjs.MediaPlayer().create();
+
+      const initDash = async () => {
+        try {
+          const cleanup = await attachHevcSupport(player, {
+            forceTranscode: true,
+            adaptiveCompute: false,
+            bitrate: 4_500_000,
+            workerUrl: '/transcode-worker.js',
+            wasmUrl: '/hevc-decode.js',
+            wasmBinaryUrl: '/hevc-decode.wasm',
+          });
+          if (isCancelled) {
+            cleanup?.();
+            try { player.destroy(); } catch {}
+            return;
+          }
+          dashHevcCleanupRef.current = cleanup;
+        } catch (err) {
+          console.warn('[VideoPlayer] attachHevcSupport notice:', err);
+        }
+
+        if (isCancelled || !videoRef.current) {
+          try { player.destroy(); } catch {}
+          return;
+        }
+
+        player.initialize(videoRef.current, effectiveUrl, true);
+        dashRef.current = player;
+        player.updateSettings({
+          streaming: {
+            buffer: {
+              initialBufferLevel: 1.5,
+              bufferTimeDefault: 8,
+              bufferTimeAtTopQuality: 16,
+              fastSwitchEnabled: true,
+            },
+            abr: {
+              autoSwitchBitrate: {
+                video: true,
+                audio: true,
+              },
+            },
+          },
+        });
+
+        player.on(dashjs.MediaPlayer.events.STREAM_INITIALIZED, () => {
+          setIsBuffering(false);
+          if (videoRef.current && initialPosition > 0 && !hasAppliedInitialPosRef.current) {
+            videoRef.current.currentTime = initialPosition;
+            hasAppliedInitialPosRef.current = true;
+          }
+        });
+
+        player.on(dashjs.MediaPlayer.events.CAN_PLAY, () => {
+          setIsBuffering(false);
+        });
+
+        player.on(dashjs.MediaPlayer.events.ERROR, (e: any) => {
+          console.warn('DASH Player Error event:', e);
+        });
+      };
+
+      initDash();
+    } else if (isHls && Hls.isSupported()) {
       const hls = new Hls({
         enableWorker: true,
         lowLatencyMode: true,
@@ -716,9 +801,20 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }
 
     return () => {
+      isCancelled = true;
+      if (dashHevcCleanupRef.current) {
+        dashHevcCleanupRef.current();
+        dashHevcCleanupRef.current = null;
+      }
       if (hlsRef.current) {
         hlsRef.current.destroy();
         hlsRef.current = null;
+      }
+      if (dashRef.current) {
+        try {
+          dashRef.current.destroy();
+        } catch {}
+        dashRef.current = null;
       }
     };
   }, [streamUrl, isTranscodeMode, initialPosition]);

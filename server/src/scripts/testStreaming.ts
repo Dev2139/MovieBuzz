@@ -25,6 +25,7 @@ async function runTests() {
 
   // 1. Health & Service check
   await test('Internal Python Bridge Health Check', async () => {
+    await movieboxService.ensureServiceRunning();
     const res = await axios.get(`${BASE_URL}/health`, { timeout: 3000 });
     if (res.status !== 200 || res.data.status !== 'ok') {
       throw new Error(`Unexpected health status: ${res.status}`);
@@ -44,6 +45,7 @@ async function runTests() {
 
   // 3. Playback Source Resolution for Movie
   let testResourceLink = '';
+  let testSignCookie = '';
   await test('Playback Source Resolution for Movie ID', async () => {
     if (!foundMovieId) throw new Error('No movie ID from previous test');
     const res = await movieboxService.getSources(foundMovieId);
@@ -55,6 +57,7 @@ async function runTests() {
       throw new Error('Source resourceLink is empty');
     }
     testResourceLink = firstSource.resourceLink;
+    testSignCookie = firstSource.signCookie || '';
   });
 
   // 4. Series Search & Seasons Resolution
@@ -91,11 +94,16 @@ async function runTests() {
   // 7. Upstream Range Request Verification
   await test('Byte-Range Request on Resolved Stream URL', async () => {
     if (!testResourceLink) throw new Error('No test resource link available');
+    const headers: Record<string, string> = {
+      Range: 'bytes=0-1024',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+      Referer: 'https://sportslive.wine',
+    };
+    if (testSignCookie) {
+      headers['Cookie'] = testSignCookie;
+    }
     const res = await axios.get(testResourceLink, {
-      headers: {
-        Range: 'bytes=0-1024',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-      },
+      headers,
       validateStatus: (s) => s === 206 || s === 200,
       timeout: 10000,
     });

@@ -1,6 +1,7 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
+// Cloudflare edge stream worker proxy enabled
 // Suppress background GramJS MTProto socket update loop timeouts
 process.on('unhandledRejection', (reason: any) => {
   if (reason?.message?.includes('TIMEOUT') || reason?.message?.includes('AUTH_KEY') || reason?.message?.includes('DISCONNECT')) {

@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { spawn, ChildProcess } from 'child_process';
 import path from 'path';
+import fs from 'fs';
 
 const MOVIEBOX_SERVICE_URL = process.env.MOVIEBOX_SERVICE_URL || 'http://127.0.0.1:5055';
 const CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes TTL
@@ -14,7 +15,7 @@ class MovieBoxService {
   private serviceUrl: string;
   private pythonProcess: ChildProcess | null = null;
   private cache: Map<string, CacheEntry<any>> = new Map();
-  private isStarting: boolean = false;
+  private startPromise: Promise<boolean> | null = null;
 
   constructor() {
     this.serviceUrl = MOVIEBOX_SERVICE_URL;
@@ -35,50 +36,63 @@ class MovieBoxService {
       return true;
     }
 
-    if (this.isStarting) return false;
-    this.isStarting = true;
-
-    try {
-      const scriptPath = path.resolve(__dirname, '../../python/moviebox_service.py');
-      console.log(`[MovieBoxService] Starting Python bridge service from ${scriptPath}...`);
-
-      const proc = spawn('python', [scriptPath], {
-        stdio: ['ignore', 'pipe', 'pipe'],
-        detached: false,
-      });
-
-      this.pythonProcess = proc;
-
-      proc.stdout?.on('data', (data) => {
-        const msg = data.toString().trim();
-        if (msg) console.log(`[MovieBox-Py] ${msg}`);
-      });
-
-      proc.stderr?.on('data', (data) => {
-        const msg = data.toString().trim();
-        if (msg) console.warn(`[MovieBox-Py-Err] ${msg}`);
-      });
-
-      proc.on('exit', (code) => {
-        console.warn(`[MovieBoxService] Python bridge exited with code ${code}`);
-        this.pythonProcess = null;
-      });
-
-      // Poll up to 10 seconds for service readiness
-      for (let i = 0; i < 20; i++) {
-        await new Promise((resolve) => setTimeout(resolve, 500));
-        if (await this.isServiceHealthy()) {
-          console.log(`[MovieBoxService] Python bridge ready at ${this.serviceUrl}`);
-          this.isStarting = false;
-          return true;
-        }
-      }
-    } catch (err) {
-      console.error('[MovieBoxService] Failed to start Python bridge:', err);
+    if (this.startPromise) {
+      return this.startPromise;
     }
 
-    this.isStarting = false;
-    return false;
+    this.startPromise = (async () => {
+      try {
+        let scriptPath = path.resolve(__dirname, '../../python/moviebox_service.py');
+        if (!fs.existsSync(scriptPath)) {
+          scriptPath = path.resolve(process.cwd(), 'python/moviebox_service.py');
+        }
+        if (!fs.existsSync(scriptPath)) {
+          scriptPath = path.resolve(process.cwd(), 'server/python/moviebox_service.py');
+        }
+
+        const pythonBin = process.env.PYTHON_BIN || (process.platform === 'win32' ? 'python' : 'python3');
+        console.log(`[MovieBoxService] Starting Python bridge service (${pythonBin}) from ${scriptPath}...`);
+
+        const proc = spawn(pythonBin, [scriptPath], {
+          stdio: ['ignore', 'pipe', 'pipe'],
+          detached: false,
+        });
+
+        this.pythonProcess = proc;
+
+        proc.stdout?.on('data', (data) => {
+          const msg = data.toString().trim();
+          if (msg) console.log(`[MovieBox-Py] ${msg}`);
+        });
+
+        proc.stderr?.on('data', (data) => {
+          const msg = data.toString().trim();
+          if (msg) console.warn(`[MovieBox-Py-Err] ${msg}`);
+        });
+
+        proc.on('exit', (code) => {
+          console.warn(`[MovieBoxService] Python bridge exited with code ${code}`);
+          this.pythonProcess = null;
+        });
+
+        // Poll up to 15 seconds for service readiness
+        for (let i = 0; i < 30; i++) {
+          await new Promise((resolve) => setTimeout(resolve, 500));
+          if (await this.isServiceHealthy()) {
+            console.log(`[MovieBoxService] Python bridge ready at ${this.serviceUrl}`);
+            return true;
+          }
+        }
+      } catch (err) {
+        console.error('[MovieBoxService] Failed to start Python bridge:', err);
+      } finally {
+        this.startPromise = null;
+      }
+
+      return false;
+    })();
+
+    return this.startPromise;
   }
 
   private getCached<T>(key: string): T | null {

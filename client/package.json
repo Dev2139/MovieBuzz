@@ -10,9 +10,12 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@hevcjs/core": "^1.4.8",
+    "@hevcjs/dashjs-plugin": "^1.1.11",
     "@tanstack/react-query": "^5.29.2",
     "axios": "^1.6.8",
     "clsx": "^2.1.0",
+    "dashjs": "^5.2.1",
     "hls.js": "^1.7.3",
     "lucide-react": "^0.368.0",
     "react": "^18.2.0",

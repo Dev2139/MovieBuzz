@@ -1,5 +1,7 @@
 import asyncio
+import base64
 import json
+import re
 import logging
 import os
 import sys
@@ -21,6 +23,67 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger("moviebox_service")
 
 PORT = int(os.getenv("MOVIEBOX_PORT", "5055"))
+
+def is_deprecation_notice_url(url: str) -> bool:
+    """Identify and filter out 21-second upgrade announcement / placeholder video URLs."""
+    if not url:
+        return True
+    lower = url.lower()
+    return (
+        "b164fbfb4347792950bdfbfb563d39d9" in lower
+        or "1c7de0bd3393702d9191801f15f88f8d" in lower
+        or "9a0461bc39da389663bf3dbb17091d3f" in lower
+        or "/notice.mp4" in lower
+        or ("macdn.aoneroom.com" in lower and "/other/" in lower)
+    )
+
+def decode_b64_padded(s: str) -> bytes | None:
+    padding = (4 - len(s) % 4) % 4
+    if padding > 0:
+        s += "=" * padding
+    try:
+        return base64.b64decode(s.encode("ascii"))
+    except Exception:
+        return None
+
+def resolve_dash_manifest_from_policy(sign_cookie: str) -> tuple[str, str] | None:
+    """
+    Decodes urlprefix or CloudFront-Policy from sign_cookie.
+    Returns (manifest_url, base_url) if resolved.
+    """
+    if not sign_cookie:
+        return None
+    for part in sign_cookie.split(";"):
+        trimmed = part.strip()
+        if "urlprefix=" in trimmed:
+            idx = trimmed.find("urlprefix=")
+            prefix_part = trimmed[idx + len("urlprefix="):]
+            b64_token = prefix_part.split(":")[0].strip()
+            normalized = b64_token.replace("-", "+").replace("_", "/")
+            decoded = decode_b64_padded(normalized)
+            if decoded:
+                try:
+                    url_str = decoded.decode("utf-8")
+                    base = url_str.rstrip("*").rstrip("/")
+                    if base and (base.startswith("http://") or base.startswith("https://")) and "/dash/" in base:
+                        return f"{base}/index.mpd", f"{base}/"
+                except Exception:
+                    pass
+        if "CloudFront-Policy=" in trimmed:
+            idx = trimmed.find("CloudFront-Policy=")
+            policy_raw = trimmed[idx + len("CloudFront-Policy="):].strip()
+            normalized = policy_raw.replace("-", "+").replace("_", "=").replace("~", "/")
+            decoded = decode_b64_padded(normalized)
+            if decoded:
+                try:
+                    js = json.loads(decoded)
+                    res = js.get("Statement", [{}])[0].get("Resource", "")
+                    base = res.rstrip("*").rstrip("/")
+                    if base and (base.startswith("http://") or base.startswith("https://")) and "/dash/" in base:
+                        return f"{base}/index.mpd", f"{base}/"
+                except Exception:
+                    pass
+    return None
 
 # Global asyncio event loop running on a dedicated worker thread
 _loop = None
@@ -145,35 +208,141 @@ class MovieBoxHandler(BaseHTTPRequestHandler):
             se = query.get("se", [""])[0].strip()
             ep = query.get("ep", [""])[0].strip()
 
-            params = {"subjectId": subject_id, "page": 1, "perPage": 20}
-            if se:
-                params["se"] = int(se)
-            if ep:
-                params["ep"] = int(ep)
+            season_num = int(se) if (se and se.isdigit()) else 0
+            ep_num = int(ep) if (ep and ep.isdigit()) else 0
 
-            res = await _client.get_from_api("/wefeed-mobile-bff/subject-api/resource", params=params)
-            vids = res.get("list", [])
             sources = []
-            for v in vids:
-                # If series episode is requested, filter matching episode if provided
-                if se and v.get("se") is not None and int(v.get("se")) != int(se):
-                    continue
-                if ep and v.get("ep") is not None and int(v.get("ep")) != int(ep):
-                    continue
+            seen_dash_urls = set()
 
-                sources.append({
-                    "resourceId": str(v.get("resourceId", "")),
-                    "resolution": v.get("resolution", 1080),
-                    "quality": f"{v.get('resolution', 1080)}p",
-                    "codecName": v.get("codecName", "h264"),
-                    "size": v.get("size", 0),
-                    "duration": v.get("duration", 0),
-                    "resourceLink": v.get("resourceLink", ""),
-                    "sourceUrl": v.get("sourceUrl", ""),
-                    "season": v.get("se", 0),
-                    "episode": v.get("ep", 0),
-                    "title": v.get("title", ""),
-                })
+            # 1. Fetch play-info for target subject (and dubs if needed) to get genuine DASH MPD manifests
+            target_ids = [subject_id]
+            # If movie has alternative dubs that provide higher quality streams, also discover them
+            try:
+                details_res = await _client.get_from_api("/wefeed-mobile-bff/subject-api/get", params={"subjectId": subject_id})
+                dubs = details_res.get("dubs", [])
+                for d in dubs:
+                    did = str(d.get("subjectId", "")).strip()
+                    if did and did not in target_ids:
+                        target_ids.append(did)
+            except Exception as e:
+                logger.debug("Could not query dubs for %s: %s", subject_id, e)
+
+            for tid in target_ids[:3]:
+                try:
+                    play_params = {"subjectId": tid, "se": season_num, "ep": ep_num}
+                    play_res = await _client.get_from_api("/wefeed-mobile-bff/subject-api/play-info", params=play_params)
+                    streams = play_res.get("streams", [])
+                    title_name = play_res.get("title", "")
+
+                    for s in streams:
+                        cookie = s.get("signCookie", "")
+                        dash_info = resolve_dash_manifest_from_policy(cookie)
+                        raw_url = s.get("url", "")
+                        resolutions_str = str(s.get("resolutions") or "1080")
+                        res_parts = [r.strip() for r in resolutions_str.split(",") if r.strip()]
+                        primary_res = int(res_parts[0]) if (res_parts and res_parts[0].isdigit()) else 1080
+
+                        stream_id = str(s.get("id", ""))
+                        codec = s.get("codecName", "hevc")
+                        size = s.get("size", 0)
+                        duration = s.get("duration", 0)
+
+                        if dash_info:
+                            manifest_url, base_url = dash_info
+                            if manifest_url not in seen_dash_urls:
+                                seen_dash_urls.add(manifest_url)
+                                sources.append({
+                                    "resourceId": stream_id or f"dash-{primary_res}",
+                                    "resolution": primary_res,
+                                    "quality": f"{primary_res}p",
+                                    "codecName": codec,
+                                    "size": size,
+                                    "duration": duration,
+                                    "format": "DASH",
+                                    "dashManifestUrl": manifest_url,
+                                    "dashBaseUrl": base_url,
+                                    "signCookie": cookie,
+                                    "resourceLink": manifest_url,
+                                    "season": season_num,
+                                    "episode": ep_num,
+                                    "title": title_name,
+                                    "isDash": True,
+                                })
+
+                        # If there is a legitimate non-deprecation direct MP4 stream
+                        if raw_url and not is_deprecation_notice_url(raw_url):
+                            sources.append({
+                                "resourceId": stream_id or f"direct-{primary_res}",
+                                "resolution": primary_res,
+                                "quality": f"{primary_res}p",
+                                "codecName": codec,
+                                "size": size,
+                                "duration": duration,
+                                "format": "MP4",
+                                "resourceLink": raw_url,
+                                "season": season_num,
+                                "episode": ep_num,
+                                "title": title_name,
+                                "isDash": False,
+                            })
+                except Exception as e:
+                    logger.warning("Error fetching play-info for %s: %s", tid, e)
+
+            # 2. Also check /resource endpoint for any direct files, filtering out deprecation notice placeholders
+            try:
+                params = {"subjectId": subject_id, "page": 1, "perPage": 20}
+                if season_num > 0:
+                    params["se"] = season_num
+                if ep_num > 0:
+                    params["ep"] = ep_num
+
+                res = await _client.get_from_api("/wefeed-mobile-bff/subject-api/resource", params=params)
+                vids = res.get("list", [])
+                for v in vids:
+                    rlink = v.get("resourceLink", "")
+                    if is_deprecation_notice_url(rlink):
+                        # Filter out fake 21-second upgrade announcement video!
+                        continue
+
+                    if season_num > 0 and v.get("se") is not None and int(v.get("se")) != season_num:
+                        continue
+                    if ep_num > 0 and v.get("ep") is not None and int(v.get("ep")) != ep_num:
+                        continue
+
+                    sources.append({
+                        "resourceId": str(v.get("resourceId", "")),
+                        "resolution": v.get("resolution", 1080),
+                        "quality": f"{v.get('resolution', 1080)}p",
+                        "codecName": v.get("codecName", "h264"),
+                        "size": v.get("size", 0),
+                        "duration": v.get("duration", 0),
+                        "format": "MP4",
+                        "resourceLink": rlink,
+                        "sourceUrl": v.get("sourceUrl", ""),
+                        "season": v.get("se", 0),
+                        "episode": v.get("ep", 0),
+                        "title": v.get("title", ""),
+                        "isDash": False,
+                    })
+            except Exception as e:
+                logger.warning("Error fetching resource list for %s: %s", subject_id, e)
+
+            # Sort sources: highest resolution first, non-retran first, highest bitrate and size first
+            def source_sort_key(s):
+                res = int(s.get("resolution") or 0)
+                title = str(s.get("title") or "").lower()
+                manifest = str(s.get("dashManifestUrl") or "")
+                
+                bitrate = 0
+                m_match = re.search(r'_h265_(\d+)', manifest)
+                if m_match:
+                    bitrate = int(m_match.group(1))
+                
+                is_retran = 1 if "retran" in title else 0
+                size = int(s.get("size") or 0)
+                return (res, -is_retran, bitrate, size)
+
+            sources.sort(key=source_sort_key, reverse=True)
             return 200, {"subjectId": subject_id, "sources": sources, "count": len(sources)}
 
         elif path == "/captions":

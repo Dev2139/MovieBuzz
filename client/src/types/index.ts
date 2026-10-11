@@ -50,17 +50,18 @@ export interface Media {
   _id: string;
   contentId?: string;
   episodeId?: string;
-  quality: '1080p' | '720p' | '480p' | '4K';
+  quality: string;
   resolution: string;
-  fileSize: string;
-  duration: number;
+  fileSize?: string;
+  duration?: number;
   mimeType: string;
-  provider: 'mock' | 'telegram' | 's3' | 'r2' | 'bunny';
-  providerMediaId: string;
+  format?: string;
+  provider: string;
+  providerMediaId?: string;
   providerMessageId?: string;
   streamUrl: string;
-  downloadUrl: string;
-  status: 'active' | 'processing' | 'archived';
+  downloadUrl?: string;
+  status?: string;
 }
 
 export interface User {
