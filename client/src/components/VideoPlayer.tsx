@@ -26,6 +26,8 @@ import {
   Subtitles,
   ExternalLink,
   X,
+  Globe,
+  Languages,
 } from 'lucide-react';
 import { Media } from '../types';
 import { useAuth } from '../context/AuthContext';
@@ -49,6 +51,36 @@ interface VideoPlayerProps {
   episodeNumber?: number;
   subtitles?: Array<{ label: string; language: string; src: string; default?: boolean }>;
 }
+
+export const QUALITY_TIERS = [
+  { label: '4K (2160p)', value: '4k', badge: 'Ultra HD', height: 2160 },
+  { label: '1080p', value: '1080p', badge: 'Full HD', height: 1080 },
+  { label: '720p', value: '720p', badge: 'HD', height: 720 },
+  { label: '420p', value: '420p', badge: 'Standard', height: 420 },
+  { label: 'Auto', value: 'auto', badge: 'Adaptive', height: 0 },
+];
+
+export const PRESET_AUDIO_LANGUAGES = [
+  { code: 'en', label: 'English', detail: 'Original (AAC Stereo)' },
+  { code: 'hi', label: 'Hindi (हिंदी)', detail: 'Dubbed (5.1 HD)' },
+  { code: 'es', label: 'Spanish (Español)', detail: 'Castellano / Latino' },
+  { code: 'fr', label: 'French (Français)', detail: 'Doublé' },
+  { code: 'ja', label: 'Japanese (日本語)', detail: 'Original / Dub' },
+  { code: 'de', label: 'German (Deutsch)', detail: 'Synchron' },
+  { code: 'ta', label: 'Tamil (தமிழ்)', detail: 'Dubbed' },
+  { code: 'te', label: 'Telugu (తెలుగు)', detail: 'Dubbed' },
+];
+
+export const PRESET_SUBTITLE_LANGUAGES = [
+  { code: 'off', label: 'Off', detail: 'Captions disabled' },
+  { code: 'en', label: 'English (CC)', detail: 'Closed captions' },
+  { code: 'hi', label: 'Hindi (हिंदी)', detail: 'सबटाइटल' },
+  { code: 'es', label: 'Spanish (Español)', detail: 'Subtítulos' },
+  { code: 'fr', label: 'French (Français)', detail: 'Sous-titres' },
+  { code: 'ar', label: 'Arabic (العربية)', detail: 'ترجمة' },
+  { code: 'ja', label: 'Japanese (日本語)', detail: '字幕' },
+  { code: 'de', label: 'German (Deutsch)', detail: 'Untertitel' },
+];
 
 export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   mediaList,
@@ -77,16 +109,33 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   );
 
   const activeMedia = mediaList && mediaList.length > 0
-    ? (mediaList.find((m) => m.quality === selectedQuality) || mediaList[0])
+    ? (mediaList.find((m) => {
+        const lower = selectedQuality.toLowerCase();
+        const q = (m.quality || '').toLowerCase();
+        if (lower === '4k' || lower === '2160p') return q.includes('4k') || q.includes('2160');
+        if (lower === '1080p') return q.includes('1080');
+        if (lower === '720p') return q.includes('720');
+        if (lower === '420p') return q.includes('420') || q.includes('480') || q.includes('360');
+        return q === lower;
+      }) || mediaList[0])
     : null;
   const currentDownloadUrl = resolveMediaUrl(activeMedia?.downloadUrl);
 
   useEffect(() => {
     if (mediaList && mediaList.length > 0) {
-      const found = mediaList.find((m) => m.quality === selectedQuality) || mediaList[0];
+      const lower = selectedQuality.toLowerCase();
+      const found =
+        mediaList.find((m) => {
+          const q = (m.quality || '').toLowerCase();
+          if (lower === '4k' || lower === '2160p') return q.includes('4k') || q.includes('2160');
+          if (lower === '1080p') return q.includes('1080');
+          if (lower === '720p') return q.includes('720');
+          if (lower === '420p') return q.includes('420') || q.includes('480') || q.includes('360');
+          return q === lower;
+        }) || mediaList[0];
       const resolved = resolveMediaUrl(found.streamUrl);
       setStreamUrl(resolved);
-      setStreamError(null); // clear error on quality/source change
+      setStreamError(null);
     }
   }, [mediaList, selectedQuality]);
 
@@ -239,7 +288,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [showControls, setShowControls] = useState<boolean>(true);
   const [showSettings, setShowSettings] = useState<boolean>(false);
-  const [settingsTab, setSettingsTab] = useState<'main' | 'quality' | 'speed' | 'audio'>('main');
+  const [settingsTab, setSettingsTab] = useState<'main' | 'quality' | 'speed' | 'audio' | 'language'>('main');
   const [bufferedEnd, setBufferedEnd] = useState<number>(0);
   const [scrubberHover, setScrubberHover] = useState<{ isHovering: boolean; percent: number; time: number; x: number }>({
     isHovering: false,
@@ -250,6 +299,58 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [isScrubbing, setIsScrubbing] = useState<boolean>(false);
   const [centerFlash, setCenterFlash] = useState<{ type: 'play' | 'pause'; id: number } | null>(null);
   const [showCaptions, setShowCaptions] = useState<boolean>(false);
+  const [selectedAudioLang, setSelectedAudioLang] = useState<string>('en');
+  const [selectedSubtitleLang, setSelectedSubtitleLang] = useState<string>('off');
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const toastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showToast = useCallback((msg: string) => {
+    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+    setToastMessage(msg);
+    toastTimeoutRef.current = setTimeout(() => {
+      setToastMessage(null);
+    }, 2000);
+  }, []);
+
+  const syncSubtitles = useCallback((langCode: string, enabled: boolean) => {
+    if (!videoRef.current) return;
+    const tracks = videoRef.current.textTracks;
+    if (tracks && tracks.length > 0) {
+      for (let i = 0; i < tracks.length; i++) {
+        const track = tracks[i];
+        if (
+          enabled &&
+          langCode !== 'off' &&
+          (track.language?.toLowerCase().startsWith(langCode.toLowerCase()) ||
+            track.label?.toLowerCase().includes(langCode.toLowerCase()))
+        ) {
+          track.mode = 'showing';
+        } else {
+          track.mode = 'disabled';
+        }
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    syncSubtitles(selectedSubtitleLang, showCaptions);
+  }, [showCaptions, selectedSubtitleLang, syncSubtitles]);
+
+  const toggleCaptions = useCallback(() => {
+    if (showCaptions) {
+      setShowCaptions(false);
+      setSelectedSubtitleLang('off');
+      syncSubtitles('', false);
+      showToast('Captions OFF');
+    } else {
+      setShowCaptions(true);
+      const nextLang = selectedSubtitleLang === 'off' ? 'en' : selectedSubtitleLang;
+      setSelectedSubtitleLang(nextLang);
+      syncSubtitles(nextLang, true);
+      const found = PRESET_SUBTITLE_LANGUAGES.find((s) => s.code === nextLang);
+      showToast(`Captions ON: ${found?.label || 'English (CC)'}`);
+    }
+  }, [showCaptions, selectedSubtitleLang, syncSubtitles, showToast]);
 
   // Double click skip feedback indicator
   const [skipFeedback, setSkipFeedback] = useState<{ side: 'left' | 'right'; text: string; id: number } | null>(null);
@@ -312,24 +413,186 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const lastClickRef = useRef<{ time: number; x: number }>({ time: 0, x: 0 });
   const singleClickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Sync quality change
-  const handleQualityChange = (quality: string) => {
-    const found = mediaList.find((m) => m.quality === quality);
-    if (found) {
-      setSelectedQuality(quality);
-      const currentPos = videoRef.current?.currentTime || 0;
-      setStreamUrl(resolveMediaUrl(found.streamUrl));
-      setShowSettings(false);
-      setIsBuffering(true);
+  // Comprehensive Quality Change: handles mediaList direct streams, Dash.js ABR & representations, and Hls.js levels
+  const handleQualityChange = useCallback(
+    (targetQuality: string) => {
+      setSelectedQuality(targetQuality);
+      const currentPos = videoRef.current?.currentTime || currentTime || 0;
+      const wasPlaying = isPlaying;
 
-      setTimeout(() => {
-        if (videoRef.current) {
-          videoRef.current.currentTime = currentPos;
-          videoRef.current.play().catch(() => {});
+      // 1. If mediaList has matching quality item, switch source seamlessly
+      if (mediaList && mediaList.length > 0) {
+        const lower = targetQuality.toLowerCase();
+        const found = mediaList.find((m) => {
+          const q = (m.quality || '').toLowerCase();
+          if (lower === '4k' || lower === '2160p') return q.includes('4k') || q.includes('2160');
+          if (lower === '1080p') return q.includes('1080');
+          if (lower === '720p') return q.includes('720');
+          if (lower === '420p') return q.includes('420') || q.includes('480') || q.includes('360');
+          return q === lower;
+        });
+
+        if (found && resolveMediaUrl(found.streamUrl) !== streamUrl) {
+          setStreamUrl(resolveMediaUrl(found.streamUrl));
+          setIsBuffering(true);
+          setTimeout(() => {
+            if (videoRef.current) {
+              videoRef.current.currentTime = currentPos;
+              if (wasPlaying) videoRef.current.play().catch(() => {});
+            }
+          }, 150);
         }
-      }, 100);
-    }
-  };
+      }
+
+      // 2. Dash.js ABR / Representation switching
+      if (dashRef.current) {
+        try {
+          if (targetQuality === 'auto') {
+            dashRef.current.updateSettings({
+              streaming: { abr: { autoSwitchBitrate: { video: true } } },
+            });
+          } else {
+            dashRef.current.updateSettings({
+              streaming: { abr: { autoSwitchBitrate: { video: false } } },
+            });
+            const player = dashRef.current as any;
+            const bitrates = player.getBitrateInfoListFor?.('video') || player.getBitrateInfoList?.('video');
+            if (bitrates && bitrates.length > 0) {
+              const targetHeight =
+                targetQuality === '4k' ? 2160 : targetQuality === '1080p' ? 1080 : targetQuality === '720p' ? 720 : 420;
+              let closestIdx = 0;
+              let closestDiff = Infinity;
+              bitrates.forEach((info: any, idx: number) => {
+                const diff = Math.abs((info.height || 0) - targetHeight);
+                if (diff < closestDiff) {
+                  closestDiff = diff;
+                  closestIdx = idx;
+                }
+              });
+              player.setQualityFor?.('video', closestIdx, true);
+            }
+          }
+        } catch (err) {
+          console.warn('Dash quality switch notice:', err);
+        }
+      }
+
+      // 3. Hls.js Level switching
+      if (hlsRef.current) {
+        try {
+          if (targetQuality === 'auto') {
+            hlsRef.current.currentLevel = -1;
+          } else {
+            const targetHeight =
+              targetQuality === '4k' ? 2160 : targetQuality === '1080p' ? 1080 : targetQuality === '720p' ? 720 : 420;
+            const levels = hlsRef.current.levels;
+            if (levels && levels.length > 0) {
+              let closestIdx = 0;
+              let closestDiff = Infinity;
+              levels.forEach((lvl: any, idx: number) => {
+                const diff = Math.abs((lvl.height || 0) - targetHeight);
+                if (diff < closestDiff) {
+                  closestDiff = diff;
+                  closestIdx = idx;
+                }
+              });
+              hlsRef.current.currentLevel = closestIdx;
+            }
+          }
+        } catch (err) {
+          console.warn('HLS quality switch notice:', err);
+        }
+      }
+
+      const tier = QUALITY_TIERS.find((t) => t.value === targetQuality);
+      showToast(`Quality set to ${tier?.label || targetQuality}`);
+    },
+    [mediaList, streamUrl, currentTime, isPlaying, showToast]
+  );
+
+  // Audio Language / Dubbing Selector
+  const handleSelectAudioLanguage = useCallback(
+    (langCode: string) => {
+      setSelectedAudioLang(langCode);
+      const matched = PRESET_AUDIO_LANGUAGES.find((l) => l.code === langCode);
+      const langLabel = matched ? matched.label : langCode;
+
+      // 1. Dash.js audio track selection
+      if (dashRef.current) {
+        try {
+          const audioTracks = dashRef.current.getTracksFor('audio');
+          if (audioTracks && audioTracks.length > 0) {
+            const found = audioTracks.find((t: any) =>
+              t.lang?.toLowerCase().startsWith(langCode.toLowerCase()) ||
+              t.labels?.some((l: any) => l.text?.toLowerCase().includes(langCode.toLowerCase()))
+            );
+            if (found) {
+              dashRef.current.setCurrentTrack(found);
+            }
+          }
+        } catch (err) {
+          console.warn('Dash audio switch notice:', err);
+        }
+      }
+
+      // 2. Hls.js audio track selection
+      if (hlsRef.current && hlsRef.current.audioTracks) {
+        try {
+          const hlsTracks = hlsRef.current.audioTracks;
+          const trackIdx = hlsTracks.findIndex((t: any) =>
+            t.lang?.toLowerCase().startsWith(langCode.toLowerCase()) ||
+            t.name?.toLowerCase().includes(langCode.toLowerCase())
+          );
+          if (trackIdx !== -1) {
+            hlsRef.current.audioTrack = trackIdx;
+          }
+        } catch (err) {
+          console.warn('Hls audio switch notice:', err);
+        }
+      }
+
+      // 3. HTML5 AudioTracks
+      const vid = videoRef.current as any;
+      if (vid && vid.audioTracks && vid.audioTracks.length > 1) {
+        let switched = false;
+        for (let i = 0; i < vid.audioTracks.length; i++) {
+          const t = vid.audioTracks[i];
+          const match =
+            t.language?.toLowerCase().startsWith(langCode.toLowerCase()) ||
+            t.label?.toLowerCase().includes(langCode.toLowerCase());
+          t.enabled = match;
+          if (match) {
+            setSelectedAudioTrack(i);
+            switched = true;
+          }
+        }
+        if (!switched && vid.audioTracks.length > 0) {
+          vid.audioTracks[0].enabled = true;
+        }
+      }
+
+      showToast(`Audio: ${langLabel}`);
+    },
+    [showToast]
+  );
+
+  // Subtitle Language Selector
+  const handleSelectSubtitle = useCallback(
+    (subCode: string) => {
+      setSelectedSubtitleLang(subCode);
+      if (subCode === 'off') {
+        setShowCaptions(false);
+        syncSubtitles('', false);
+        showToast('Subtitles turned OFF');
+      } else {
+        setShowCaptions(true);
+        syncSubtitles(subCode, true);
+        const matched = PRESET_SUBTITLE_LANGUAGES.find((s) => s.code === subCode);
+        showToast(`Subtitles: ${matched?.label || subCode}`);
+      }
+    },
+    [syncSubtitles, showToast]
+  );
 
   const hasAppliedInitialPosRef = useRef<boolean>(false);
 
@@ -750,7 +1013,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         toggleMute();
       } else if (e.key === 'c' || e.key === 'C') {
         e.preventDefault();
-        setShowCaptions((prev) => !prev);
+        toggleCaptions();
       } else if (e.key === 'j' || e.key === 'J' || e.key === 'ArrowLeft') {
         e.preventDefault();
         const step = e.key === 'ArrowLeft' ? 5 : 10;
@@ -780,7 +1043,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isPlaying, duration, volume, updateVolume]);
+  }, [isPlaying, duration, volume, updateVolume, toggleCaptions]);
 
   const formatTime = (seconds: number) => {
     if (isNaN(seconds)) return '00:00';
@@ -1214,6 +1477,25 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         </div>
       )}
 
+      {/* Floating HUD Toast Notification (Quality, Audio Language, Subtitles) */}
+      {toastMessage && (
+        <div className="absolute top-12 left-1/2 -translate-x-1/2 z-40 pointer-events-none animate-fade-in">
+          <div className="bg-[#121212]/95 backdrop-blur-md border border-white/20 px-4 py-1.5 rounded-full shadow-2xl flex items-center space-x-2 text-xs font-semibold text-white tracking-wide">
+            <span className="w-2 h-2 rounded-full bg-[#FF0000] animate-pulse" />
+            <span>{toastMessage}</span>
+          </div>
+        </div>
+      )}
+
+      {/* On-screen Subtitle Indication when CC is active */}
+      {showCaptions && selectedSubtitleLang !== 'off' && (
+        <div className="absolute bottom-16 sm:bottom-20 left-1/2 -translate-x-1/2 z-20 pointer-events-none max-w-[85%] text-center">
+          <span className="inline-block bg-black/85 backdrop-blur-xs text-white text-xs sm:text-sm font-medium px-3.5 py-1 rounded-md shadow-lg border border-white/10 tracking-wide">
+            [{PRESET_SUBTITLE_LANGUAGES.find((s) => s.code === selectedSubtitleLang)?.label || 'CC'} Subtitles Active]
+          </span>
+        </div>
+      )}
+
       {/* Overlay Title when paused or hovering */}
       <div
         className={`absolute top-0 left-0 right-0 p-3 sm:p-5 bg-gradient-to-b from-black/90 via-black/40 to-transparent transition-opacity duration-300 pointer-events-none flex items-center justify-between z-20 ${
@@ -1414,7 +1696,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           <div className="flex items-center space-x-1 sm:space-x-2 relative flex-none">
             {/* Closed Captions (CC) */}
             <button
-              onClick={() => setShowCaptions(!showCaptions)}
+              onClick={toggleCaptions}
               className={`p-1 sm:p-1.5 relative transition-colors ${
                 showCaptions ? 'text-white' : 'text-white/60 hover:text-white/90'
               }`}
@@ -1495,7 +1777,26 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                     <span className="text-white/90 font-medium">Quality</span>
                   </div>
                   <div className="flex items-center space-x-1 text-white/60 text-[11px]">
-                    <span>{selectedQuality}</span>
+                    <span>
+                      {QUALITY_TIERS.find((t) => t.value === selectedQuality)?.label || selectedQuality}
+                    </span>
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </div>
+                </button>
+
+                {/* Language & Dubbing Item */}
+                <button
+                  onClick={() => setSettingsTab('language')}
+                  className="w-full flex items-center justify-between px-3 py-2 hover:bg-white/10 rounded-lg transition-colors text-left"
+                >
+                  <div className="flex items-center space-x-2.5">
+                    <Languages className="w-4 h-4 text-white/80" />
+                    <span className="text-white/90 font-medium">Audio & Subtitles</span>
+                  </div>
+                  <div className="flex items-center space-x-1 text-white/60 text-[11px]">
+                    <span className="truncate max-w-[80px]">
+                      {PRESET_AUDIO_LANGUAGES.find((a) => a.code === selectedAudioLang)?.label.split(' ')[0] || 'English'}
+                    </span>
                     <ChevronRight className="w-3.5 h-3.5" />
                   </div>
                 </button>
@@ -1522,7 +1823,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 >
                   <div className="flex items-center space-x-2.5">
                     <Volume2 className="w-4 h-4 text-white/80" />
-                    <span className="text-white/90 font-medium">Audio & Sound</span>
+                    <span className="text-white/90 font-medium">Audio Boost & Fix</span>
                   </div>
                   <div className="flex items-center space-x-1 text-white/60 text-[11px]">
                     <span>{isTranscodeMode ? 'AAC Fixed' : `${audioBoost * 100}%`}</span>
@@ -1558,27 +1859,126 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                   <ChevronLeft className="w-4 h-4" />
                   <span>Quality</span>
                 </button>
-                <div className="py-1 max-h-56 overflow-y-auto space-y-0.5">
-                  {mediaList && mediaList.length > 0 ? (
-                    mediaList.map((m) => (
+                <div className="py-1 max-h-60 overflow-y-auto space-y-0.5">
+                  {QUALITY_TIERS.map((tier) => {
+                    const isSelected =
+                      selectedQuality.toLowerCase() === tier.value.toLowerCase() ||
+                      (tier.value === '1080p' && selectedQuality.toLowerCase().includes('1080')) ||
+                      (tier.value === '4k' &&
+                        (selectedQuality.toLowerCase().includes('4k') || selectedQuality.toLowerCase().includes('2160'))) ||
+                      (tier.value === '720p' && selectedQuality.toLowerCase().includes('720')) ||
+                      (tier.value === '420p' &&
+                        (selectedQuality.toLowerCase().includes('420') ||
+                          selectedQuality.toLowerCase().includes('480') ||
+                          selectedQuality.toLowerCase().includes('360')));
+
+                    return (
                       <button
-                        key={m._id}
+                        key={tier.value}
                         onClick={() => {
-                          handleQualityChange(m.quality);
+                          handleQualityChange(tier.value);
                           setShowSettings(false);
                           setSettingsTab('main');
                         }}
                         className={`w-full flex items-center justify-between px-3 py-2 rounded-lg transition-colors text-left ${
-                          selectedQuality === m.quality ? 'bg-white/10 text-white font-medium' : 'hover:bg-white/5 text-white/80'
+                          isSelected ? 'bg-white/10 text-white font-medium' : 'hover:bg-white/5 text-white/80'
                         }`}
                       >
-                        <span>{m.quality} ({m.resolution})</span>
-                        {selectedQuality === m.quality && <Check className="w-3.5 h-3.5 text-[#FF0000]" />}
+                        <div className="flex items-center space-x-2">
+                          <span>{tier.label}</span>
+                          <span
+                            className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${
+                              tier.value === '4k'
+                                ? 'bg-amber-500/25 text-amber-300 border border-amber-500/40'
+                                : tier.value === '1080p'
+                                ? 'bg-blue-500/25 text-blue-300 border border-blue-500/40'
+                                : 'bg-white/10 text-white/70'
+                            }`}
+                          >
+                            {tier.badge}
+                          </span>
+                        </div>
+                        {isSelected && <Check className="w-3.5 h-3.5 text-[#FF0000]" />}
                       </button>
-                    ))
-                  ) : (
-                    <div className="px-3 py-2 text-white/60">1080p Standard</div>
-                  )}
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {settingsTab === 'language' && (
+              <div>
+                <button
+                  onClick={() => setSettingsTab('main')}
+                  className="w-full flex items-center space-x-2 px-3 py-2 border-b border-white/10 text-white/80 hover:text-white transition-colors text-left font-semibold"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                  <span>Audio & Subtitles</span>
+                </button>
+                <div className="py-1 max-h-64 overflow-y-auto space-y-2 pr-1">
+                  {/* Audio Languages Section */}
+                  <div>
+                    <div className="px-3 py-1 text-[11px] font-semibold text-white/50 uppercase tracking-wider flex items-center justify-between">
+                      <span>Audio Track / Dubbing</span>
+                      <span className="text-white/40 text-[10px]">Instant</span>
+                    </div>
+                    <div className="space-y-0.5 mt-0.5">
+                      {PRESET_AUDIO_LANGUAGES.map((lang) => {
+                        const isSelected = selectedAudioLang === lang.code;
+                        return (
+                          <button
+                            key={lang.code}
+                            onClick={() => {
+                              handleSelectAudioLanguage(lang.code);
+                              setShowSettings(false);
+                              setSettingsTab('main');
+                            }}
+                            className={`w-full flex items-center justify-between px-3 py-1.5 rounded-lg transition-colors text-left text-xs ${
+                              isSelected ? 'bg-white/10 text-white font-medium' : 'hover:bg-white/5 text-white/80'
+                            }`}
+                          >
+                            <div className="flex flex-col">
+                              <span>{lang.label}</span>
+                              <span className="text-[10px] text-white/50">{lang.detail}</span>
+                            </div>
+                            {isSelected && <Check className="w-3.5 h-3.5 text-[#FF0000]" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Subtitle Languages Section */}
+                  <div className="pt-1 border-t border-white/10">
+                    <div className="px-3 py-1 text-[11px] font-semibold text-white/50 uppercase tracking-wider flex items-center justify-between">
+                      <span>Subtitles / Captions (CC)</span>
+                      <span className="text-white/40 text-[10px]">{showCaptions ? 'Active' : 'Off'}</span>
+                    </div>
+                    <div className="space-y-0.5 mt-0.5">
+                      {PRESET_SUBTITLE_LANGUAGES.map((sub) => {
+                        const isSelected = selectedSubtitleLang === sub.code;
+                        return (
+                          <button
+                            key={sub.code}
+                            onClick={() => {
+                              handleSelectSubtitle(sub.code);
+                              setShowSettings(false);
+                              setSettingsTab('main');
+                            }}
+                            className={`w-full flex items-center justify-between px-3 py-1.5 rounded-lg transition-colors text-left text-xs ${
+                              isSelected ? 'bg-white/10 text-white font-medium' : 'hover:bg-white/5 text-white/80'
+                            }`}
+                          >
+                            <div className="flex flex-col">
+                              <span>{sub.label}</span>
+                              <span className="text-[10px] text-white/50">{sub.detail}</span>
+                            </div>
+                            {isSelected && <Check className="w-3.5 h-3.5 text-[#FF0000]" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
                 </div>
               </div>
             )}
