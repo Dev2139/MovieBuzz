@@ -70,8 +70,8 @@ app.use('/api/requests', requestRoutes);
 app.use('/api/streaming', streamingRoutes);
 
 // Root & Health check endpoints
-app.get(['/', '/api', '/api/health'], (req, res) => {
-  res.json({
+app.get(['/', '/api', '/api/health', '/healthz'], (req, res) => {
+  res.status(200).json({
     status: 'ok',
     service: 'CineStream Backend API',
     message: '🎬 CineStream API is active and running (MovieBox Direct Streaming Engine)',
