@@ -28,15 +28,17 @@ api.interceptors.response.use(
       const status = error?.response?.status;
       const isNetworkError = !error?.response && Boolean(error?.code || error?.message);
       const isServerError = Boolean(status && (status >= 500 || status === 429));
+      const reqUrl = error?.config?.url || '';
+      const isStreamingQuery = reqUrl.includes('/streaming/');
 
-      if (isServerError || isNetworkError) {
+      if ((isServerError || isNetworkError) && !isStreamingQuery) {
         if (typeof window !== 'undefined') {
           window.dispatchEvent(
             new CustomEvent('cinestream:server-error', {
               detail: {
                 status: status || 503,
                 message: error?.response?.data?.message || error?.message || 'Server traffic capacity reached',
-                url: error?.config?.url,
+                url: reqUrl,
               },
             })
           );
@@ -336,4 +338,42 @@ export const resolveStreamingSourcesByTitle = async (
   });
   return res.data;
 };
+
+export interface MovieBoxEpisode {
+  seasonNumber: number;
+  episodeNumber: number;
+  title: string;
+  description: string;
+  thumbnailUrl: string;
+  duration: number;
+}
+
+export interface MovieBoxSeason {
+  seasonNumber: number;
+  title: string;
+  episodeCount: number;
+  episodes: MovieBoxEpisode[];
+}
+
+export interface MovieBoxSeriesDetails {
+  subjectId: string;
+  title: string;
+  description: string;
+  backdropUrl: string;
+  totalSeasons: number;
+  totalEpisodes: number;
+  seasons: MovieBoxSeason[];
+}
+
+export const fetchSeriesMovieBoxSeasonsEpisodes = async (
+  title: string,
+  year?: number,
+  subjectId?: string
+) => {
+  const res = await api.get<MovieBoxSeriesDetails>('/streaming/series/seasons-episodes', {
+    params: { title, year, subjectId },
+  });
+  return res.data;
+};
+
 

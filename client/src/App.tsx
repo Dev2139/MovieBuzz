@@ -27,6 +27,9 @@ import { AdminDashboardPage } from './pages/AdminDashboardPage';
 import { AdminTelegramPage } from './pages/AdminTelegramPage';
 
 const handleServerError = (error: any) => {
+  const reqUrl = error?.config?.url || '';
+  if (reqUrl.includes('/streaming/')) return;
+
   const status = error?.response?.status;
   const isNetworkError = !error?.response && Boolean(error?.code || error?.message?.includes?.('Network Error'));
   const isServerError = Boolean(status && (status >= 500 || status === 429));
