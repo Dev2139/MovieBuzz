@@ -11,16 +11,25 @@ export function parseTelegramCaption(caption: string): ParsedTelegramMetadata {
   const lines = caption.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   const firstLine = lines[0] || '';
 
-  // 1. Detect Season & Episode (Single or Bulk Range e.g. E01-E04, Eps 1-4, 1 to 8, 9 to 16)
+  // 1. Detect Season & Episode (Single or Bulk Range e.g. S01-S04, E01-E08, Eps 1-4, 1 to 8)
   let season: number | undefined;
+  let seasonEnd: number | undefined;
   let episode: number | undefined;
   let episodeEnd: number | undefined;
+
+  // Check for season range first e.g. "S01-S03", "Season 1-2", "Season 1 to 3", "Season 1 & 2"
+  const seasonRangeRegex = /(?:Season|S)\s*(\d{1,2})\s*(?:-|to|&)\s*(?:Season|S)?\s*(\d{1,2})/i;
+  const seasonRangeMatch = caption.match(seasonRangeRegex);
+  if (seasonRangeMatch && parseInt(seasonRangeMatch[2], 10) >= parseInt(seasonRangeMatch[1], 10)) {
+    season = parseInt(seasonRangeMatch[1], 10);
+    seasonEnd = parseInt(seasonRangeMatch[2], 10);
+  }
 
   const rangeRegex = /(?:S(\d{1,2})\s*)?(?:E|Ep|Episode|Episodes|Eps)?\s*(\d{1,2})\s*(?:-|to)\s*(?:E|Ep|Episode|Episodes|Eps)?\s*(\d{1,2})/i;
   const rangeMatch = caption.match(rangeRegex);
 
   if (rangeMatch && parseInt(rangeMatch[3], 10) > parseInt(rangeMatch[2], 10)) {
-    if (rangeMatch[1]) season = parseInt(rangeMatch[1], 10);
+    if (rangeMatch[1] && !season) season = parseInt(rangeMatch[1], 10);
     episode = parseInt(rangeMatch[2], 10);
     episodeEnd = parseInt(rangeMatch[3], 10);
   } else {
@@ -28,14 +37,35 @@ export function parseTelegramCaption(caption: string): ParsedTelegramMetadata {
     const sAndEMatch = caption.match(sAndERegex);
 
     if (sAndEMatch) {
-      season = parseInt(sAndEMatch[1], 10);
+      if (!season) season = parseInt(sAndEMatch[1], 10);
       episode = parseInt(sAndEMatch[2], 10);
     } else {
       const seasonMatch = caption.match(/(?:Season|S)\s*(\d{1,2})/i);
-      if (seasonMatch) season = parseInt(seasonMatch[1], 10);
+      if (seasonMatch && !season) season = parseInt(seasonMatch[1], 10);
 
       const epMatch = caption.match(/(?:Episode|Ep|E)\s*(\d{1,2})/i);
       if (epMatch) episode = parseInt(epMatch[1], 10);
+    }
+  }
+
+  // Construct structured season-wise episode list
+  const seasonsList: Array<{ seasonNumber: number; episodes: number[] }> = [];
+  if (season !== undefined || episode !== undefined) {
+    const startS = season || 1;
+    const endS = Math.max(startS, seasonEnd || startS);
+    const startEp = episode || 1;
+    const endEp = Math.max(startEp, episodeEnd || startEp);
+
+    const epArray: number[] = [];
+    for (let e = startEp; e <= endEp; e++) {
+      epArray.push(e);
+    }
+
+    for (let s = startS; s <= endS; s++) {
+      seasonsList.push({
+        seasonNumber: s,
+        episodes: [...epArray],
+      });
     }
   }
 
@@ -115,8 +145,10 @@ export function parseTelegramCaption(caption: string): ParsedTelegramMetadata {
     title,
     year,
     season,
+    seasonEnd,
     episode,
     episodeEnd,
+    seasonsList,
     quality,
     resolution,
     language,

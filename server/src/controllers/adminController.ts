@@ -206,7 +206,7 @@ export const deleteContent = async (req: Request, res: Response) => {
 // --- Series, Season, Episode CRUD ---
 export const createSeries = async (req: Request, res: Response) => {
   try {
-    const { title, description, posterUrl, backdropUrl, releaseYear, genres, languages, cast, director, rating } = req.body;
+    const { title, description, posterUrl, backdropUrl, releaseYear, genres, languages, cast, director, rating, seasons } = req.body;
     const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
 
     const series = new Content({
@@ -226,9 +226,169 @@ export const createSeries = async (req: Request, res: Response) => {
     });
 
     await series.save();
-    return res.status(201).json({ series });
+
+    // Store seasons and multiple episodes season-wise if provided
+    const createdSeasons: any[] = [];
+    const createdEpisodes: any[] = [];
+
+    if (seasons && Array.isArray(seasons)) {
+      for (const sItem of seasons) {
+        const sNum = Number(sItem.seasonNumber) || 1;
+        const season = await Season.create({
+          seriesId: series._id,
+          seasonNumber: sNum,
+          title: sItem.title || `Season ${sNum}`,
+          description: sItem.description || series.description,
+          posterUrl: sItem.posterUrl || series.posterUrl,
+          releaseYear: Number(sItem.releaseYear || releaseYear || 2026),
+        });
+        createdSeasons.push(season);
+
+        const epList = Array.isArray(sItem.episodes) ? sItem.episodes : [];
+        for (const epItem of epList) {
+          const epNum = Number(epItem.episodeNumber || epItem.number) || 1;
+          const episode = await Episode.create({
+            seriesId: series._id,
+            seasonId: season._id,
+            episodeNumber: epNum,
+            title: epItem.title || `Episode ${epNum}`,
+            description: epItem.description || series.description,
+            thumbnailUrl: epItem.thumbnailUrl || season.posterUrl || series.posterUrl,
+            duration: Number(epItem.duration) || 2700,
+          });
+          createdEpisodes.push(episode);
+        }
+      }
+    }
+
+    return res.status(201).json({ series, seasons: createdSeasons, episodes: createdEpisodes });
   } catch (error) {
     return res.status(500).json({ message: 'Error creating series' });
+  }
+};
+
+/**
+ * Dedicated Endpoint to store multiple episodes season-wise for webseries
+ */
+export const storeSeriesEpisodes = async (req: Request, res: Response) => {
+  try {
+    const { seriesId } = req.params;
+    const { targetSeriesId, seasons, seasonNumber, seasonEndNumber, startEpisode, endEpisode, episodeCount } = req.body;
+    const sId = seriesId || targetSeriesId;
+
+    const series = await Content.findById(sId);
+    if (!series) {
+      return res.status(404).json({ message: 'Series not found' });
+    }
+
+    const host = req.get('host') || 'localhost:5000';
+    const protocol = (req.headers['x-forwarded-proto'] as string) || req.protocol || 'http';
+    const baseUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : `${protocol}://${host}`;
+
+    const savedSeasons: any[] = [];
+    const savedEpisodes: any[] = [];
+
+    // Case 1: Structured seasons array with episodes provided
+    if (Array.isArray(seasons) && seasons.length > 0) {
+      for (const sItem of seasons) {
+        const sNum = Number(sItem.seasonNumber) || 1;
+        let season = await Season.findOne({ seriesId: series._id, seasonNumber: sNum });
+        if (!season) {
+          season = await Season.create({
+            seriesId: series._id,
+            seasonNumber: sNum,
+            title: sItem.title || `Season ${sNum}`,
+            description: sItem.description || series.description,
+            posterUrl: sItem.posterUrl || series.posterUrl,
+            releaseYear: Number(sItem.releaseYear || series.releaseYear || 2026),
+          });
+        }
+        savedSeasons.push(season);
+
+        const epList = Array.isArray(sItem.episodes) ? sItem.episodes : [];
+        for (const epItem of epList) {
+          const epNum = Number(epItem.episodeNumber || epItem.number) || 1;
+          let episode = await Episode.findOne({ seasonId: season._id, episodeNumber: epNum });
+          if (!episode) {
+            episode = await Episode.create({
+              seriesId: series._id,
+              seasonId: season._id,
+              episodeNumber: epNum,
+              title: epItem.title || `Episode ${epNum}`,
+              description: epItem.description || `Episode ${epNum} of Season ${sNum}`,
+              thumbnailUrl: epItem.thumbnailUrl || season.posterUrl || series.posterUrl,
+              duration: Number(epItem.duration) || 2700,
+            });
+          }
+          savedEpisodes.push(episode);
+
+          if (epItem.qualities && Array.isArray(epItem.qualities)) {
+            for (const q of epItem.qualities) {
+              await Media.findOneAndUpdate(
+                { episodeId: episode._id, quality: q.quality || '1080p' },
+                {
+                  resolution: q.resolution || '1920x1080',
+                  fileSize: q.fileSize || '950 MB',
+                  streamUrl: q.streamUrl || `${baseUrl}/api/media/proxy-file/${encodeURIComponent(q.providerMediaId || '')}`,
+                  downloadUrl: q.downloadUrl || `${baseUrl}/api/media/download-file/${encodeURIComponent(q.providerMediaId || '')}`,
+                  provider: q.provider || 'custom',
+                  providerMediaId: q.providerMediaId || `ep-${episode._id}-${Date.now()}`,
+                  status: 'active',
+                },
+                { upsert: true }
+              );
+            }
+          }
+        }
+      }
+    } else {
+      // Case 2: Range parameters: seasonNumber, seasonEndNumber, startEpisode, endEpisode
+      const sStart = Number(seasonNumber) || 1;
+      const sEnd = Math.max(sStart, Number(seasonEndNumber) || sStart);
+      const epStart = Number(startEpisode) || 1;
+      const epEnd = Math.max(epStart, Number(endEpisode) || (episodeCount ? epStart + Number(episodeCount) - 1 : epStart));
+
+      for (let sNum = sStart; sNum <= sEnd; sNum++) {
+        let season = await Season.findOne({ seriesId: series._id, seasonNumber: sNum });
+        if (!season) {
+          season = await Season.create({
+            seriesId: series._id,
+            seasonNumber: sNum,
+            title: `Season ${sNum}`,
+            description: series.description,
+            posterUrl: series.posterUrl,
+            releaseYear: series.releaseYear || 2026,
+          });
+        }
+        savedSeasons.push(season);
+
+        for (let epNum = epStart; epNum <= epEnd; epNum++) {
+          let episode = await Episode.findOne({ seasonId: season._id, episodeNumber: epNum });
+          if (!episode) {
+            episode = await Episode.create({
+              seriesId: series._id,
+              seasonId: season._id,
+              episodeNumber: epNum,
+              title: `Episode ${epNum}`,
+              description: `Episode ${epNum} of Season ${sNum}`,
+              thumbnailUrl: series.posterUrl,
+              duration: 2700,
+            });
+          }
+          savedEpisodes.push(episode);
+        }
+      }
+    }
+
+    return res.status(200).json({
+      message: `Stored ${savedEpisodes.length} episodes season-wise across ${savedSeasons.length} seasons for "${series.title}"!`,
+      series,
+      seasons: savedSeasons,
+      episodes: savedEpisodes,
+    });
+  } catch (error) {
+    console.error('storeSeriesEpisodes error:', error);
+    return res.status(500).json({ message: 'Error storing webseries episodes season-wise' });
   }
 };
 
@@ -448,56 +608,62 @@ export const publishTelegramImport = async (req: Request, res: Response) => {
         await series.save();
       }
 
-      const sNum = seasonNumber || importDoc.detectedSeason || 1;
-      const startEp = episodeNumber || importDoc.detectedEpisode || 1;
-      const endEp = Math.max(startEp, episodeEndNumber || importDoc.detectedEpisodeEnd || startEp);
+      const sStart = Number(seasonNumber) || importDoc.detectedSeason || 1;
+      const sEnd = Math.max(sStart, Number(req.body.seasonEndNumber) || sStart);
+      const startEp = Number(episodeNumber) || importDoc.detectedEpisode || 1;
+      const endEp = Math.max(startEp, Number(episodeEndNumber) || importDoc.detectedEpisodeEnd || startEp);
 
-      let season = await Season.findOne({ seriesId: series._id, seasonNumber: sNum });
-      if (!season) {
-        season = new Season({
-          seriesId: series._id,
-          seasonNumber: sNum,
-          title: `Season ${sNum}`,
-          releaseYear: importDoc.detectedYear || 2026,
-        });
-        await season.save();
-      }
+      const createdEpisodes: any[] = [];
+      const createdMedias: any[] = [];
+      const createdSeasons: any[] = [];
 
-      const createdEpisodes = [];
-      const createdMedias = [];
-
-      for (let eNum = startEp; eNum <= endEp; eNum++) {
-        let episode = await Episode.findOne({ seasonId: season._id, episodeNumber: eNum });
-        if (!episode) {
-          episode = new Episode({
+      for (let sNum = sStart; sNum <= sEnd; sNum++) {
+        let season = await Season.findOne({ seriesId: series._id, seasonNumber: sNum });
+        if (!season) {
+          season = new Season({
             seriesId: series._id,
-            seasonId: season._id,
-            episodeNumber: eNum,
-            title: startEp !== endEp ? `Episode ${eNum} (Bulk File)` : `Episode ${eNum}`,
-            description: importDoc.originalCaption,
-            thumbnailUrl: posterUrl || series.posterUrl || 'https://images.unsplash.com/photo-1574375927938-d5a98e8ffe85?w=800',
-            duration: 2700,
+            seasonNumber: sNum,
+            title: `Season ${sNum}`,
+            releaseYear: importDoc.detectedYear || 2026,
+            posterUrl: posterUrl || series.posterUrl,
           });
-          await episode.save();
+          await season.save();
         }
+        createdSeasons.push(season);
 
-        const media = await Media.findOneAndUpdate(
-          { episodeId: episode._id, quality: finalQuality },
-          {
-            resolution: finalQuality === '4K' ? '3840x2160' : '1920x1080',
-            fileSize: '950 MB',
-            streamUrl: `${baseUrl}/api/media/proxy-file/${encodeURIComponent(importDoc.mediaId)}`,
-            downloadUrl: `${baseUrl}/api/media/download-file/${encodeURIComponent(importDoc.mediaId)}`,
-            provider: 'telegram',
-            providerMediaId: importDoc.mediaId,
-            providerMessageId: importDoc.messageId,
-            status: 'active',
-          },
-          { upsert: true, new: true }
-        );
+        for (let eNum = startEp; eNum <= endEp; eNum++) {
+          let episode = await Episode.findOne({ seasonId: season._id, episodeNumber: eNum });
+          if (!episode) {
+            episode = new Episode({
+              seriesId: series._id,
+              seasonId: season._id,
+              episodeNumber: eNum,
+              title: startEp !== endEp ? `Episode ${eNum} (Bulk File)` : `Episode ${eNum}`,
+              description: importDoc.originalCaption,
+              thumbnailUrl: posterUrl || series.posterUrl || 'https://images.unsplash.com/photo-1574375927938-d5a98e8ffe85?w=800',
+              duration: 2700,
+            });
+            await episode.save();
+          }
 
-        createdEpisodes.push(episode);
-        createdMedias.push(media);
+          const media = await Media.findOneAndUpdate(
+            { episodeId: episode._id, quality: finalQuality },
+            {
+              resolution: finalQuality === '4K' ? '3840x2160' : '1920x1080',
+              fileSize: '950 MB',
+              streamUrl: `${baseUrl}/api/media/proxy-file/${encodeURIComponent(importDoc.mediaId)}`,
+              downloadUrl: `${baseUrl}/api/media/download-file/${encodeURIComponent(importDoc.mediaId)}`,
+              provider: 'telegram',
+              providerMediaId: importDoc.mediaId,
+              providerMessageId: importDoc.messageId,
+              status: 'active',
+            },
+            { upsert: true, new: true }
+          );
+
+          createdEpisodes.push(episode);
+          createdMedias.push(media);
+        }
       }
 
       importDoc.status = 'IMPORTED';
@@ -507,10 +673,10 @@ export const publishTelegramImport = async (req: Request, res: Response) => {
 
       const isBulk = createdEpisodes.length > 1;
       const msg = isBulk
-        ? `Published Bulk Episode Range (E${startEp}-E${endEp}) to series "${series.title}"!`
+        ? `Published Bulk Episodes (${createdEpisodes.length} episodes season-wise) to series "${series.title}"!`
         : `Published Episode ${startEp} to series "${series.title}"!`;
 
-      return res.json({ message: msg, series, season, episodes: createdEpisodes, medias: createdMedias });
+      return res.json({ message: msg, series, seasons: createdSeasons, episodes: createdEpisodes, medias: createdMedias });
     }
   } catch (error) {
     console.error('publishTelegramImport error:', error);

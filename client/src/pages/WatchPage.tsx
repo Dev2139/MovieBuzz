@@ -141,7 +141,7 @@ export const WatchPage: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-dark-base text-white pt-16 sm:pt-20 pb-20 md:pb-16 select-none">
+    <div className="min-h-screen bg-dark-base text-white pt-3 sm:pt-5 pb-20 md:pb-16 select-none">
       <div className="max-w-7xl mx-auto px-2 sm:px-6 lg:px-8 space-y-4 sm:space-y-6">
         {/* Navigation Breadcrumb & Source Indicator */}
         <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-gray-400 px-2 sm:px-0">

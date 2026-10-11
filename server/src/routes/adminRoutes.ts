@@ -4,6 +4,7 @@ import {
   getAdminCatalog,
   createMovie,
   createSeries,
+  storeSeriesEpisodes,
   createSeason,
   createEpisode,
   updateContent,
@@ -36,6 +37,8 @@ router.delete('/content/:id', deleteContent);
 
 // Series / Season / Episode CRUD
 router.post('/series', createSeries);
+router.post('/series/store-episodes', storeSeriesEpisodes);
+router.post('/series/:seriesId/store-episodes', storeSeriesEpisodes);
 router.post('/seasons', createSeason);
 router.post('/episodes', createEpisode);
 
