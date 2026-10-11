@@ -39,26 +39,53 @@ export const getAdminStats = async (req: Request, res: Response) => {
   }
 };
 
+// Safe array parser for comma-separated or array inputs
+const parseStringArray = (val: any, fallback: string[] = []): string[] => {
+  if (Array.isArray(val)) return val.map((s) => String(s).trim()).filter(Boolean);
+  if (typeof val === 'string' && val.trim().length > 0) {
+    return val.split(',').map((s) => s.trim()).filter(Boolean);
+  }
+  return fallback;
+};
+
+// Safe slug generator that guarantees uniqueness in MongoDB
+const generateUniqueSlug = async (rawTitle: string, rawYear: any, fallbackPrefix: string): Promise<string> => {
+  const base = (rawTitle || fallbackPrefix)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/(^-|-$)/g, '') || fallbackPrefix;
+  const year = Number(rawYear) || 2026;
+  let candidate = `${base}-${year}`;
+  let count = 1;
+  while (await Content.exists({ slug: candidate })) {
+    candidate = `${base}-${year}-${Math.floor(1000 + Math.random() * 9000)}${count > 1 ? `-${count}` : ''}`;
+    count++;
+  }
+  return candidate;
+};
+
 // --- Movie CRUD ---
 export const createMovie = async (req: Request, res: Response) => {
   try {
     const { title, description, posterUrl, backdropUrl, trailerUrl, releaseYear, genres, languages, cast, director, rating, qualities } = req.body;
 
-    const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+    const rawTitle = (title || 'Untitled Movie').trim();
+    const targetYear = Number(releaseYear) || 2026;
+    const slug = await generateUniqueSlug(rawTitle, targetYear, 'movie');
 
     const movie = new Content({
-      title,
-      slug: `${slug}-${releaseYear || 2026}`,
+      title: rawTitle,
+      slug,
       type: 'movie',
-      description,
-      posterUrl,
-      backdropUrl,
-      trailerUrl,
-      releaseYear: Number(releaseYear),
-      genres: Array.isArray(genres) ? genres : genres.split(',').map((g: string) => g.trim()),
-      languages: Array.isArray(languages) ? languages : languages.split(',').map((l: string) => l.trim()),
-      cast: Array.isArray(cast) ? cast : cast.split(',').map((c: string) => c.trim()),
-      director,
+      description: description || `Watch ${rawTitle} in Ultra HD on CineStream.`,
+      posterUrl: posterUrl || 'https://images.unsplash.com/photo-1542751371-adc38448a05e?w=800',
+      backdropUrl: backdropUrl || posterUrl || 'https://images.unsplash.com/photo-1509198397868-475647b2a1e5?w=1600',
+      trailerUrl: trailerUrl || '',
+      releaseYear: targetYear,
+      genres: parseStringArray(genres, ['Action', 'Drama']),
+      languages: parseStringArray(languages, ['English']),
+      cast: parseStringArray(cast, []),
+      director: director || '',
       rating: Number(rating) || 7.5,
       status: 'published',
     });
@@ -72,23 +99,27 @@ export const createMovie = async (req: Request, res: Response) => {
     // Attach qualities if passed
     if (qualities && Array.isArray(qualities)) {
       for (const q of qualities) {
-        await Media.create({
-          contentId: movie._id,
-          quality: q.quality || '1080p',
-          resolution: q.resolution || '1920x1080',
-          fileSize: q.fileSize || '1.4 GB',
-          streamUrl: q.streamUrl || `${baseUrl}/api/media/proxy-file/${encodeURIComponent(q.providerMediaId || '')}`,
-          downloadUrl: q.downloadUrl || `${baseUrl}/api/media/download-file/${encodeURIComponent(q.providerMediaId || '')}`,
-          provider: q.provider || 'mock',
-          providerMediaId: q.providerMediaId || `media-${Date.now()}`,
-        });
+        try {
+          await Media.create({
+            contentId: movie._id,
+            quality: q.quality || '1080p',
+            resolution: q.resolution || '1920x1080',
+            fileSize: q.fileSize || '1.4 GB',
+            streamUrl: q.streamUrl || `${baseUrl}/api/media/proxy-file/${encodeURIComponent(q.providerMediaId || '')}`,
+            downloadUrl: q.downloadUrl || `${baseUrl}/api/media/download-file/${encodeURIComponent(q.providerMediaId || '')}`,
+            provider: q.provider || 'mock',
+            providerMediaId: q.providerMediaId || `media-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          });
+        } catch (mediaErr) {
+          console.warn('Failed to attach media quality:', mediaErr);
+        }
       }
     }
 
     return res.status(201).json({ movie });
-  } catch (error) {
+  } catch (error: any) {
     console.error('createMovie error:', error);
-    return res.status(500).json({ message: 'Error creating movie' });
+    return res.status(500).json({ message: error?.message || 'Error creating movie' });
   }
 };
 
@@ -158,8 +189,9 @@ export const updateContent = async (req: Request, res: Response) => {
     if (description !== undefined) updates.description = description;
     if (posterUrl !== undefined) updates.posterUrl = posterUrl;
     if (backdropUrl !== undefined) updates.backdropUrl = backdropUrl;
-    if (genres !== undefined) updates.genres = genres;
-    if (languages !== undefined) updates.languages = languages;
+    if (genres !== undefined) updates.genres = parseStringArray(genres, content.genres);
+    if (languages !== undefined) updates.languages = parseStringArray(languages, content.languages);
+    if (req.body.cast !== undefined) updates.cast = parseStringArray(req.body.cast, content.cast);
     if (releaseYear !== undefined) updates.releaseYear = Number(releaseYear);
     if (rating !== undefined) updates.rating = Number(rating);
     if (director !== undefined) updates.director = director;
@@ -207,20 +239,22 @@ export const deleteContent = async (req: Request, res: Response) => {
 export const createSeries = async (req: Request, res: Response) => {
   try {
     const { title, description, posterUrl, backdropUrl, releaseYear, genres, languages, cast, director, rating, seasons } = req.body;
-    const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+    const rawTitle = (title || 'Untitled Series').trim();
+    const targetYear = Number(releaseYear) || 2026;
+    const slug = await generateUniqueSlug(rawTitle, targetYear, 'series');
 
     const series = new Content({
-      title,
-      slug: `${slug}-${releaseYear || 2026}`,
+      title: rawTitle,
+      slug,
       type: 'series',
-      description,
-      posterUrl,
-      backdropUrl,
-      releaseYear: Number(releaseYear),
-      genres: Array.isArray(genres) ? genres : genres.split(',').map((g: string) => g.trim()),
-      languages: Array.isArray(languages) ? languages : languages.split(',').map((l: string) => l.trim()),
-      cast: Array.isArray(cast) ? cast : cast.split(',').map((c: string) => c.trim()),
-      director,
+      description: description || `Watch ${rawTitle} all seasons and episodes on CineStream.`,
+      posterUrl: posterUrl || 'https://images.unsplash.com/photo-1574375927938-d5a98e8ffe85?w=800',
+      backdropUrl: backdropUrl || posterUrl || 'https://images.unsplash.com/photo-1517604931442-7e0c8ed2963c?w=1600',
+      releaseYear: targetYear,
+      genres: parseStringArray(genres, ['Drama', 'Action']),
+      languages: parseStringArray(languages, ['English']),
+      cast: parseStringArray(cast, []),
+      director: director || '',
       rating: Number(rating) || 8.0,
       status: 'published',
     });
@@ -240,7 +274,7 @@ export const createSeries = async (req: Request, res: Response) => {
           title: sItem.title || `Season ${sNum}`,
           description: sItem.description || series.description,
           posterUrl: sItem.posterUrl || series.posterUrl,
-          releaseYear: Number(sItem.releaseYear || releaseYear || 2026),
+          releaseYear: Number(sItem.releaseYear || targetYear),
         });
         createdSeasons.push(season);
 
@@ -262,8 +296,9 @@ export const createSeries = async (req: Request, res: Response) => {
     }
 
     return res.status(201).json({ series, seasons: createdSeasons, episodes: createdEpisodes });
-  } catch (error) {
-    return res.status(500).json({ message: 'Error creating series' });
+  } catch (error: any) {
+    console.error('createSeries error:', error);
+    return res.status(500).json({ message: error?.message || 'Error creating series' });
   }
 };
 
@@ -542,7 +577,7 @@ export const publishTelegramImport = async (req: Request, res: Response) => {
 
     const finalTitle = title || importDoc.detectedTitle;
     const finalQuality = quality || importDoc.detectedQuality || '1080p';
-    const slug = finalTitle.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+    const finalYear = importDoc.detectedYear || 2026;
 
     const host = req.get('host') || 'localhost:5000';
     const protocol = (req.headers['x-forwarded-proto'] as string) || req.protocol || 'http';
@@ -551,15 +586,16 @@ export const publishTelegramImport = async (req: Request, res: Response) => {
     if (targetType === 'movie') {
       let movie = await Content.findOne({ title: finalTitle, type: 'movie' });
       if (!movie) {
+        const movieSlug = await generateUniqueSlug(finalTitle, finalYear, 'movie');
         movie = new Content({
           title: finalTitle,
-          slug: `${slug}-${importDoc.detectedYear || 2026}`,
+          slug: movieSlug,
           type: 'movie',
           description: description || importDoc.originalCaption,
           posterUrl: posterUrl || 'https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=800',
           backdropUrl: backdropUrl || 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=1600',
-          releaseYear: importDoc.detectedYear || 2026,
-          genres: genres || ['Action', 'Sci-Fi'],
+          releaseYear: finalYear,
+          genres: parseStringArray(genres, ['Action', 'Sci-Fi']),
           languages: [importDoc.detectedLanguage || 'English'],
           status: 'published',
         });
@@ -593,15 +629,16 @@ export const publishTelegramImport = async (req: Request, res: Response) => {
       }
 
       if (!series) {
+        const seriesSlug = await generateUniqueSlug(finalTitle, finalYear, 'series');
         series = new Content({
           title: finalTitle,
-          slug: `${slug}-${importDoc.detectedYear || 2026}`,
+          slug: seriesSlug,
           type: 'series',
           description: description || importDoc.originalCaption,
           posterUrl: posterUrl || 'https://images.unsplash.com/photo-1574375927938-d5a98e8ffe85?w=800',
           backdropUrl: backdropUrl || 'https://images.unsplash.com/photo-1517604931442-7e0c8ed2963c?w=1600',
-          releaseYear: importDoc.detectedYear || 2026,
-          genres: genres || ['Drama', 'Mystery'],
+          releaseYear: finalYear,
+          genres: parseStringArray(genres, ['Drama', 'Mystery']),
           languages: [importDoc.detectedLanguage || 'English'],
           status: 'published',
         });

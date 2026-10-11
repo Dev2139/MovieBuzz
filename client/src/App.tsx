@@ -1,11 +1,10 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { QueryClient, QueryClientProvider, QueryCache, MutationCache } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ToastProvider } from './context/ToastContext';
 import { PWAProvider } from './context/PWAContext';
 import { ServerErrorProvider } from './context/ServerErrorContext';
-import { HeavyTrafficScreen } from './components/HeavyTrafficScreen';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Navbar } from './components/Navbar';
 import { BottomNav } from './components/BottomNav';
@@ -26,34 +25,7 @@ import { HistoryPage } from './pages/HistoryPage';
 import { AdminDashboardPage } from './pages/AdminDashboardPage';
 import { AdminTelegramPage } from './pages/AdminTelegramPage';
 
-const handleServerError = (error: any) => {
-  const reqUrl = error?.config?.url || '';
-  if (reqUrl.includes('/streaming/')) return;
-
-  const status = error?.response?.status;
-  const isNetworkError = !error?.response && Boolean(error?.code || error?.message?.includes?.('Network Error'));
-  const isServerError = Boolean(status && (status >= 500 || status === 429));
-  if (isServerError || isNetworkError) {
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(
-        new CustomEvent('cinestream:server-error', {
-          detail: {
-            status: status || 503,
-            message: error?.response?.data?.message || error?.message || 'Server traffic capacity reached',
-          },
-        })
-      );
-    }
-  }
-};
-
 const queryClient = new QueryClient({
-  queryCache: new QueryCache({
-    onError: handleServerError,
-  }),
-  mutationCache: new MutationCache({
-    onError: handleServerError,
-  }),
   defaultOptions: {
     queries: {
       refetchOnWindowFocus: true,
@@ -84,7 +56,6 @@ export const App: React.FC = () => {
               <PWAProvider>
                 <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
                   <ScrollToTop />
-                  <HeavyTrafficScreen />
                   <div className="flex flex-col min-h-screen bg-dark-base relative">
                   <Navbar />
                   <main className="flex-1">

@@ -214,8 +214,8 @@ export const AdminDashboardPage: React.FC = () => {
           quality: '1080p',
           resolution: '1920x1080',
           fileSize: '1.4 GB',
-          streamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
-          downloadUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+          streamUrl: 'https://vjs.zencdn.net/v/oceans.mp4',
+          downloadUrl: 'https://vjs.zencdn.net/v/oceans.mp4',
         },
       ],
     });

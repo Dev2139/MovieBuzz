@@ -20,31 +20,10 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// Intercept server errors (5xx, 429, network failures) to trigger heavy traffic screen
+// Response interceptor
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (!axios.isCancel(error)) {
-      const status = error?.response?.status;
-      const isNetworkError = !error?.response && Boolean(error?.code || error?.message);
-      const isServerError = Boolean(status && (status >= 500 || status === 429));
-      const reqUrl = error?.config?.url || '';
-      const isStreamingQuery = reqUrl.includes('/streaming/');
-
-      if ((isServerError || isNetworkError) && !isStreamingQuery) {
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(
-            new CustomEvent('cinestream:server-error', {
-              detail: {
-                status: status || 503,
-                message: error?.response?.data?.message || error?.message || 'Server traffic capacity reached',
-                url: reqUrl,
-              },
-            })
-          );
-        }
-      }
-    }
     return Promise.reject(error);
   }
 );

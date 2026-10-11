@@ -102,6 +102,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const dashHevcCleanupRef = useRef<(() => void) | null>(null);
   const autoRetryAttemptsRef = useRef<number>(0);
   const isRetryingRef = useRef<boolean>(false);
+  const playbackPositionRef = useRef<number>(initialPosition || 0);
+  const wasPlayingBeforeHiddenRef = useRef<boolean>(false);
+  const hasAppliedInitialPosRef = useRef<boolean>(false);
 
   const [selectedQuality, setSelectedQuality] = useState<string>(
     mediaList && mediaList.length > 0 ? mediaList[0].quality : '1080p'
@@ -385,7 +388,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         if (resumePos > 0 && Math.abs(videoRef.current.currentTime - resumePos) > 1.5) {
           videoRef.current.currentTime = resumePos;
         }
-        videoRef.current.play().catch(() => {});
+        const p = videoRef.current.play();
+        if (p !== undefined) {
+          p.catch(() => {});
+        }
         setIsPlaying(true);
       }
     }, 100);
@@ -603,10 +609,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     },
     [syncSubtitles, showToast]
   );
-
-  const playbackPositionRef = useRef<number>(initialPosition || 0);
-  const wasPlayingBeforeHiddenRef = useRef<boolean>(false);
-  const hasAppliedInitialPosRef = useRef<boolean>(false);
 
   useEffect(() => {
     if (initialPosition > 0 && playbackPositionRef.current === 0) {
@@ -2373,15 +2375,19 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         <div className="absolute inset-0 z-50 bg-black flex items-center justify-center select-none no-player-click">
           <video
             ref={adVideoRef}
-            src="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4"
+            src="https://vjs.zencdn.net/v/oceans.mp4"
             autoPlay
             playsInline
             preload="auto"
             muted={isAdMuted}
             poster="https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=1280&q=80"
+            onError={() => {
+              handleSkipAd();
+            }}
             onCanPlay={() => {
               if (adVideoRef.current && isPlayingAd) {
-                adVideoRef.current.play().catch(() => {});
+                const p = adVideoRef.current.play();
+                if (p !== undefined) p.catch(() => {});
               }
             }}
             onTimeUpdate={(e) => {
