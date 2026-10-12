@@ -92,7 +92,8 @@ export const PRESET_SUBTITLE_LANGUAGES = [
 ];
 
 function parseVttTimestamp(timeStr: string): number {
-  const clean = timeStr.trim().split(' ')[0];
+  if (!timeStr) return 0;
+  const clean = timeStr.trim().split(' ')[0].replace(',', '.');
   const parts = clean.split(':');
   if (parts.length === 3) {
     const [h, m, s] = parts;
@@ -106,6 +107,7 @@ function parseVttTimestamp(timeStr: string): number {
 
 function parseVtt(vttString: string): Array<{ start: number; end: number; text: string }> {
   const cues: Array<{ start: number; end: number; text: string }> = [];
+  if (!vttString) return cues;
   const lines = vttString.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
   let i = 0;
   while (i < lines.length) {
@@ -117,11 +119,18 @@ function parseVtt(vttString: string): Array<{ start: number; end: number; text: 
       i++;
       const textLines: string[] = [];
       while (i < lines.length && lines[i].trim() !== '' && !lines[i].includes('-->')) {
-        const cleanText = lines[i].replace(/<\/?[^>]+(>|$)/g, '').trim();
-        if (cleanText) textLines.push(cleanText);
+        let cleanText = lines[i]
+          .replace(/<\/?[^>]+(>|$)/g, '')
+          .replace(/\{[^}]+\}/g, '')
+          .replace(/\\N/g, '\n')
+          .replace(/\\n/g, '\n')
+          .trim();
+        if (cleanText && cleanText !== '_') {
+          textLines.push(cleanText);
+        }
         i++;
       }
-      if (textLines.length > 0) {
+      if (textLines.length > 0 && end > start) {
         cues.push({ start, end, text: textLines.join('\n') });
       }
     } else {
@@ -498,7 +507,53 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   // Subtitle WebVTT parsing & current cue tracking
   const [activeVttCues, setActiveVttCues] = useState<Array<{ start: number; end: number; text: string }>>([]);
   const [currentCueText, setCurrentCueText] = useState<string>('');
+  const userManuallyToggledCaptionsRef = useRef<boolean>(false);
 
+  // Sync HTML5 textTracks mode (hidden keeps cues parsed and accessible without browser duplicate/unstyled rendering)
+  const syncSubtitles = useCallback((langCode: string, enabled: boolean) => {
+    if (!videoRef.current) return;
+    const tracks = videoRef.current.textTracks;
+    if (tracks && tracks.length > 0) {
+      for (let i = 0; i < tracks.length; i++) {
+        const track = tracks[i];
+        if (
+          enabled &&
+          langCode !== 'off' &&
+          (track.language?.toLowerCase().startsWith(langCode.toLowerCase()) ||
+            track.label?.toLowerCase().includes(langCode.toLowerCase()) ||
+            langCode.toLowerCase().startsWith(track.language?.toLowerCase()))
+        ) {
+          track.mode = 'hidden';
+        } else {
+          track.mode = 'disabled';
+        }
+      }
+    }
+  }, []);
+
+  // Auto-enable subtitles by default once tracks are available (unless user explicitly turned them off)
+  useEffect(() => {
+    if (userManuallyToggledCaptionsRef.current) return;
+    if (!effectiveSubtitles || effectiveSubtitles.length === 0) return;
+
+    if (selectedSubtitleLang === 'off' || !showCaptions) {
+      const defaultSub =
+        effectiveSubtitles.find((s) => s.default) ||
+        effectiveSubtitles.find(
+          (s) => s.language?.toLowerCase() === 'en' || s.language?.toLowerCase().startsWith('en')
+        ) ||
+        effectiveSubtitles[0];
+
+      if (defaultSub) {
+        const lang = defaultSub.language || 'en';
+        setSelectedSubtitleLang(lang);
+        setShowCaptions(true);
+        syncSubtitles(lang, true);
+      }
+    }
+  }, [effectiveSubtitles, selectedSubtitleLang, showCaptions, syncSubtitles]);
+
+  // Fetch and parse WebVTT file for active subtitle language
   useEffect(() => {
     if (!showCaptions || selectedSubtitleLang === 'off') {
       setActiveVttCues([]);
@@ -514,8 +569,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
     if (!matched?.src) return;
 
+    const resolvedSrc = resolveMediaUrl(matched.src);
     let cancelled = false;
-    fetch(matched.src)
+
+    fetch(resolvedSrc)
       .then((r) => r.text())
       .then((vttText) => {
         if (!cancelled && vttText) {
@@ -532,6 +589,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     };
   }, [showCaptions, selectedSubtitleLang, effectiveSubtitles]);
 
+  // Track active subtitle cue based on currentTime
   useEffect(() => {
     if (!showCaptions || selectedSubtitleLang === 'off' || activeVttCues.length === 0) {
       setCurrentCueText('');
@@ -542,6 +600,40 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     const match = activeVttCues.find((c) => pos >= c.start && pos <= c.end);
     setCurrentCueText(match ? match.text : '');
   }, [currentTime, showCaptions, selectedSubtitleLang, activeVttCues]);
+
+  // Fallback: Listen to native HTML5 textTrack cuechange events
+  useEffect(() => {
+    if (!videoRef.current) return;
+    const tracks = videoRef.current.textTracks;
+    if (!tracks || tracks.length === 0) return;
+
+    const onCueChange = () => {
+      if (!showCaptions || selectedSubtitleLang === 'off') return;
+      for (let i = 0; i < tracks.length; i++) {
+        const t = tracks[i];
+        if (t.mode !== 'disabled' && t.activeCues && t.activeCues.length > 0) {
+          const activeCue = t.activeCues[0] as any;
+          if (activeCue && activeCue.text) {
+            const clean = activeCue.text.replace(/<\/?[^>]+(>|$)/g, '').trim();
+            if (clean) {
+              setCurrentCueText(clean);
+              return;
+            }
+          }
+        }
+      }
+    };
+
+    for (let i = 0; i < tracks.length; i++) {
+      tracks[i].addEventListener('cuechange', onCueChange);
+    }
+
+    return () => {
+      for (let i = 0; i < tracks.length; i++) {
+        tracks[i].removeEventListener('cuechange', onCueChange);
+      }
+    };
+  }, [showCaptions, selectedSubtitleLang]);
 
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const toastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -554,39 +646,20 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }, 2000);
   }, []);
 
-  const syncSubtitles = useCallback((langCode: string, enabled: boolean) => {
-    if (!videoRef.current) return;
-    const tracks = videoRef.current.textTracks;
-    if (tracks && tracks.length > 0) {
-      for (let i = 0; i < tracks.length; i++) {
-        const track = tracks[i];
-        if (
-          enabled &&
-          langCode !== 'off' &&
-          (track.language?.toLowerCase().startsWith(langCode.toLowerCase()) ||
-            track.label?.toLowerCase().includes(langCode.toLowerCase()) ||
-            langCode.toLowerCase().startsWith(track.language?.toLowerCase()))
-        ) {
-          track.mode = 'showing';
-        } else {
-          track.mode = 'disabled';
-        }
-      }
-    }
-  }, []);
-
   useEffect(() => {
     syncSubtitles(selectedSubtitleLang, showCaptions);
   }, [showCaptions, selectedSubtitleLang, syncSubtitles]);
 
   const toggleCaptions = useCallback(() => {
     if (showCaptions) {
+      userManuallyToggledCaptionsRef.current = true;
       setShowCaptions(false);
       setSelectedSubtitleLang('off');
       syncSubtitles('', false);
       setCurrentCueText('');
       showToast('Captions OFF');
     } else {
+      userManuallyToggledCaptionsRef.current = false;
       setShowCaptions(true);
       const defaultOption =
         availableSubtitles.find((s) => s.code === 'en') ||
@@ -885,11 +958,13 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     (subCode: string) => {
       setSelectedSubtitleLang(subCode);
       if (subCode === 'off') {
+        userManuallyToggledCaptionsRef.current = true;
         setShowCaptions(false);
         syncSubtitles('', false);
         setCurrentCueText('');
         showToast('Subtitles turned OFF');
       } else {
+        userManuallyToggledCaptionsRef.current = false;
         setShowCaptions(true);
         syncSubtitles(subCode, true);
         const matched = availableSubtitles.find((s) => s.code === subCode);
@@ -1033,6 +1108,15 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       if (dur > 0) setDuration(dur);
       updateBuffered();
       saveProgressThrottled(cur, dur);
+
+      // Fast synchronous cue tracking to eliminate latency
+      if (showCaptions && selectedSubtitleLang !== 'off' && activeVttCues.length > 0) {
+        const match = activeVttCues.find((c) => cur >= c.start && cur <= c.end);
+        const nextText = match ? match.text : '';
+        if (nextText !== currentCueText) {
+          setCurrentCueText(nextText);
+        }
+      }
     }
   };
 
@@ -1770,7 +1854,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               kind="subtitles"
               label={sub.label}
               srcLang={sub.language}
-              src={sub.src}
+              src={resolveMediaUrl(sub.src)}
               default={sub.default}
             />
           ))}
@@ -1948,11 +2032,16 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       {/* On-screen Cinematic Subtitle Display */}
       {showCaptions && selectedSubtitleLang !== 'off' && currentCueText && (
         <div
-          className={`absolute left-0 right-0 pointer-events-none flex justify-center items-end px-4 sm:px-8 z-20 transition-all duration-200 ${
-            showControls ? 'bottom-20 sm:bottom-24' : 'bottom-8 sm:bottom-12'
+          className={`absolute left-0 right-0 pointer-events-none flex justify-center items-end px-4 sm:px-8 z-30 transition-all duration-200 ${
+            showControls ? 'bottom-20 sm:bottom-24 md:bottom-28' : 'bottom-6 sm:bottom-10'
           }`}
         >
-          <div className="bg-black/85 text-white font-medium text-sm sm:text-base md:text-lg lg:text-xl px-4 py-1.5 sm:px-6 sm:py-2 rounded-lg shadow-2xl backdrop-blur-sm max-w-3xl text-center leading-relaxed border border-white/10 select-none whitespace-pre-line tracking-wide drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)] animate-fade-in">
+          <div
+            style={{
+              textShadow: '0 2px 4px rgba(0,0,0,1), 0 0 4px rgba(0,0,0,0.95), 0 1px 2px rgba(0,0,0,1)',
+            }}
+            className="bg-black/90 text-white font-medium text-sm sm:text-base md:text-lg lg:text-xl px-4 py-1.5 sm:px-6 sm:py-2.5 rounded-lg shadow-2xl backdrop-blur-md max-w-3xl text-center leading-relaxed border border-white/10 select-none whitespace-pre-line tracking-wide drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)]"
+          >
             {currentCueText}
           </div>
         </div>

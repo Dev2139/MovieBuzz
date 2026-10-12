@@ -1,7 +1,11 @@
 import axios from 'axios';
 import { Content, Season, Episode, Media, User, WatchHistoryItem, AdminStats, TelegramImportItem, ContentRequest, AdminCatalogResponse } from '../types';
 
-const API_URL = import.meta.env.VITE_API_URL || 'https://moviebuzz-99fb.onrender.com/api';
+const API_URL =
+  import.meta.env.VITE_API_URL ||
+  (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+    ? 'http://localhost:5000/api'
+    : 'https://moviebuzz-99fb.onrender.com/api');
 
 export const api = axios.create({
   baseURL: API_URL,
