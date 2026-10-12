@@ -830,14 +830,36 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         if (resumePos > 0 && Math.abs(videoRef.current.currentTime - resumePos) > 1.5) {
           videoRef.current.currentTime = resumePos;
         }
+        ensureAudioContext();
         const p = videoRef.current.play();
         if (p !== undefined) {
           p.catch(() => {});
         }
         setIsPlaying(true);
+        setIsBuffering(false);
       }
     }, 100);
-  }, [initialPosition]);
+  }, [initialPosition, ensureAudioContext]);
+
+  // Re-trigger ad for free users when changing stream quality or audio language
+  const triggerAdForSwitch = useCallback(() => {
+    if (isAdFreeUser || isPlayingAd) return;
+    adCompletedRef.current = false;
+    setAdCurrentTime(0);
+    setIsPlayingAd(true);
+    if (videoRef.current) {
+      try {
+        videoRef.current.pause();
+      } catch {}
+    }
+    setIsPlaying(false);
+    setTimeout(() => {
+      if (adVideoRef.current) {
+        adVideoRef.current.currentTime = 0;
+        adVideoRef.current.play().catch(() => {});
+      }
+    }, 50);
+  }, [isAdFreeUser, isPlayingAd]);
 
   // Kickstart ad playback immediately upon mount
   useEffect(() => {
@@ -860,6 +882,11 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       shouldAutoResumeAfterQualitySwitchRef.current = wasPlaying;
 
       const lower = targetQuality.toLowerCase();
+      const isQualityChanging = lower !== selectedQuality.toLowerCase() || Boolean(specificMedia);
+
+      if (isQualityChanging && !isAdFreeUser) {
+        triggerAdForSwitch();
+      }
 
       // 1. If a specific media item is provided or exists in mediaList
       let targetSource: Media | undefined = specificMedia;
@@ -1013,12 +1040,17 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       const tier = QUALITY_TIERS.find((t) => t.value === lower);
       showToast(`Quality set to ${tier?.label || targetQuality}`);
     },
-    [mediaList, streamUrl, currentTime, isPlaying, showToast]
+    [mediaList, streamUrl, currentTime, isPlaying, selectedQuality, isAdFreeUser, triggerAdForSwitch, showToast]
   );
 
   // Audio Language / Dubbing Selector
   const handleSelectAudioLanguage = useCallback(
     (langCode: string, targetSubjectId?: string) => {
+      const isAudioChanging = langCode.toLowerCase() !== selectedAudioLang.toLowerCase() || Boolean(targetSubjectId);
+      if (isAudioChanging && !isAdFreeUser) {
+        triggerAdForSwitch();
+      }
+
       setSelectedAudioLang(langCode);
       const matched = availableAudioOptions.find((l) => l.code === langCode);
       const langLabel = matched ? matched.label : langCode;
@@ -1128,7 +1160,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
       showToast(`Audio: ${langLabel}`);
     },
-    [availableAudioOptions, mediaList, selectedQuality, streamUrl, isPlaying, currentTime, showToast]
+    [availableAudioOptions, mediaList, selectedQuality, selectedAudioLang, streamUrl, isPlaying, currentTime, isAdFreeUser, triggerAdForSwitch, showToast]
   );
 
   // Subtitle Language Selector
@@ -1815,15 +1847,18 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           return;
         }
 
-        player.initialize(videoRef.current, effectiveUrl, true);
+        player.initialize(videoRef.current, effectiveUrl, !isPlayingAd);
         dashRef.current = player;
         player.updateSettings({
           streaming: {
             buffer: {
-              initialBufferLevel: 0.3,
-              bufferTimeDefault: 4,
-              bufferTimeAtTopQuality: 8,
-              bufferToKeep: 15,
+              initialBufferLevel: 6,
+              bufferTimeDefault: 45,
+              bufferTimeAtTopQuality: 60,
+              bufferTimeAtTopQualityLongForm: 90,
+              bufferToKeep: 180,
+              bufferPruningInterval: 60,
+              avoidCurrentTimeRangePruning: true,
               fastSwitchEnabled: true,
             },
             abr: {
@@ -1841,9 +1876,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               MediaSegment: 800,
             },
             retryAttempts: {
-              MPD: 4,
-              InitializationSegment: 4,
-              MediaSegment: 4,
+              MPD: 5,
+              InitializationSegment: 5,
+              MediaSegment: 5,
             },
           },
         });
@@ -1926,12 +1961,13 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     } else if (isHls && Hls.isSupported()) {
       const hls = new Hls({
         enableWorker: true,
-        lowLatencyMode: true,
-        backBufferLength: 90,
-        maxBufferLength: 30,
-        maxMaxBufferLength: 60,
-        maxBufferSize: 60 * 1000 * 1000,
+        lowLatencyMode: false,
+        backBufferLength: 120,
+        maxBufferLength: 60,
+        maxMaxBufferLength: 120,
+        maxBufferSize: 120 * 1000 * 1000,
         startLevel: -1,
+        autoStartLoad: true,
       });
 
       hls.loadSource(effectiveUrl);
