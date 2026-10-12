@@ -54,11 +54,11 @@ interface VideoPlayerProps {
 }
 
 export const QUALITY_TIERS = [
-  { label: '4K (2160p)', value: '4k', badge: 'Ultra HD', height: 2160 },
-  { label: '1080p', value: '1080p', badge: 'Full HD', height: 1080 },
-  { label: '720p', value: '720p', badge: 'HD', height: 720 },
-  { label: '420p', value: '420p', badge: 'Standard', height: 420 },
-  { label: 'Auto', value: 'auto', badge: 'Adaptive', height: 0 },
+  { label: 'Auto (Adaptive)', value: 'auto', badge: 'Auto', height: 0 },
+  { label: '420p (Standard)', value: '420p', badge: 'Standard', height: 420 },
+  { label: '720p (HD)', value: '720p', badge: 'HD', height: 720 },
+  { label: '1080p (Full HD)', value: '1080p', badge: 'Full HD', height: 1080 },
+  { label: '2160p / 4K (Ultra HD)', value: '4k', badge: 'Ultra HD', height: 2160 },
 ];
 
 export interface AudioTrackOption {
@@ -930,7 +930,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                     ? 1080
                     : targetQuality === '720p'
                     ? 720
-                    : 480;
+                    : targetQuality === '420p' || targetQuality === '480p'
+                    ? 420
+                    : 360;
                 let closestDiff = Infinity;
                 bitrates.forEach((info: any, idx: number) => {
                   const diff = Math.abs((info.height || 0) - targetHeight);
@@ -965,7 +967,15 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             const levels = hlsRef.current.levels;
             if (levels && levels.length > 0) {
               const targetHeight =
-                targetQuality === '4k' ? 2160 : targetQuality === '1080p' ? 1080 : targetQuality === '720p' ? 720 : 480;
+                targetQuality === '4k' || targetQuality === '2160p'
+                  ? 2160
+                  : targetQuality === '1080p'
+                  ? 1080
+                  : targetQuality === '720p'
+                  ? 720
+                  : targetQuality === '420p' || targetQuality === '480p'
+                  ? 420
+                  : 360;
               let closestIdx = 0;
               let closestDiff = Infinity;
               levels.forEach((lvl: any, idx: number) => {
@@ -1765,17 +1775,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
       const initDash = async () => {
         try {
-          const hasNativeHevc =
-            typeof MediaSource !== 'undefined' &&
-            (MediaSource.isTypeSupported('video/mp4; codecs="hev1.1.6.L93.B0"') ||
-              MediaSource.isTypeSupported('video/mp4; codecs="hvc1.1.6.L93.B0"') ||
-              MediaSource.isTypeSupported('video/mp4; codecs="hev1.1.6.L120.B0"') ||
-              MediaSource.isTypeSupported('video/mp4; codecs="hvc1.1.6.L120.B0"'));
-
           const cleanup = await attachHevcSupport(player, {
-            forceTranscode: !hasNativeHevc,
+            forceTranscode: true,
             adaptiveCompute: true,
-            bitrate: 4_500_000,
             workerUrl: '/transcode-worker.js',
             wasmUrl: '/hevc-decode.js',
             wasmBinaryUrl: '/hevc-decode.wasm',
@@ -2701,7 +2703,15 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                         <span className="text-brand-400 text-[10px] font-medium">{mediaList.length} Options</span>
                       </div>
                       <div className="space-y-0.5 mt-0.5">
-                        {mediaList.map((m) => {
+                        {[...mediaList]
+                          .sort((a, b) => {
+                            const parseRes = (q: string) => {
+                              const match = q.match(/\d+/);
+                              return match ? parseInt(match[0], 10) : 0;
+                            };
+                            return parseRes(a.quality || a.resolution) - parseRes(b.quality || b.resolution);
+                          })
+                          .map((m) => {
                           const isSelected =
                             selectedQuality.toLowerCase() === m.quality.toLowerCase() ||
                             streamUrl === resolveMediaUrl(m.streamUrl);
@@ -2782,7 +2792,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                           {selectedQuality === 'auto' && <Check className="w-3.5 h-3.5 text-[#FF0000]" />}
                         </button>
 
-                        {dashQualities.map((dq) => {
+                        {[...dashQualities]
+                          .sort((a, b) => a.height - b.height)
+                          .map((dq) => {
                           const isSelected =
                             selectedQuality.toLowerCase() === dq.value.toLowerCase() ||
                             selectedQuality.toLowerCase().includes(String(dq.height));
