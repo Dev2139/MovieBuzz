@@ -20,7 +20,7 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        target: 'https://moviebuzz-server.onrender.com',
+        target: process.env.VITE_DEV_API_URL || 'http://localhost:5000',
         changeOrigin: true,
       },
     },
