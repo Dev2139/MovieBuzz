@@ -1900,10 +1900,11 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           return;
         }
 
-        player.initialize(videoRef.current, effectiveUrl, !isPlayingAd);
-        dashRef.current = player;
         player.updateSettings({
           streaming: {
+            scheduling: {
+              scheduleWhilePaused: true,
+            },
             buffer: {
               initialBufferLevel: 6,
               bufferTimeDefault: 45,
@@ -1942,6 +1943,12 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             },
           },
         });
+
+        player.initialize(videoRef.current, effectiveUrl, !isPlayingAd);
+        dashRef.current = player;
+        try {
+          player.preload();
+        } catch {}
 
         player.on(dashjs.MediaPlayer.events.STREAM_INITIALIZED, () => {
           setIsBuffering(false);
@@ -2032,6 +2039,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
       hls.loadSource(effectiveUrl);
       hls.attachMedia(videoRef.current);
+      hls.startLoad();
 
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         setIsBuffering(false);
