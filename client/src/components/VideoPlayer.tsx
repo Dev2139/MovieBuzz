@@ -831,6 +831,11 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           videoRef.current.currentTime = resumePos;
         }
         ensureAudioContext();
+        if (dashRef.current) {
+          try {
+            dashRef.current.play();
+          } catch {}
+        }
         const p = videoRef.current.play();
         if (p !== undefined) {
           p.catch(() => {});
@@ -1820,8 +1825,13 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
       const initDash = async () => {
         try {
+          const isAppleDevice =
+            typeof navigator !== 'undefined' &&
+            /Macintosh|iPhone|iPad|iPod/.test(navigator.userAgent) &&
+            !/Chrome|Chromium|Edg/.test(navigator.userAgent);
+
           const cleanup = await attachHevcSupport(player, {
-            forceTranscode: false,
+            forceTranscode: !isAppleDevice,
             adaptiveCompute: {
               targetSpeedX: 1.15,
               lowerAfter: 1,
