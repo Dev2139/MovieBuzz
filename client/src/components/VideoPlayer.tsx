@@ -33,7 +33,7 @@ import { Media } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { saveLocalPlaybackPosition } from '../utils/localStorage';
 import { resolveMediaUrl } from '../utils/url';
-import { saveWatchProgress } from '../services/api';
+import { saveWatchProgress, fetchSubtitles } from '../services/api';
 
 interface VideoPlayerProps {
   mediaList: Media[];
@@ -49,7 +49,7 @@ interface VideoPlayerProps {
   imdbId?: string;
   seasonNumber?: number;
   episodeNumber?: number;
-  subtitles?: Array<{ label: string; language: string; src: string; default?: boolean }>;
+  subtitles?: Array<{ id?: string; label: string; language: string; src: string; default?: boolean }>;
   dubs?: Array<{ subjectId: string; name: string; code: string; original?: boolean }>;
 }
 
@@ -91,6 +91,46 @@ export const PRESET_SUBTITLE_LANGUAGES = [
   { code: 'de', label: 'German (Deutsch)', detail: 'Untertitel' },
 ];
 
+function parseVttTimestamp(timeStr: string): number {
+  const clean = timeStr.trim().split(' ')[0];
+  const parts = clean.split(':');
+  if (parts.length === 3) {
+    const [h, m, s] = parts;
+    return parseFloat(h) * 3600 + parseFloat(m) * 60 + parseFloat(s);
+  } else if (parts.length === 2) {
+    const [m, s] = parts;
+    return parseFloat(m) * 60 + parseFloat(s);
+  }
+  return 0;
+}
+
+function parseVtt(vttString: string): Array<{ start: number; end: number; text: string }> {
+  const cues: Array<{ start: number; end: number; text: string }> = [];
+  const lines = vttString.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i].trim();
+    if (line.includes('-->')) {
+      const [startStr, endStr] = line.split('-->').map((s) => s.trim());
+      const start = parseVttTimestamp(startStr);
+      const end = parseVttTimestamp(endStr);
+      i++;
+      const textLines: string[] = [];
+      while (i < lines.length && lines[i].trim() !== '' && !lines[i].includes('-->')) {
+        const cleanText = lines[i].replace(/<\/?[^>]+(>|$)/g, '').trim();
+        if (cleanText) textLines.push(cleanText);
+        i++;
+      }
+      if (textLines.length > 0) {
+        cues.push({ start, end, text: textLines.join('\n') });
+      }
+    } else {
+      i++;
+    }
+  }
+  return cues;
+}
+
 export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   mediaList,
   contentId,
@@ -101,6 +141,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   contentType,
   initialPosition = 0,
   onEnded,
+  tmdbId,
+  imdbId,
+  seasonNumber = 1,
+  episodeNumber = 1,
   subtitles,
   dubs = [],
 }) => {
@@ -401,6 +445,104 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
     return list;
   }, [dubs, mediaList, audioTracksList]);
+  // Auto-fetch fallback subtitles if not explicitly passed by parent
+  const [autoFetchedSubtitles, setAutoFetchedSubtitles] = useState<
+    Array<{ id: string; label: string; language: string; src: string; default?: boolean }>
+  >([]);
+
+  useEffect(() => {
+    if (subtitles && subtitles.length > 0) return;
+    if (!contentTitle && !imdbId && !tmdbId) return;
+
+    fetchSubtitles({
+      imdbId,
+      tmdbId,
+      title: contentTitle,
+      type: contentType as any,
+      season: seasonNumber,
+      episode: episodeNumber,
+    })
+      .then((res) => {
+        if (res?.subtitles?.length) {
+          setAutoFetchedSubtitles(res.subtitles);
+        }
+      })
+      .catch(() => {});
+  }, [subtitles, contentTitle, imdbId, tmdbId, contentType, seasonNumber, episodeNumber]);
+
+  const effectiveSubtitles = React.useMemo(() => {
+    if (subtitles && subtitles.length > 0) return subtitles;
+    return autoFetchedSubtitles;
+  }, [subtitles, autoFetchedSubtitles]);
+
+  // Dynamic Subtitle Options list
+  const availableSubtitles = React.useMemo(() => {
+    const list: Array<{ code: string; label: string; detail: string; src?: string }> = [
+      { code: 'off', label: 'Off', detail: 'Captions disabled' },
+    ];
+    if (effectiveSubtitles && effectiveSubtitles.length > 0) {
+      effectiveSubtitles.forEach((s) => {
+        list.push({
+          code: s.language,
+          label: s.label.includes('(') ? s.label : `${s.label} (${s.language.toUpperCase()})`,
+          detail: s.label,
+          src: s.src,
+        });
+      });
+    } else {
+      PRESET_SUBTITLE_LANGUAGES.filter((p) => p.code !== 'off').forEach((p) => list.push(p));
+    }
+    return list;
+  }, [effectiveSubtitles]);
+
+  // Subtitle WebVTT parsing & current cue tracking
+  const [activeVttCues, setActiveVttCues] = useState<Array<{ start: number; end: number; text: string }>>([]);
+  const [currentCueText, setCurrentCueText] = useState<string>('');
+
+  useEffect(() => {
+    if (!showCaptions || selectedSubtitleLang === 'off') {
+      setActiveVttCues([]);
+      setCurrentCueText('');
+      return;
+    }
+
+    const matched = effectiveSubtitles.find(
+      (s) =>
+        s.language.toLowerCase() === selectedSubtitleLang.toLowerCase() ||
+        selectedSubtitleLang.toLowerCase().startsWith(s.language.toLowerCase())
+    );
+
+    if (!matched?.src) return;
+
+    let cancelled = false;
+    fetch(matched.src)
+      .then((r) => r.text())
+      .then((vttText) => {
+        if (!cancelled && vttText) {
+          const cues = parseVtt(vttText);
+          setActiveVttCues(cues);
+        }
+      })
+      .catch((err) => {
+        console.warn('[VideoPlayer] Subtitle VTT fetch notice:', err);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [showCaptions, selectedSubtitleLang, effectiveSubtitles]);
+
+  useEffect(() => {
+    if (!showCaptions || selectedSubtitleLang === 'off' || activeVttCues.length === 0) {
+      setCurrentCueText('');
+      return;
+    }
+
+    const pos = currentTime;
+    const match = activeVttCues.find((c) => pos >= c.start && pos <= c.end);
+    setCurrentCueText(match ? match.text : '');
+  }, [currentTime, showCaptions, selectedSubtitleLang, activeVttCues]);
+
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const toastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -422,7 +564,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           enabled &&
           langCode !== 'off' &&
           (track.language?.toLowerCase().startsWith(langCode.toLowerCase()) ||
-            track.label?.toLowerCase().includes(langCode.toLowerCase()))
+            track.label?.toLowerCase().includes(langCode.toLowerCase()) ||
+            langCode.toLowerCase().startsWith(track.language?.toLowerCase()))
         ) {
           track.mode = 'showing';
         } else {
@@ -441,16 +584,19 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       setShowCaptions(false);
       setSelectedSubtitleLang('off');
       syncSubtitles('', false);
+      setCurrentCueText('');
       showToast('Captions OFF');
     } else {
       setShowCaptions(true);
-      const nextLang = selectedSubtitleLang === 'off' ? 'en' : selectedSubtitleLang;
+      const defaultOption =
+        availableSubtitles.find((s) => s.code === 'en') ||
+        availableSubtitles.find((s) => s.code !== 'off');
+      const nextLang = defaultOption?.code || 'en';
       setSelectedSubtitleLang(nextLang);
       syncSubtitles(nextLang, true);
-      const found = PRESET_SUBTITLE_LANGUAGES.find((s) => s.code === nextLang);
-      showToast(`Captions ON: ${found?.label || 'English (CC)'}`);
+      showToast(`Captions ON: ${defaultOption?.label || 'English (CC)'}`);
     }
-  }, [showCaptions, selectedSubtitleLang, syncSubtitles, showToast]);
+  }, [showCaptions, availableSubtitles, syncSubtitles, showToast]);
 
   // Double click skip feedback indicator
   const [skipFeedback, setSkipFeedback] = useState<{ side: 'left' | 'right'; text: string; id: number } | null>(null);
@@ -741,15 +887,16 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       if (subCode === 'off') {
         setShowCaptions(false);
         syncSubtitles('', false);
+        setCurrentCueText('');
         showToast('Subtitles turned OFF');
       } else {
         setShowCaptions(true);
         syncSubtitles(subCode, true);
-        const matched = PRESET_SUBTITLE_LANGUAGES.find((s) => s.code === subCode);
+        const matched = availableSubtitles.find((s) => s.code === subCode);
         showToast(`Subtitles: ${matched?.label || subCode}`);
       }
     },
-    [syncSubtitles, showToast]
+    [availableSubtitles, syncSubtitles, showToast]
   );
 
   useEffect(() => {
@@ -1616,10 +1763,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         className="w-full h-full object-contain cursor-pointer transition-[filter] duration-150"
         playsInline
       >
-        {subtitles &&
-          subtitles.map((sub, idx) => (
+        {effectiveSubtitles &&
+          effectiveSubtitles.map((sub, idx) => (
             <track
-              key={idx}
+              key={sub.id || `${sub.language}-${idx}`}
               kind="subtitles"
               label={sub.label}
               srcLang={sub.language}
@@ -1798,12 +1945,16 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         </div>
       )}
 
-      {/* On-screen Subtitle Indication when CC is active */}
-      {showCaptions && selectedSubtitleLang !== 'off' && (
-        <div className="absolute bottom-16 sm:bottom-20 left-1/2 -translate-x-1/2 z-20 pointer-events-none max-w-[85%] text-center">
-          <span className="inline-block bg-black/85 backdrop-blur-xs text-white text-xs sm:text-sm font-medium px-3.5 py-1 rounded-md shadow-lg border border-white/10 tracking-wide">
-            [{PRESET_SUBTITLE_LANGUAGES.find((s) => s.code === selectedSubtitleLang)?.label || 'CC'} Subtitles Active]
-          </span>
+      {/* On-screen Cinematic Subtitle Display */}
+      {showCaptions && selectedSubtitleLang !== 'off' && currentCueText && (
+        <div
+          className={`absolute left-0 right-0 pointer-events-none flex justify-center items-end px-4 sm:px-8 z-20 transition-all duration-200 ${
+            showControls ? 'bottom-20 sm:bottom-24' : 'bottom-8 sm:bottom-12'
+          }`}
+        >
+          <div className="bg-black/85 text-white font-medium text-sm sm:text-base md:text-lg lg:text-xl px-4 py-1.5 sm:px-6 sm:py-2 rounded-lg shadow-2xl backdrop-blur-sm max-w-3xl text-center leading-relaxed border border-white/10 select-none whitespace-pre-line tracking-wide drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)] animate-fade-in">
+            {currentCueText}
+          </div>
         </div>
       )}
 
@@ -2266,8 +2417,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                       <span className="text-white/40 text-[10px]">{showCaptions ? 'Active' : 'Off'}</span>
                     </div>
                     <div className="space-y-0.5 mt-0.5">
-                      {PRESET_SUBTITLE_LANGUAGES.map((sub) => {
-                        const isSelected = selectedSubtitleLang === sub.code;
+                      {availableSubtitles.map((sub) => {
+                        const isSelected = showCaptions ? selectedSubtitleLang === sub.code : sub.code === 'off';
                         return (
                           <button
                             key={sub.code}
@@ -2282,7 +2433,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                           >
                             <div className="flex flex-col">
                               <span>{sub.label}</span>
-                              <span className="text-[10px] text-white/50">{sub.detail}</span>
+                              {sub.detail && <span className="text-[10px] text-white/50">{sub.detail}</span>}
                             </div>
                             {isSelected && <Check className="w-3.5 h-3.5 text-[#FF0000]" />}
                           </button>

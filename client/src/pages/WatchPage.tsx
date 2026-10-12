@@ -8,6 +8,7 @@ import {
   fetchContentList,
   resolveStreamingSourcesByTitle,
   fetchSeriesMovieBoxSeasonsEpisodes,
+  fetchSubtitles,
 } from '../services/api';
 import { VideoPlayer } from '../components/VideoPlayer';
 import { ChevronLeft, ChevronRight, List, Film, Tv, Play, Sparkles, Layers } from 'lucide-react';
@@ -181,6 +182,33 @@ export const WatchPage: React.FC = () => {
     return [];
   }, [movieboxData?.sources, isMovie, movieData?.media, seriesData?.media]);
 
+  // Subtitles Query (resolves multi-language WebVTT tracks)
+  const { data: subtitlesData } = useQuery({
+    queryKey: ['subtitles-sources', imdbId, tmdbId, rawTitle, isMovie ? 'movie' : 'series', currentSeasonNum, currentEpNum],
+    queryFn: () =>
+      fetchSubtitles({
+        imdbId,
+        tmdbId,
+        title: rawTitle,
+        type: isMovie ? 'movie' : 'series',
+        season: currentSeasonNum,
+        episode: currentEpNum,
+      }),
+    enabled: Boolean(rawTitle || imdbId || tmdbId),
+    refetchOnWindowFocus: false,
+    staleTime: 30 * 60 * 1000,
+  });
+
+  const effectiveSubtitles = React.useMemo(() => {
+    if (subtitlesData?.subtitles && subtitlesData.subtitles.length > 0) {
+      return subtitlesData.subtitles;
+    }
+    if (movieboxData?.subtitles && movieboxData.subtitles.length > 0) {
+      return movieboxData.subtitles;
+    }
+    return [];
+  }, [subtitlesData?.subtitles, movieboxData?.subtitles]);
+
   // Saved position lookup (Cloud authenticated history first, fallback to local storage)
   let initialPos = 0;
   if (user && userHistoryData?.history && contentId) {
@@ -263,6 +291,7 @@ export const WatchPage: React.FC = () => {
             imdbId={imdbId}
             seasonNumber={isSeries ? Number(season || 1) : 1}
             episodeNumber={isSeries ? Number(episode || 1) : 1}
+            subtitles={effectiveSubtitles}
             dubs={movieboxData?.dubs || []}
             onEnded={() => {
               if (nextEp) {

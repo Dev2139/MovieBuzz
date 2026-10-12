@@ -305,6 +305,14 @@ export const fetchEpisodeStreamingSources = async (subjectId: string, season: nu
   return res.data;
 };
 
+export interface SubtitleTrack {
+  id: string;
+  label: string;
+  language: string;
+  src: string;
+  default?: boolean;
+}
+
 export const resolveStreamingSourcesByTitle = async (
   title: string,
   year?: number,
@@ -316,9 +324,24 @@ export const resolveStreamingSourcesByTitle = async (
     subject: any;
     sources: any[];
     dubs?: Array<{ subjectId: string; name: string; code: string; original?: boolean }>;
+    subtitles?: SubtitleTrack[];
   }>('/streaming/resolve', {
     params: { title, year, type, season, episode },
   });
+  return res.data;
+};
+
+export const fetchSubtitles = async (params: {
+  imdbId?: string;
+  tmdbId?: number;
+  title?: string;
+  type?: 'movie' | 'series';
+  season?: number;
+  episode?: number;
+}) => {
+  const res = await api.get<{
+    subtitles: SubtitleTrack[];
+  }>('/streaming/subtitles', { params });
   return res.data;
 };
 

@@ -9,6 +9,7 @@
     "start": "node dist/server.js",
     "moviebox": "python python/moviebox_service.py",
     "test:streaming": "tsx src/scripts/testStreaming.ts",
+    "test:subtitles": "tsx src/scripts/testSubtitles.ts",
     "seed": "tsx src/seed/seed.ts",
     "clean": "tsx src/seed/clean.ts",
     "generate-session": "tsx src/scripts/generateUserSession.ts"
