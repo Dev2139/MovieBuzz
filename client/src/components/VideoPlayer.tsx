@@ -1337,6 +1337,14 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }
   }, []);
 
+  // Poll buffer levels continuously even while paused so progress updates in real-time
+  useEffect(() => {
+    const timer = setInterval(() => {
+      updateBuffered();
+    }, 1200);
+    return () => clearInterval(timer);
+  }, [updateBuffered]);
+
   const handleTimeUpdate = () => {
     if (videoRef.current) {
       const cur = videoRef.current.currentTime;
@@ -1904,12 +1912,13 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           streaming: {
             scheduling: {
               scheduleWhilePaused: true,
+              defaultTimeout: 300,
             },
             buffer: {
-              initialBufferLevel: 6,
-              bufferTimeDefault: 45,
-              bufferTimeAtTopQuality: 60,
-              bufferTimeAtTopQualityLongForm: 90,
+              initialBufferLevel: 8,
+              bufferTimeDefault: 90,
+              bufferTimeAtTopQuality: 120,
+              bufferTimeAtTopQualityLongForm: 180,
               bufferToKeep: 1800,
               bufferPruningInterval: 300,
               avoidCurrentTimeRangePruning: true,
@@ -2017,6 +2026,11 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
         player.on(dashjs.MediaPlayer.events.CAN_PLAY, () => {
           setIsBuffering(false);
+          updateBuffered();
+        });
+
+        player.on(dashjs.MediaPlayer.events.FRAGMENT_LOADING_COMPLETED, () => {
+          updateBuffered();
         });
 
         player.on(dashjs.MediaPlayer.events.ERROR, (e: any) => {
@@ -2030,9 +2044,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         enableWorker: true,
         lowLatencyMode: false,
         backBufferLength: 1800,
-        maxBufferLength: 60,
-        maxMaxBufferLength: 120,
-        maxBufferSize: 120 * 1000 * 1000,
+        maxBufferLength: 120,
+        maxMaxBufferLength: 180,
+        maxBufferSize: 250 * 1000 * 1000,
         startLevel: -1,
         autoStartLoad: true,
       });
@@ -2040,6 +2054,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       hls.loadSource(effectiveUrl);
       hls.attachMedia(videoRef.current);
       hls.startLoad();
+
+      hls.on(Hls.Events.FRAG_BUFFERED, () => {
+        updateBuffered();
+      });
 
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         setIsBuffering(false);
@@ -2140,6 +2158,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         ref={videoRef}
         preload="auto"
         playsInline
+        onProgress={updateBuffered}
         onTimeUpdate={handleTimeUpdate}
         onLoadedMetadata={handleLoadedMetadata}
         onLoadStart={() => setIsBuffering(true)}
