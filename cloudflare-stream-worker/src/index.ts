@@ -136,7 +136,7 @@ export default {
         respHeaders.set('Cache-Control', 'public, max-age=3600');
       } else if (isSegment) {
         respHeaders.set('Content-Type', 'video/iso.segment');
-        respHeaders.set('Cache-Control', 'public, max-age=86400');
+        respHeaders.set('Cache-Control', 'public, max-age=31536000, immutable');
       }
 
       return new Response(upstreamRes.body, {

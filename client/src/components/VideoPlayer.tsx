@@ -1313,6 +1313,17 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }
   }, [initialPosition, streamUrl]);
 
+  const isAlreadyBuffered = useCallback((targetTime: number): boolean => {
+    if (!videoRef.current || videoRef.current.buffered.length === 0) return false;
+    const b = videoRef.current.buffered;
+    for (let i = 0; i < b.length; i++) {
+      if (targetTime >= b.start(i) - 0.5 && targetTime <= b.end(i) + 0.5) {
+        return true;
+      }
+    }
+    return false;
+  }, []);
+
   const updateBuffered = useCallback(() => {
     if (videoRef.current && videoRef.current.buffered.length > 0) {
       const cur = videoRef.current.currentTime;
@@ -1405,7 +1416,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     const newTime = parseFloat(e.target.value);
     playbackPositionRef.current = newTime;
     setCurrentTime(newTime);
-    setIsBuffering(true);
+    if (!isAlreadyBuffered(newTime)) {
+      setIsBuffering(true);
+    }
     if (videoRef.current) {
       videoRef.current.currentTime = newTime;
     }
@@ -1417,7 +1430,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     const newTime = clickFraction * (duration || 0);
     playbackPositionRef.current = newTime;
     setCurrentTime(newTime);
-    setIsBuffering(true);
+    if (!isAlreadyBuffered(newTime)) {
+      setIsBuffering(true);
+    }
     if (videoRef.current) {
       videoRef.current.currentTime = newTime;
     }
@@ -1633,7 +1648,13 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         if (clickX < width * 0.3) {
           // Left side double-click: Rewind 10s
           if (videoRef.current) {
-            videoRef.current.currentTime = Math.max(0, videoRef.current.currentTime - 10);
+            const target = Math.max(0, videoRef.current.currentTime - 10);
+            playbackPositionRef.current = target;
+            setCurrentTime(target);
+            if (!isAlreadyBuffered(target)) {
+              setIsBuffering(true);
+            }
+            videoRef.current.currentTime = target;
           }
           setSkipFeedback({ side: 'left', text: '10 seconds', id: Date.now() });
           setTimeout(() => setSkipFeedback(null), 800);
@@ -1643,7 +1664,13 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         } else if (clickX > width * 0.7) {
           // Right side double-click: Fast-forward 10s
           if (videoRef.current) {
-            videoRef.current.currentTime = Math.min(duration, videoRef.current.currentTime + 10);
+            const target = Math.min(duration, videoRef.current.currentTime + 10);
+            playbackPositionRef.current = target;
+            setCurrentTime(target);
+            if (!isAlreadyBuffered(target)) {
+              setIsBuffering(true);
+            }
+            videoRef.current.currentTime = target;
           }
           setSkipFeedback({ side: 'right', text: '10 seconds', id: Date.now() });
           setTimeout(() => setSkipFeedback(null), 800);
@@ -1730,13 +1757,29 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       } else if (e.key === 'j' || e.key === 'J' || e.key === 'ArrowLeft') {
         e.preventDefault();
         const step = e.key === 'ArrowLeft' ? 5 : 10;
-        if (videoRef.current) videoRef.current.currentTime = Math.max(0, videoRef.current.currentTime - step);
+        if (videoRef.current) {
+          const target = Math.max(0, videoRef.current.currentTime - step);
+          playbackPositionRef.current = target;
+          setCurrentTime(target);
+          if (!isAlreadyBuffered(target)) {
+            setIsBuffering(true);
+          }
+          videoRef.current.currentTime = target;
+        }
         setSkipFeedback({ side: 'left', text: `-${step}s`, id: Date.now() });
         setTimeout(() => setSkipFeedback(null), 800);
       } else if (e.key === 'l' || e.key === 'L' || e.key === 'ArrowRight') {
         e.preventDefault();
         const step = e.key === 'ArrowRight' ? 5 : 10;
-        if (videoRef.current) videoRef.current.currentTime = Math.min(duration, videoRef.current.currentTime + step);
+        if (videoRef.current) {
+          const target = Math.min(duration, videoRef.current.currentTime + step);
+          playbackPositionRef.current = target;
+          setCurrentTime(target);
+          if (!isAlreadyBuffered(target)) {
+            setIsBuffering(true);
+          }
+          videoRef.current.currentTime = target;
+        }
         setSkipFeedback({ side: 'right', text: `+${step}s`, id: Date.now() });
         setTimeout(() => setSkipFeedback(null), 800);
       } else if (e.key === 'ArrowUp') {
@@ -1866,10 +1909,17 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               bufferTimeDefault: 45,
               bufferTimeAtTopQuality: 60,
               bufferTimeAtTopQualityLongForm: 90,
-              bufferToKeep: 180,
-              bufferPruningInterval: 60,
+              bufferToKeep: 1800,
+              bufferPruningInterval: 300,
               avoidCurrentTimeRangePruning: true,
+              enableSeekDecorrelationFix: true,
               fastSwitchEnabled: true,
+              reuseExistingSourceBuffers: true,
+            },
+            gaps: {
+              jumpGaps: true,
+              jumpLargeGaps: true,
+              smallGapLimit: 1.5,
             },
             abr: {
               autoSwitchBitrate: {
@@ -1972,7 +2022,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       const hls = new Hls({
         enableWorker: true,
         lowLatencyMode: false,
-        backBufferLength: 120,
+        backBufferLength: 1800,
         maxBufferLength: 60,
         maxMaxBufferLength: 120,
         maxBufferSize: 120 * 1000 * 1000,
@@ -2087,8 +2137,15 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         onLoadStart={() => setIsBuffering(true)}
         onWaiting={handleStall}
         onStalled={handleStall}
-        onSeeking={() => setIsBuffering(true)}
-        onSeeked={() => setIsBuffering(false)}
+        onSeeking={() => {
+          if (videoRef.current && !isAlreadyBuffered(videoRef.current.currentTime)) {
+            setIsBuffering(true);
+          }
+        }}
+        onSeeked={() => {
+          setIsBuffering(false);
+          updateBuffered();
+        }}
         onCanPlay={() => {
           setIsBuffering(false);
           autoRetryAttemptsRef.current = 0;
