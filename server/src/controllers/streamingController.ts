@@ -73,17 +73,19 @@ function formatStreamingSources(sources: any[], baseUrl: string) {
     }
 
     const rawRes = parseInt(String(s.resolution).replace(/\D/g, '') || '720', 10);
-    const baseLabel = rawRes >= 1080 ? '1080p' : rawRes >= 720 ? '720p' : `${rawRes}p`;
+    const baseLabel = rawRes >= 2160 ? '4K (2160p)' : rawRes >= 1080 ? '1080p' : rawRes >= 720 ? '720p' : `${rawRes}p`;
 
     const count = (seenQualities.get(baseLabel) || 0) + 1;
     seenQualities.set(baseLabel, count);
-    const qualityLabel = count === 1 ? (s.quality || baseLabel) : `${baseLabel} (Option ${count})`;
+    const sizeGb = s.size ? `${(s.size / (1024 * 1024 * 1024)).toFixed(2)} GB` : '';
+    const printNote = count > 1 ? ` (Print ${count}${sizeGb ? ` • ${sizeGb}` : ''})` : sizeGb ? ` (${sizeGb})` : '';
+    const qualityLabel = count === 1 && s.quality ? s.quality : `${baseLabel}${printNote}`;
 
     return {
       resourceId: s.resourceId,
       quality: qualityLabel,
       resolution: `${rawRes}p`,
-      codecName: s.codecName,
+      codecName: s.codecName || (isDash ? 'hevc' : 'h264'),
       fileSize: s.size ? `${(s.size / (1024 * 1024 * 1024)).toFixed(2)} GB` : 'Standard',
       streamUrl,
       rawStreamUrl: s.resourceLink,
@@ -522,6 +524,7 @@ export const proxyDashStream = async (req: Request, res: Response) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', '*');
+    res.setHeader('Cache-Control', cleanPath.endsWith('.mpd') ? 'public, max-age=3600' : 'public, max-age=31536000, immutable');
 
     if (upstreamRes.headers['content-range']) {
       res.setHeader('Content-Range', String(upstreamRes.headers['content-range']));
@@ -575,6 +578,7 @@ export const proxyVideoStream = async (req: Request, res: Response) => {
     res.setHeader('Content-Type', String(upstreamRes.headers['content-type'] || 'video/mp4'));
     res.setHeader('Accept-Ranges', 'bytes');
     res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
 
     if (upstreamRes.headers['content-range']) {
       res.setHeader('Content-Range', String(upstreamRes.headers['content-range']));

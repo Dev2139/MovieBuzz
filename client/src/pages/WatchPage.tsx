@@ -163,6 +163,7 @@ export const WatchPage: React.FC = () => {
         quality: s.quality,
         resolution: s.resolution,
         fileSize: s.fileSize,
+        codecName: s.codecName,
         mimeType: s.format === 'DASH' ? 'application/dash+xml' : (s.mimeType || 'video/mp4'),
         format: s.format || 'MP4',
         provider: 'cinestream',

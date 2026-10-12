@@ -66,6 +66,7 @@ export interface Media {
   audioName?: string;
   dubSubjectId?: string;
   isOriginal?: boolean;
+  codecName?: string;
 }
 
 export interface User {
