@@ -647,14 +647,26 @@ export const getSubtitleFile = async (req: Request, res: Response) => {
       url: url as string,
     });
 
+    const origin = (req.headers.origin as string) || '';
+    if (origin) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+    } else {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    }
     res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
-    res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Cache-Control', 'public, max-age=86400');
     return res.status(200).send(vttContent);
   } catch (error: any) {
     console.error('getSubtitleFile error:', error.message);
+    const origin = (req.headers.origin as string) || '';
+    if (origin) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+    } else {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    }
     res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
-    res.setHeader('Access-Control-Allow-Origin', '*');
     return res.status(200).send('WEBVTT\n\n');
   }
 };
@@ -681,14 +693,26 @@ export const proxySubtitle = async (req: Request, res: Response) => {
     const srtText: string = response.data || '';
     const vttContent = srtToVtt(srtText);
 
+    const origin = (req.headers.origin as string) || '';
+    if (origin) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+    } else {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    }
     res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
-    res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Cache-Control', 'public, max-age=86400');
     return res.send(vttContent);
   } catch (error: any) {
     console.error('proxySubtitle error:', error.message);
+    const origin = (req.headers.origin as string) || '';
+    if (origin) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+    } else {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    }
     res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
-    res.setHeader('Access-Control-Allow-Origin', '*');
     return res.send('WEBVTT\n\n');
   }
 };

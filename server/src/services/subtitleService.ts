@@ -195,7 +195,21 @@ class SubtitleService {
     const { title = '', tmdbId, type = 'movie', season = 1, episode = 1, baseUrl } = params;
     let imdbId = params.imdbId;
 
-    // Resolve imdbId if not provided but tmdbId or title is available
+    // Resolve imdbId if not provided but tmdbId is available
+    if (!imdbId && tmdbId) {
+      try {
+        const apiKey = process.env.TMDB_API_KEY || '5dbb265bcf35f217cf70ac66d54fd125';
+        const extRes = await axios.get(
+          `https://api.themoviedb.org/3/${type === 'series' ? 'tv' : 'movie'}/${tmdbId}/external_ids?api_key=${apiKey}`,
+          { timeout: 4000 }
+        );
+        if (extRes.data?.imdb_id) {
+          imdbId = extRes.data.imdb_id;
+        }
+      } catch {}
+    }
+
+    // Fallback: Resolve imdbId via TMDB search by title
     if (!imdbId && title) {
       try {
         const enriched = await tmdbService.fetchMetadata(title);
@@ -223,9 +237,24 @@ class SubtitleService {
       }
     } else {
       // 2. Fetch Movie subtitles from Yify Subtitles
+      let movieSubs: SubtitleOption[] = [];
       if (imdbId) {
-        const movieSubs = await this.fetchMovieYify(imdbId, baseUrl);
-        for (const s of movieSubs) {
+        movieSubs = await this.fetchMovieYify(imdbId, baseUrl);
+      }
+      if (!movieSubs.length && title) {
+        movieSubs = await this.searchMovieYifyByTitle(title, baseUrl);
+      }
+      for (const s of movieSubs) {
+        if (!seenLanguages.has(s.language)) {
+          seenLanguages.add(s.language);
+          subtitles.push(s);
+        }
+      }
+
+      // 3. Complement/fallback with OpenSubtitles REST API
+      if (imdbId) {
+        const osSubs = await this.fetchOpenSubtitlesRest(imdbId, baseUrl);
+        for (const s of osSubs) {
           if (!seenLanguages.has(s.language)) {
             seenLanguages.add(s.language);
             subtitles.push(s);
@@ -234,7 +263,7 @@ class SubtitleService {
       }
     }
 
-    // 3. Fallback to OpenSubtitles.com if user configured API key
+    // 4. Fallback to OpenSubtitles.com if user configured API key
     if (process.env.OPENSUBTITLES_API_KEY && (imdbId || tmdbId)) {
       try {
         const openSubs = await this.fetchOpenSubtitles(imdbId, tmdbId, type, season, episode, baseUrl);
@@ -306,6 +335,69 @@ class SubtitleService {
       return subs;
     } catch (err: any) {
       console.warn('[SubtitleService] Yify subtitle lookup notice:', err.message);
+      return [];
+    }
+  }
+
+  /**
+   * Search Yify Subtitles by movie title via /ajax/search/?mov=
+   */
+  private async searchMovieYifyByTitle(title: string, baseUrl: string): Promise<SubtitleOption[]> {
+    try {
+      const cleanTitle = title.replace(/[^\w\s-]/g, ' ').replace(/\s+/g, ' ').trim();
+      const res = await axios.get(`https://yifysubtitles.ch/ajax/search/?mov=${encodeURIComponent(cleanTitle)}`, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+        timeout: 6000,
+      });
+
+      const list: Array<{ movie: string; imdb: string }> = Array.isArray(res.data) ? res.data : [];
+      if (list.length > 0 && list[0].imdb) {
+        return this.fetchMovieYify(list[0].imdb, baseUrl);
+      }
+      return [];
+    } catch (err: any) {
+      console.warn('[SubtitleService] Yify title search notice:', err.message);
+      return [];
+    }
+  }
+
+  /**
+   * Fetch Multi-language Subtitles from OpenSubtitles REST API
+   */
+  private async fetchOpenSubtitlesRest(imdbId: string, baseUrl: string): Promise<SubtitleOption[]> {
+    try {
+      const cleanImdb = imdbId.startsWith('tt') ? imdbId.replace('tt', '') : imdbId;
+      const url = `https://rest.opensubtitles.org/search/imdbid-${cleanImdb}`;
+      const res = await axios.get(url, {
+        headers: { 'User-Agent': 'TemporaryUserAgent' },
+        timeout: 7000,
+      });
+
+      const list: any[] = Array.isArray(res.data) ? res.data : [];
+      const subs: SubtitleOption[] = [];
+      const seenLangs = new Set<string>();
+
+      for (const item of list) {
+        if (!item.SubDownloadLink) continue;
+        const rawLang = item.LanguageName || item.SubLanguageID || 'English';
+        const rawLangLower = rawLang.toLowerCase();
+        const iso = (item.ISO639 || LANGUAGE_CODE_MAP[rawLangLower] || item.SubLanguageID || 'en').toLowerCase().slice(0, 2);
+
+        if (seenLangs.has(iso)) continue;
+        seenLangs.add(iso);
+
+        subs.push({
+          id: `os-${item.IDSubtitleFile || item.IDSubtitle}`,
+          label: rawLang,
+          language: iso,
+          src: `${baseUrl}/api/streaming/subtitles/file?source=opensubs_rest&url=${encodeURIComponent(item.SubDownloadLink)}`,
+          default: iso === 'en',
+        });
+      }
+
+      return subs;
+    } catch (err: any) {
+      console.warn('[SubtitleService] OpenSubtitles REST notice:', err.message);
       return [];
     }
   }
@@ -489,6 +581,19 @@ class SubtitleService {
       if (!link) throw new Error('OpenSubtitles download link not received');
       const fileRes = await axios.get(link, { responseType: 'text', timeout: 10000 });
       vttContent = srtToVtt(fileRes.data || '');
+    } else if (source === 'opensubs_rest' && url) {
+      const fileRes = await axios.get(url, {
+        responseType: 'arraybuffer',
+        headers: { 'User-Agent': 'TemporaryUserAgent' },
+        timeout: 12000,
+      });
+      let text = '';
+      try {
+        text = zlib.gunzipSync(Buffer.from(fileRes.data)).toString('utf-8');
+      } catch {
+        text = Buffer.from(fileRes.data).toString('utf-8');
+      }
+      vttContent = srtToVtt(text);
     } else if (url) {
       const fileRes = await axios.get(url, { responseType: 'text', timeout: 10000 });
       vttContent = srtToVtt(fileRes.data || '');
