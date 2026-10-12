@@ -288,6 +288,41 @@ export const fetchAdminCatalogApi = async (params?: {
   return res.data;
 };
 
+// --- Admin User Management APIs ---
+export interface AdminUserItem {
+  id: string;
+  name: string;
+  email: string;
+  role: 'user' | 'admin';
+  isPremium: boolean;
+  createdAt: string;
+}
+
+export interface AdminUsersResponse {
+  users: AdminUserItem[];
+  totalUsers: number;
+  totalPremium: number;
+  totalNormal: number;
+}
+
+export const fetchAdminUsersApi = async (params?: { search?: string; filter?: string }) => {
+  const res = await api.get<AdminUsersResponse>('/admin/users', { params });
+  return res.data;
+};
+
+export const toggleAdminUserPremiumApi = async ({
+  userId,
+  isPremium,
+}: {
+  userId: string;
+  isPremium?: boolean;
+}) => {
+  const res = await api.put<{ message: string; user: AdminUserItem }>(`/admin/users/${userId}/premium`, {
+    isPremium,
+  });
+  return res.data;
+};
+
 // --- MovieBox Streaming Source APIs ---
 export const fetchStreamingSearch = async (query: string, type: 'movie' | 'series' | 'all' = 'all') => {
   const res = await api.get<{ query: string; results: any[]; count: number }>('/streaming/search', {

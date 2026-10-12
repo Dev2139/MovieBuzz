@@ -816,3 +816,88 @@ export const getAdminCatalog = async (req: Request, res: Response) => {
     return res.status(500).json({ message: 'Error fetching admin catalog' });
   }
 };
+
+/**
+ * GET /api/admin/users
+ * Returns list of registered users with search and premium/normal filtering
+ */
+export const getAdminUsers = async (req: Request, res: Response) => {
+  try {
+    const search = (req.query.search as string || '').trim();
+    const filter = (req.query.filter as string || 'all').toLowerCase();
+
+    const query: any = {};
+    if (search) {
+      query.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } },
+      ];
+    }
+    if (filter === 'premium') {
+      query.isPremium = true;
+    } else if (filter === 'normal') {
+      query.isPremium = { $ne: true };
+    }
+
+    const [users, totalUsers, totalPremium] = await Promise.all([
+      User.find(query)
+        .select('-password')
+        .sort({ createdAt: -1 })
+        .limit(200)
+        .lean(),
+      User.countDocuments(),
+      User.countDocuments({ isPremium: true }),
+    ]);
+
+    return res.json({
+      users: users.map((u: any) => ({
+        id: u._id,
+        name: u.name,
+        email: u.email,
+        role: u.role,
+        isPremium: Boolean(u.isPremium),
+        createdAt: u.createdAt,
+      })),
+      totalUsers,
+      totalPremium,
+      totalNormal: totalUsers - totalPremium,
+    });
+  } catch (error: any) {
+    console.error('getAdminUsers error:', error);
+    return res.status(500).json({ message: 'Failed to fetch users', details: error.message });
+  }
+};
+
+/**
+ * PUT /api/admin/users/:id/premium
+ * Toggle or set a user's isPremium status
+ */
+export const toggleUserPremium = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { isPremium } = req.body;
+
+    const user = await User.findById(id);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    user.isPremium = typeof isPremium === 'boolean' ? isPremium : !user.isPremium;
+    await user.save();
+
+    return res.json({
+      message: `User ${user.name} is now ${user.isPremium ? 'Premium (Ad-Free)' : 'Normal'}`,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        isPremium: Boolean(user.isPremium),
+      },
+    });
+  } catch (error: any) {
+    console.error('toggleUserPremium error:', error);
+    return res.status(500).json({ message: 'Failed to update premium status', details: error.message });
+  }
+};
+

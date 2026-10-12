@@ -14,6 +14,8 @@ import {
   parseTelegramPost,
   publishTelegramImport,
   enrichCatalogMetadata,
+  getAdminUsers,
+  toggleUserPremium,
 } from '../controllers/adminController';
 import {
   getAdminRequests,
@@ -29,6 +31,10 @@ router.use(requireAdmin);
 
 router.get('/stats', getAdminStats);
 router.get('/catalog', getAdminCatalog);
+
+// User Management & Premium Status
+router.get('/users', getAdminUsers);
+router.put('/users/:id/premium', toggleUserPremium);
 
 // Movie & Content CRUD
 router.post('/movies', createMovie);

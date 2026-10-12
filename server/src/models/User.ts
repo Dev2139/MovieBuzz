@@ -5,6 +5,7 @@ export interface IUser extends Document {
   email: string;
   password?: string;
   role: 'user' | 'admin';
+  isPremium?: boolean;
   favorites: mongoose.Types.ObjectId[];
   watchlist: mongoose.Types.ObjectId[];
   createdAt: Date;
@@ -17,6 +18,7 @@ const UserSchema: Schema = new Schema(
     email: { type: String, required: true, unique: true, lowercase: true, trim: true },
     password: { type: String, required: true },
     role: { type: String, enum: ['user', 'admin'], default: 'user' },
+    isPremium: { type: Boolean, default: false },
     favorites: [{ type: Schema.Types.ObjectId, ref: 'Content' }],
     watchlist: [{ type: Schema.Types.ObjectId, ref: 'Content' }],
   },

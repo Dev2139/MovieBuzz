@@ -50,6 +50,7 @@ export const register = async (req: Request, res: Response) => {
         name: user.name,
         email: user.email,
         role: user.role,
+        isPremium: Boolean(user.isPremium),
       },
     });
   } catch (error) {
@@ -92,6 +93,7 @@ export const login = async (req: Request, res: Response) => {
         name: user.name,
         email: user.email,
         role: user.role,
+        isPremium: Boolean(user.isPremium),
       },
     });
   } catch (error) {
@@ -115,6 +117,7 @@ export const getMe = async (req: AuthRequest, res: Response) => {
       name: req.user.name,
       email: req.user.email,
       role: req.user.role,
+      isPremium: Boolean(req.user.isPremium),
       favorites: req.user.favorites,
       watchlist: req.user.watchlist,
     },

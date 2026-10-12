@@ -11,6 +11,8 @@ import {
   fetchAdminRequestsApi,
   updateAdminRequestApi,
   deleteAdminRequestApi,
+  fetchAdminUsersApi,
+  toggleAdminUserPremiumApi,
 } from '../services/api';
 import {
   Film,
@@ -34,11 +36,13 @@ import {
   ChevronLeft,
   ChevronRight,
   Check,
+  Crown,
+  UserX,
 } from 'lucide-react';
 
 export const AdminDashboardPage: React.FC = () => {
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState<'overview' | 'manage' | 'requests' | 'add-movie' | 'add-series'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'manage' | 'requests' | 'users' | 'add-movie' | 'add-series'>('overview');
 
   // Stats query
   const { data: stats } = useQuery({
@@ -90,6 +94,27 @@ export const AdminDashboardPage: React.FC = () => {
     mutationFn: deleteAdminRequestApi,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin-requests'] });
+      queryClient.invalidateQueries({ queryKey: ['admin-stats'] });
+    },
+  });
+
+  // User Management states & queries
+  const [userSearch, setUserSearch] = useState('');
+  const [userFilter, setUserFilter] = useState<'all' | 'premium' | 'normal'>('all');
+
+  const { data: usersData, isLoading: isUsersLoading } = useQuery({
+    queryKey: ['admin-users', userSearch, userFilter],
+    queryFn: () =>
+      fetchAdminUsersApi({
+        search: userSearch,
+        filter: userFilter,
+      }),
+  });
+
+  const toggleUserPremiumMutation = useMutation({
+    mutationFn: toggleAdminUserPremiumApi,
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['admin-users'] });
       queryClient.invalidateQueries({ queryKey: ['admin-stats'] });
     },
   });
@@ -289,6 +314,7 @@ export const AdminDashboardPage: React.FC = () => {
       <div className="flex flex-wrap gap-2 border-b border-dark-border pb-3">
         {[
           { id: 'overview', label: 'Dashboard Overview' },
+          { id: 'users', label: `Users & Premium (${usersData?.totalUsers ?? stats?.totalUsers ?? 0})` },
           { id: 'requests', label: `User Requests (${stats?.pendingRequests || 0})` },
           { id: 'manage', label: `Manage Catalog (${catalog?.total || 0})` },
           { id: 'add-movie', label: 'Add New Movie' },
@@ -773,6 +799,196 @@ export const AdminDashboardPage: React.FC = () => {
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Users Management Tab */}
+      {activeTab === 'users' && (
+        <div className="bg-dark-card border border-dark-border rounded-2xl p-6 space-y-6 animate-fade-in">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-dark-border pb-4">
+            <div>
+              <div className="flex items-center space-x-2">
+                <Users className="w-5 h-5 text-amber-400" />
+                <h3 className="text-xl font-bold text-white">Registered Users & Membership Plans</h3>
+              </div>
+              <p className="text-xs text-gray-400 mt-1">
+                Manage user access, view registered accounts, and toggle between Normal and Premium (Ad-Free) membership
+              </p>
+            </div>
+
+            {/* Quick Metrics */}
+            <div className="flex items-center gap-3">
+              <div className="px-3 py-1.5 rounded-xl bg-dark-base border border-dark-border text-center">
+                <span className="text-[10px] text-gray-400 font-semibold block uppercase">Total Users</span>
+                <span className="text-sm font-black text-white">{usersData?.totalUsers ?? stats?.totalUsers ?? 0}</span>
+              </div>
+              <div className="px-3 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-center">
+                <span className="text-[10px] text-amber-400 font-semibold block uppercase">Premium (Ad-Free)</span>
+                <span className="text-sm font-black text-amber-400">{usersData?.totalPremium ?? 0}</span>
+              </div>
+              <div className="px-3 py-1.5 rounded-xl bg-dark-base border border-dark-border text-center">
+                <span className="text-[10px] text-gray-400 font-semibold block uppercase">Normal</span>
+                <span className="text-sm font-black text-gray-300">{usersData?.totalNormal ?? 0}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Search & Filters */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="relative flex-1 max-w-md">
+              <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="Search users by name or email..."
+                value={userSearch}
+                onChange={(e) => setUserSearch(e.target.value)}
+                className="w-full pl-9 pr-3 py-2 bg-dark-base border border-dark-border rounded-xl text-xs text-white placeholder-gray-500 focus:outline-none focus:border-brand-500"
+              />
+              {userSearch && (
+                <button
+                  onClick={() => setUserSearch('')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+
+            <div className="flex items-center space-x-1.5 bg-dark-base border border-dark-border p-1 rounded-xl">
+              {[
+                { id: 'all', label: 'All Users' },
+                { id: 'premium', label: 'Premium Only' },
+                { id: 'normal', label: 'Normal Only' },
+              ].map((f) => (
+                <button
+                  key={f.id}
+                  onClick={() => setUserFilter(f.id as any)}
+                  className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
+                    userFilter === f.id
+                      ? 'bg-brand-500 text-white shadow'
+                      : 'text-gray-400 hover:text-white'
+                  }`}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Users Table / List */}
+          {isUsersLoading ? (
+            <div className="p-8 text-center text-gray-400 text-xs">Loading users list...</div>
+          ) : !usersData?.users || usersData.users.length === 0 ? (
+            <div className="p-8 text-center bg-dark-base border border-dark-border rounded-xl text-gray-400 text-xs">
+              No users found matching your filters.
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-xl border border-dark-border">
+              <table className="w-full text-left text-xs text-gray-300">
+                <thead className="bg-dark-base border-b border-dark-border text-gray-400 uppercase text-[10px] tracking-wider">
+                  <tr>
+                    <th className="py-3 px-4">User</th>
+                    <th className="py-3 px-4">Role</th>
+                    <th className="py-3 px-4">Membership Plan</th>
+                    <th className="py-3 px-4">Joined</th>
+                    <th className="py-3 px-4 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-dark-border">
+                  {usersData.users.map((u) => {
+                    const isUserPremium = u.isPremium;
+                    const isUserAdmin = u.role === 'admin';
+                    const isPending =
+                      toggleUserPremiumMutation.isPending &&
+                      (toggleUserPremiumMutation.variables as any)?.userId === u.id;
+
+                    return (
+                      <tr key={u.id} className="hover:bg-dark-hover transition-colors">
+                        <td className="py-3 px-4">
+                          <div className="flex items-center space-x-3">
+                            <div
+                              className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs uppercase ${
+                                isUserPremium
+                                  ? 'bg-gradient-to-tr from-amber-500 to-yellow-300 text-black shadow-md'
+                                  : 'bg-dark-border text-white'
+                              }`}
+                            >
+                              {u.name.slice(0, 2)}
+                            </div>
+                            <div>
+                              <div className="font-bold text-white flex items-center gap-1.5">
+                                <span>{u.name}</span>
+                                {isUserPremium && (
+                                  <Crown className="w-3.5 h-3.5 text-amber-400 fill-amber-400 shrink-0" />
+                                )}
+                              </div>
+                              <span className="text-[11px] text-gray-400">{u.email}</span>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="py-3 px-4">
+                          <span
+                            className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                              isUserAdmin
+                                ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
+                                : 'bg-white/10 text-gray-400'
+                            }`}
+                          >
+                            {u.role}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4">
+                          {isUserPremium ? (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm">
+                              <Crown className="w-3 h-3 text-amber-400 fill-amber-400" />
+                              <span>PREMIUM (Ad-Free)</span>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-white/5 text-gray-400 border border-white/10">
+                              <span>NORMAL (Standard)</span>
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-3 px-4 text-gray-400 text-[11px]">
+                          {new Date(u.createdAt).toLocaleDateString(undefined, { dateStyle: 'medium' })}
+                        </td>
+                        <td className="py-3 px-4 text-right">
+                          <button
+                            type="button"
+                            disabled={isPending}
+                            onClick={() =>
+                              toggleUserPremiumMutation.mutate({
+                                userId: u.id,
+                                isPremium: !isUserPremium,
+                              })
+                            }
+                            className={`px-3 py-1.5 rounded-xl font-bold text-xs transition-all shadow inline-flex items-center space-x-1.5 ${
+                              isUserPremium
+                                ? 'bg-zinc-800 hover:bg-zinc-700 text-gray-300 border border-white/10 hover:border-rose-500/50 hover:text-rose-300'
+                                : 'bg-gradient-to-r from-amber-500 to-yellow-400 hover:from-amber-400 hover:to-yellow-300 text-black shadow-amber-500/20 hover:scale-105 active:scale-95'
+                            } ${isPending ? 'opacity-50 pointer-events-none' : ''}`}
+                            title={isUserPremium ? 'Revoke premium status' : 'Promote to premium (ad-free) status'}
+                          >
+                            {isUserPremium ? (
+                              <>
+                                <UserX className="w-3.5 h-3.5" />
+                                <span>Revert to Normal</span>
+                              </>
+                            ) : (
+                              <>
+                                <Crown className="w-3.5 h-3.5 fill-black" />
+                                <span>Make Premium</span>
+                              </>
+                            )}
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           )}
         </div>
