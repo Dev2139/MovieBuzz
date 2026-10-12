@@ -73,7 +73,7 @@ function formatStreamingSources(sources: any[], baseUrl: string) {
     }
 
     const rawRes = parseInt(String(s.resolution).replace(/\D/g, '') || '720', 10);
-    const baseLabel = rawRes >= 2160 ? '4K (2160p)' : rawRes >= 1080 ? '1080p' : rawRes >= 720 ? '720p' : `${rawRes}p`;
+    const baseLabel = rawRes >= 2160 ? '4K (2160p)' : rawRes >= 1080 ? '1080p' : rawRes >= 720 ? '720p' : '420p';
 
     const count = (seenQualities.get(baseLabel) || 0) + 1;
     seenQualities.set(baseLabel, count);

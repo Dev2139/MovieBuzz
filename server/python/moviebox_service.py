@@ -366,11 +366,12 @@ class MovieBoxHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 logger.warning("Error fetching resource list for %s: %s", subject_id, e)
 
-            # Sort sources: highest resolution first, non-retran first, highest bitrate and size first
+            # Sort sources: highest resolution first, hardware-accelerated direct MP4 first, non-retran first, highest bitrate and size first
             def source_sort_key(s):
                 res = int(s.get("resolution") or 0)
                 title = str(s.get("title") or "").lower()
                 manifest = str(s.get("dashManifestUrl") or "")
+                is_mp4 = 1 if (s.get("format") == "MP4" or s.get("codecName") == "h264") else 0
                 
                 bitrate = 0
                 m_match = re.search(r'_h265_(\d+)', manifest)
@@ -379,7 +380,7 @@ class MovieBoxHandler(BaseHTTPRequestHandler):
                 
                 is_retran = 1 if "retran" in title else 0
                 size = int(s.get("size") or 0)
-                return (res, -is_retran, bitrate, size)
+                return (res, is_mp4, -is_retran, bitrate, size)
 
             sources.sort(key=source_sort_key, reverse=True)
             return 200, {

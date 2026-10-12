@@ -54,11 +54,12 @@ interface VideoPlayerProps {
 }
 
 export const QUALITY_TIERS = [
-  { label: 'Auto (Adaptive)', value: 'auto', badge: 'Auto', height: 0 },
-  { label: '420p (Standard)', value: '420p', badge: 'Standard', height: 420 },
-  { label: '720p (HD)', value: '720p', badge: 'HD', height: 720 },
-  { label: '1080p (Full HD)', value: '1080p', badge: 'Full HD', height: 1080 },
-  { label: '2160p / 4K (Ultra HD)', value: '4k', badge: 'Ultra HD', height: 2160 },
+  { label: 'Auto (Adaptive)', value: 'auto', badge: 'Auto', height: 0, description: 'Best adaptive print for your speed' },
+  { label: '420p (Standard)', value: '420p', badge: 'Fastest', height: 420, description: 'Zero buffering & instant rendering' },
+  { label: '720p (HD)', value: '720p', badge: 'HD', height: 720, description: 'Crisp High Definition print' },
+  { label: '1080p (Full HD)', value: '1080p', badge: 'Full HD', height: 1080, description: 'Crystal clear 1080p theatrical print' },
+  { label: '2160p (Ultra HD)', value: '2160p', badge: 'Ultra HD', height: 2160, description: '2160p Master Quality' },
+  { label: '4K (Cinema 4K)', value: '4k', badge: '4K Cinema', height: 2160, description: 'Master 4K Cinema Print' },
 ];
 
 export interface AudioTrackOption {
@@ -874,28 +875,31 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       playbackPositionRef.current = currentPos;
       shouldAutoResumeAfterQualitySwitchRef.current = wasPlaying;
 
+      const lower = targetQuality.toLowerCase();
+
       // 1. If a specific media item is provided or exists in mediaList
       let targetSource: Media | undefined = specificMedia;
-      if (!targetSource && mediaList && mediaList.length > 0) {
-        const lower = targetQuality.toLowerCase();
+      if (!targetSource && mediaList && mediaList.length > 0 && lower !== 'auto') {
         targetSource = mediaList.find((m) => {
-          if (m.quality.toLowerCase() === lower) return true;
           const q = (m.quality || '').toLowerCase();
-          if (lower === '4k' || lower === '2160p') return q.includes('4k') || q.includes('2160');
-          if (lower === '1080p') return q.includes('1080');
-          if (lower === '720p') return q.includes('720');
-          if (lower === '420p' || lower === '480p') return q.includes('420') || q.includes('480') || q.includes('360');
-          return false;
+          const r = (m.resolution || '').toLowerCase();
+          if (lower === '4k') return q.includes('4k') || q.includes('2160') || r.includes('2160');
+          if (lower === '2160p') return q.includes('2160') || q.includes('4k') || r.includes('2160');
+          if (lower === '1080p') return q.includes('1080') || r.includes('1080');
+          if (lower === '720p') return q.includes('720') || r.includes('720');
+          if (lower === '420p') return q.includes('420') || q.includes('480') || q.includes('360') || r.includes('420') || r.includes('480') || r.includes('360');
+          return q === lower;
         });
       }
 
       if (targetSource) {
-        setSelectedQuality(targetSource.quality);
+        setSelectedQuality(targetQuality);
         const resolved = resolveMediaUrl(targetSource.streamUrl);
         if (resolved && resolved !== streamUrl) {
           setIsBuffering(true);
           setStreamUrl(resolved);
-          showToast(`Switched print to ${targetSource.quality} • ${targetSource.fileSize || targetSource.resolution}`);
+          const tier = QUALITY_TIERS.find((t) => t.value === lower);
+          showToast(`Switched quality to ${tier?.label || targetQuality.toUpperCase()}`);
           return;
         }
       } else {
@@ -905,9 +909,14 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       // 2. Dash.js ABR / Representation switching
       if (dashRef.current) {
         try {
-          if (targetQuality === 'auto') {
+          if (lower === 'auto') {
             dashRef.current.updateSettings({
-              streaming: { abr: { autoSwitchBitrate: { video: true } } },
+              streaming: {
+                abr: {
+                  autoSwitchBitrate: { video: true },
+                  maxBitrate: { video: -1 },
+                },
+              },
             });
             setActiveRenderedResolution('');
             showToast('Quality set to Auto (Adaptive Clear Print)');
@@ -924,15 +933,13 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 chosenIdx = dashIndex;
               } else {
                 const targetHeight =
-                  targetQuality === '4k' || targetQuality === '2160p'
+                  lower === '4k' || lower === '2160p'
                     ? 2160
-                    : targetQuality === '1080p'
+                    : lower === '1080p'
                     ? 1080
-                    : targetQuality === '720p'
+                    : lower === '720p'
                     ? 720
-                    : targetQuality === '420p' || targetQuality === '480p'
-                    ? 420
-                    : 360;
+                    : 420;
                 let closestDiff = Infinity;
                 bitrates.forEach((info: any, idx: number) => {
                   const diff = Math.abs((info.height || 0) - targetHeight);
@@ -945,9 +952,22 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               player.setQualityFor?.('video', chosenIdx, true);
               const activeRep = bitrates[chosenIdx];
               const h = activeRep?.height || 0;
-              const resLabel = h >= 2160 ? '4K Ultra HD' : h >= 1080 ? '1080p Full HD' : h >= 720 ? '720p HD' : `${h}p`;
+              const resLabel =
+                lower === '4k'
+                  ? '4K Cinema'
+                  : h >= 2160
+                  ? '2160p Ultra HD'
+                  : h >= 1080
+                  ? '1080p Full HD'
+                  : h >= 720
+                  ? '720p HD'
+                  : '420p Standard';
               setActiveRenderedResolution(resLabel);
-              showToast(`Quality set to ${resLabel} (${activeRep?.bitrate ? `${(activeRep.bitrate / 1000000).toFixed(1)} Mbps` : 'Clear Print'})`);
+              showToast(
+                `Quality switched to ${resLabel} (${
+                  activeRep?.bitrate ? `${(activeRep.bitrate / 1000000).toFixed(1)} Mbps` : 'Clear Print'
+                })`
+              );
               return;
             }
           }
@@ -959,23 +979,21 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       // 3. Hls.js Level switching
       if (hlsRef.current) {
         try {
-          if (targetQuality === 'auto') {
+          if (lower === 'auto') {
             hlsRef.current.currentLevel = -1;
-            showToast('Quality set to Auto (Adaptive)');
+            showToast('Quality set to Auto (Adaptive Clear Print)');
             return;
           } else {
             const levels = hlsRef.current.levels;
             if (levels && levels.length > 0) {
               const targetHeight =
-                targetQuality === '4k' || targetQuality === '2160p'
+                lower === '4k' || lower === '2160p'
                   ? 2160
-                  : targetQuality === '1080p'
+                  : lower === '1080p'
                   ? 1080
-                  : targetQuality === '720p'
+                  : lower === '720p'
                   ? 720
-                  : targetQuality === '420p' || targetQuality === '480p'
-                  ? 420
-                  : 360;
+                  : 420;
               let closestIdx = 0;
               let closestDiff = Infinity;
               levels.forEach((lvl: any, idx: number) => {
@@ -987,7 +1005,19 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               });
               hlsRef.current.currentLevel = closestIdx;
               const lvl = levels[closestIdx];
-              showToast(`Quality set to ${lvl.height || targetQuality}p HD`);
+              const h = lvl?.height || 0;
+              const resLabel =
+                lower === '4k'
+                  ? '4K Cinema'
+                  : h >= 2160
+                  ? '2160p Ultra HD'
+                  : h >= 1080
+                  ? '1080p Full HD'
+                  : h >= 720
+                  ? '720p HD'
+                  : '420p Standard';
+              setActiveRenderedResolution(resLabel);
+              showToast(`Quality switched to ${resLabel}`);
               return;
             }
           }
@@ -996,7 +1026,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         }
       }
 
-      const tier = QUALITY_TIERS.find((t) => t.value === targetQuality);
+      const tier = QUALITY_TIERS.find((t) => t.value === lower);
       showToast(`Quality set to ${tier?.label || targetQuality}`);
     },
     [mediaList, streamUrl, currentTime, isPlaying, showToast]
@@ -1777,7 +1807,12 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         try {
           const cleanup = await attachHevcSupport(player, {
             forceTranscode: true,
-            adaptiveCompute: true,
+            adaptiveCompute: {
+              targetSpeedX: 1.15,
+              lowerAfter: 1,
+              raiseAfter: 6,
+              measureWindow: 2,
+            },
             workerUrl: '/transcode-worker.js',
             wasmUrl: '/hevc-decode.js',
             wasmBinaryUrl: '/hevc-decode.wasm',
@@ -1802,10 +1837,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         player.updateSettings({
           streaming: {
             buffer: {
-              initialBufferLevel: 0.8,
-              bufferTimeDefault: 12,
-              bufferTimeAtTopQuality: 20,
-              bufferToKeep: 30,
+              initialBufferLevel: 0.3,
+              bufferTimeDefault: 4,
+              bufferTimeAtTopQuality: 8,
+              bufferToKeep: 15,
               fastSwitchEnabled: true,
             },
             abr: {
@@ -1813,11 +1848,14 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 video: true,
                 audio: true,
               },
+              initialBitrate: {
+                video: 1200,
+              },
             },
             retryIntervals: {
-              MPD: 500,
-              InitializationSegment: 500,
-              MediaSegment: 1000,
+              MPD: 400,
+              InitializationSegment: 400,
+              MediaSegment: 800,
             },
             retryAttempts: {
               MPD: 4,
@@ -2613,7 +2651,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                   </div>
                   <div className="flex items-center space-x-1 text-white/60 text-[11px]">
                     <span>
-                      {QUALITY_TIERS.find((t) => t.value === selectedQuality)?.label || selectedQuality}
+                      {QUALITY_TIERS.find((t) => t.value === selectedQuality.toLowerCase())?.label ||
+                        (activeRenderedResolution ? `${activeRenderedResolution} HD` : selectedQuality)}
                     </span>
                     <ChevronRight className="w-3.5 h-3.5" />
                   </div>
@@ -2692,183 +2731,122 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                   className="w-full flex items-center space-x-2 px-3 py-2 border-b border-white/10 text-white/80 hover:text-white transition-colors text-left font-semibold"
                 >
                   <ChevronLeft className="w-4 h-4" />
-                  <span>Quality & Print Selection</span>
+                  <span>Quality & Resolution</span>
                 </button>
-                <div className="py-1 max-h-72 overflow-y-auto space-y-2 pr-1">
-                  {/* Real MediaList Available Prints if multiple prints exist */}
-                  {mediaList && mediaList.length > 1 && (
-                    <div>
-                      <div className="px-3 py-1 text-[11px] font-semibold text-white/50 uppercase tracking-wider flex items-center justify-between">
-                        <span>Available Movie Prints</span>
-                        <span className="text-brand-400 text-[10px] font-medium">{mediaList.length} Options</span>
-                      </div>
-                      <div className="space-y-0.5 mt-0.5">
-                        {[...mediaList]
-                          .sort((a, b) => {
-                            const parseRes = (q: string) => {
-                              const match = q.match(/\d+/);
-                              return match ? parseInt(match[0], 10) : 0;
-                            };
-                            return parseRes(a.quality || a.resolution) - parseRes(b.quality || b.resolution);
-                          })
-                          .map((m) => {
-                          const isSelected =
-                            selectedQuality.toLowerCase() === m.quality.toLowerCase() ||
-                            streamUrl === resolveMediaUrl(m.streamUrl);
-                          const isUltra = m.quality.toLowerCase().includes('4k') || m.quality.toLowerCase().includes('2160');
-                          const isFullHd = m.quality.toLowerCase().includes('1080');
-                          const isHd = m.quality.toLowerCase().includes('720');
+                <div className="py-1 max-h-80 overflow-y-auto space-y-1 pr-1 scrollbar-none">
+                  {/* Primary Quality Hierarchy: Auto, 420p, 720p, 1080p, 2160p, 4k */}
+                  <div className="px-3 py-1 text-[11px] font-semibold text-white/50 uppercase tracking-wider flex items-center justify-between">
+                    <span>Resolution & Print</span>
+                    <span className="text-brand-400 text-[10px] font-medium">Fast Rendering</span>
+                  </div>
 
-                          return (
-                            <button
-                              key={m._id || m.quality}
-                              onClick={() => {
-                                handleQualityChange(m.quality, m);
-                                setShowSettings(false);
-                                setSettingsTab('main');
-                              }}
-                              className={`w-full flex items-center justify-between px-3 py-2 rounded-lg transition-colors text-left ${
-                                isSelected ? 'bg-white/10 text-white font-medium' : 'hover:bg-white/5 text-white/80'
-                              }`}
-                            >
-                              <div className="flex flex-col min-w-0 pr-2">
-                                <div className="flex items-center space-x-1.5">
-                                  <span className="truncate">{m.quality}</span>
-                                  <span
-                                    className={`text-[9px] px-1 py-0.2 rounded font-semibold shrink-0 ${
-                                      isUltra
-                                        ? 'bg-amber-500/25 text-amber-300 border border-amber-500/40'
-                                        : isFullHd
-                                        ? 'bg-blue-500/25 text-blue-300 border border-blue-500/40'
-                                        : isHd
-                                        ? 'bg-emerald-500/25 text-emerald-300 border border-emerald-500/40'
-                                        : 'bg-white/10 text-white/70'
-                                    }`}
-                                  >
-                                    {isUltra ? 'Ultra HD' : isFullHd ? 'Full HD' : isHd ? 'HD' : 'Standard'}
-                                  </span>
-                                </div>
-                                {(m.fileSize || m.codecName) && (
-                                  <span className="text-[10px] text-white/50 truncate">
-                                    {m.fileSize ? `Size: ${m.fileSize}` : ''}
-                                    {m.fileSize && m.codecName ? ' • ' : ''}
-                                    {m.codecName ? `Codec: ${m.codecName.toUpperCase()}` : ''}
-                                  </span>
-                                )}
-                              </div>
-                              {isSelected && <Check className="w-3.5 h-3.5 text-[#FF0000] shrink-0" />}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
+                  <div className="space-y-0.5">
+                    {QUALITY_TIERS.map((tier) => {
+                      const currentLower = selectedQuality.toLowerCase();
+                      const renderLower = (activeRenderedResolution || '').toLowerCase();
+                      const isSelected =
+                        tier.value === 'auto'
+                          ? currentLower === 'auto'
+                          : tier.value === '4k'
+                          ? currentLower === '4k' || (currentLower.includes('4k') && !currentLower.includes('2160')) || renderLower.includes('4k')
+                          : tier.value === '2160p'
+                          ? currentLower === '2160p' || (currentLower.includes('2160') && currentLower !== '4k') || renderLower.includes('2160')
+                          : tier.value === '1080p'
+                          ? currentLower === '1080p' || currentLower.includes('1080') || renderLower.includes('1080')
+                          : tier.value === '720p'
+                          ? currentLower === '720p' || currentLower.includes('720') || renderLower.includes('720')
+                          : tier.value === '420p'
+                          ? currentLower === '420p' ||
+                            currentLower.includes('420') ||
+                            currentLower.includes('480') ||
+                            currentLower.includes('360') ||
+                            renderLower.includes('420') ||
+                            renderLower.includes('480') ||
+                            renderLower.includes('360')
+                          : currentLower === tier.value.toLowerCase();
 
-                  {/* Adaptive DASH Streams / Representations */}
-                  {dashQualities && dashQualities.length > 0 && (
-                    <div className={mediaList && mediaList.length > 1 ? 'pt-1 border-t border-white/10' : ''}>
-                      <div className="px-3 py-1 text-[11px] font-semibold text-white/50 uppercase tracking-wider flex items-center justify-between">
-                        <span>Adaptive Video Resolution</span>
-                        <span className="text-white/40 text-[10px]">CineStream</span>
-                      </div>
-                      <div className="space-y-0.5 mt-0.5">
-                        {/* Auto option */}
+                      const isUltra = tier.height >= 2160 || tier.value === '4k' || tier.value === '2160p';
+                      const isFullHd = tier.height === 1080 || tier.value === '1080p';
+                      const isHd = tier.height === 720 || tier.value === '720p';
+                      const isFast = tier.value === '420p';
+                      const isAuto = tier.value === 'auto';
+
+                      return (
                         <button
+                          key={tier.value}
                           onClick={() => {
-                            handleQualityChange('auto');
+                            handleQualityChange(tier.value);
                             setShowSettings(false);
                             setSettingsTab('main');
                           }}
                           className={`w-full flex items-center justify-between px-3 py-2 rounded-lg transition-colors text-left ${
-                            selectedQuality === 'auto' ? 'bg-white/10 text-white font-medium' : 'hover:bg-white/5 text-white/80'
+                            isSelected
+                              ? 'bg-white/15 text-white font-medium ring-1 ring-white/20'
+                              : 'hover:bg-white/5 text-white/80'
                           }`}
                         >
-                          <div className="flex items-center space-x-2">
-                            <span>Auto (Adaptive)</span>
-                            <span className="text-[10px] px-1.5 py-0.5 rounded font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
-                              Best Print
-                            </span>
-                          </div>
-                          {selectedQuality === 'auto' && <Check className="w-3.5 h-3.5 text-[#FF0000]" />}
-                        </button>
-
-                        {[...dashQualities]
-                          .sort((a, b) => a.height - b.height)
-                          .map((dq) => {
-                          const isSelected =
-                            selectedQuality.toLowerCase() === dq.value.toLowerCase() ||
-                            selectedQuality.toLowerCase().includes(String(dq.height));
-                          return (
-                            <button
-                              key={`dash-${dq.index}-${dq.height}`}
-                              onClick={() => {
-                                handleQualityChange(dq.value, undefined, dq.index);
-                                setShowSettings(false);
-                                setSettingsTab('main');
-                              }}
-                              className={`w-full flex items-center justify-between px-3 py-2 rounded-lg transition-colors text-left ${
-                                isSelected ? 'bg-white/10 text-white font-medium' : 'hover:bg-white/5 text-white/80'
-                              }`}
-                            >
-                              <div className="flex items-center space-x-2">
-                                <span>{dq.label}</span>
-                                <span className="text-[10px] px-1.5 py-0.5 rounded font-semibold bg-white/10 text-white/70">
-                                  {dq.badge}
-                                </span>
-                              </div>
-                              {isSelected && <Check className="w-3.5 h-3.5 text-[#FF0000]" />}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Standard Quality Tiers Fallback */}
-                  {(!mediaList || mediaList.length <= 1) && (!dashQualities || dashQualities.length === 0) && (
-                    <div className="space-y-0.5">
-                      {QUALITY_TIERS.map((tier) => {
-                        const isSelected =
-                          selectedQuality.toLowerCase() === tier.value.toLowerCase() ||
-                          (tier.value === '1080p' && selectedQuality.toLowerCase().includes('1080')) ||
-                          (tier.value === '4k' &&
-                            (selectedQuality.toLowerCase().includes('4k') || selectedQuality.toLowerCase().includes('2160'))) ||
-                          (tier.value === '720p' && selectedQuality.toLowerCase().includes('720')) ||
-                          (tier.value === '420p' &&
-                            (selectedQuality.toLowerCase().includes('420') ||
-                              selectedQuality.toLowerCase().includes('480') ||
-                              selectedQuality.toLowerCase().includes('360')));
-
-                        return (
-                          <button
-                            key={tier.value}
-                            onClick={() => {
-                              handleQualityChange(tier.value);
-                              setShowSettings(false);
-                              setSettingsTab('main');
-                            }}
-                            className={`w-full flex items-center justify-between px-3 py-2 rounded-lg transition-colors text-left ${
-                              isSelected ? 'bg-white/10 text-white font-medium' : 'hover:bg-white/5 text-white/80'
-                            }`}
-                          >
-                            <div className="flex items-center space-x-2">
-                              <span>{tier.label}</span>
+                          <div className="flex flex-col min-w-0 pr-2">
+                            <div className="flex items-center space-x-1.5">
+                              <span className="font-semibold text-xs sm:text-[13px]">{tier.label}</span>
                               <span
-                                className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${
-                                  tier.value === '4k'
+                                className={`text-[9px] px-1.5 py-0.2 rounded font-bold shrink-0 ${
+                                  isUltra
                                     ? 'bg-amber-500/25 text-amber-300 border border-amber-500/40'
-                                    : tier.value === '1080p'
+                                    : isFullHd
                                     ? 'bg-blue-500/25 text-blue-300 border border-blue-500/40'
-                                    : 'bg-white/10 text-white/70'
+                                    : isHd
+                                    ? 'bg-emerald-500/25 text-emerald-300 border border-emerald-500/40'
+                                    : isFast
+                                    ? 'bg-purple-500/25 text-purple-300 border border-purple-500/40'
+                                    : 'bg-green-500/25 text-green-300 border border-green-500/40'
                                 }`}
                               >
                                 {tier.badge}
                               </span>
                             </div>
-                            {isSelected && <Check className="w-3.5 h-3.5 text-[#FF0000]" />}
-                          </button>
-                        );
-                      })}
+                            <span className="text-[10px] text-white/50 truncate">
+                              {tier.description}
+                            </span>
+                          </div>
+                          {isSelected && <Check className="w-4 h-4 text-[#FF0000] shrink-0" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Specific Provider Sources if multiple prints exist */}
+                  {mediaList && mediaList.length > 1 && (
+                    <div className="pt-2 mt-2 border-t border-white/10">
+                      <div className="px-3 py-1 text-[11px] font-semibold text-white/50 uppercase tracking-wider flex items-center justify-between">
+                        <span>Alternate Provider Streams</span>
+                        <span className="text-white/40 text-[10px]">{mediaList.length} Streams</span>
+                      </div>
+                      <div className="space-y-0.5 mt-0.5">
+                        {mediaList.map((m, idx) => {
+                          const isSourceSelected = streamUrl === resolveMediaUrl(m.streamUrl);
+                          return (
+                            <button
+                              key={m._id || `src-${idx}`}
+                              onClick={() => {
+                                handleQualityChange(m.quality, m);
+                                setShowSettings(false);
+                                setSettingsTab('main');
+                              }}
+                              className={`w-full flex items-center justify-between px-3 py-1.5 rounded-lg transition-colors text-left ${
+                                isSourceSelected ? 'bg-white/10 text-white font-medium' : 'hover:bg-white/5 text-white/70'
+                              }`}
+                            >
+                              <div className="flex flex-col min-w-0 pr-2">
+                                <span className="truncate text-xs">{m.quality} • {m.format || 'Stream'}</span>
+                                {m.fileSize && (
+                                  <span className="text-[10px] text-white/40">{m.fileSize}</span>
+                                )}
+                              </div>
+                              {isSourceSelected && <Check className="w-3.5 h-3.5 text-[#FF0000] shrink-0" />}
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
                   )}
                 </div>
