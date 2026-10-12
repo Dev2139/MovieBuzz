@@ -16,3 +16,15 @@
 .scrollbar-none::-webkit-scrollbar {
   display: none;
 }
+
+/* Cinema-Grade Video Subtitle Styling */
+video::cue {
+  background-color: rgba(0, 0, 0, 0.82);
+  color: #ffffff;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  font-size: 1.15rem;
+  line-height: 1.4;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.95);
+  border-radius: 6px;
+  padding: 3px 8px;
+}

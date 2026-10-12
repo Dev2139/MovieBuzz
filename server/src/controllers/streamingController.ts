@@ -4,6 +4,7 @@ import https from 'https';
 import axios from 'axios';
 import { movieboxService } from '../services/movieboxService';
 import { tmdbService, cleanMovieTitle } from '../services/tmdb/tmdbService';
+import { subtitleService, srtToVtt } from '../services/subtitleService';
 
 // Persistent HTTP/HTTPS connection pooling to prevent TLS handshake overhead on every DASH segment
 const httpAgent = new http.Agent({ keepAlive: true, maxSockets: 50 });
@@ -384,14 +385,29 @@ export const resolveStreamingSources = async (req: Request, res: Response) => {
 
     const formattedSources = formatStreamingSources(resolved.sources, baseUrl);
 
+    // Concurrently fetch subtitles for resolved content
+    let subtitles: any[] = [];
+    try {
+      subtitles = await subtitleService.getSubtitles({
+        title,
+        type,
+        season,
+        episode,
+        baseUrl,
+      });
+    } catch (subErr: any) {
+      console.warn('resolveStreamingSources subtitles notice:', subErr.message);
+    }
+
     return res.json({
       subject: resolved.subject,
       sources: formattedSources,
       dubs: resolved.dubs || [],
+      subtitles,
     });
   } catch (error: any) {
     console.warn('resolveStreamingSources notice:', error.message);
-    return res.json({ subject: null, sources: [], dubs: [] });
+    return res.json({ subject: null, sources: [], dubs: [], subtitles: [] });
   }
 };
 
@@ -583,32 +599,96 @@ export const proxyVideoStream = async (req: Request, res: Response) => {
 };
 
 /**
+ * GET /api/streaming/subtitles
+ * Resolves available subtitle tracks for a movie or TV show episode
+ */
+export const getSubtitles = async (req: Request, res: Response) => {
+  try {
+    const title = (req.query.title as string) || '';
+    const imdbId = (req.query.imdbId as string) || undefined;
+    const tmdbId = req.query.tmdbId ? parseInt(req.query.tmdbId as string, 10) : undefined;
+    const type = (req.query.type as string) === 'series' ? 'series' : 'movie';
+    const season = req.query.season ? parseInt(req.query.season as string, 10) : 1;
+    const episode = req.query.episode ? parseInt(req.query.episode as string, 10) : 1;
+
+    const host = req.get('host') || 'localhost:5000';
+    const protocol = (req.headers['x-forwarded-proto'] as string) || req.protocol || 'http';
+    const baseUrl = `${protocol}://${host}`;
+
+    const subtitles = await subtitleService.getSubtitles({
+      title,
+      imdbId,
+      tmdbId,
+      type,
+      season,
+      episode,
+      baseUrl,
+    });
+
+    return res.json({ subtitles });
+  } catch (error: any) {
+    console.error('getSubtitles error:', error.message);
+    return res.json({ subtitles: [] });
+  }
+};
+
+/**
+ * GET /api/streaming/subtitles/file
+ * Serves subtitle file in WebVTT (.vtt) format with CORS and caching headers
+ */
+export const getSubtitleFile = async (req: Request, res: Response) => {
+  try {
+    const { source, id, page, fileId, url } = req.query;
+    const vttContent = await subtitleService.getSubtitleFile({
+      source: source as string,
+      id: id as string,
+      page: page as string,
+      fileId: fileId as string,
+      url: url as string,
+    });
+
+    res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    return res.status(200).send(vttContent);
+  } catch (error: any) {
+    console.error('getSubtitleFile error:', error.message);
+    res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    return res.status(200).send('WEBVTT\n\n');
+  }
+};
+
+/**
  * GET /api/streaming/subtitle?url=...
  * Proxies subtitle file and converts SubRip (.srt) to WebVTT (.vtt) on the fly for standard HTML5 <track>.
  */
 export const proxySubtitle = async (req: Request, res: Response) => {
   const targetUrl = req.query.url as string;
-  if (!targetUrl || !isAllowedUrl(targetUrl)) {
-    return res.status(400).json({ error: 'Invalid or disallowed subtitle URL.' });
+  if (!targetUrl) {
+    return res.status(400).json({ error: 'Missing subtitle URL.' });
   }
 
   try {
     const response = await axios.get(targetUrl, {
       responseType: 'text',
       timeout: 10000,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+      },
     });
 
     const srtText: string = response.data || '';
-    // SRT to WebVTT conversion (replace commas in timestamps with dots and prepend WEBVTT)
-    const vttContent = srtText.startsWith('WEBVTT')
-      ? srtText
-      : `WEBVTT\n\n${srtText.replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, '$1.$2')}`;
+    const vttContent = srtToVtt(srtText);
 
     res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
     res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
     return res.send(vttContent);
   } catch (error: any) {
     console.error('proxySubtitle error:', error.message);
-    return res.status(502).json({ error: 'Failed to fetch subtitle.' });
+    res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    return res.send('WEBVTT\n\n');
   }
 };

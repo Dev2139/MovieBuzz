@@ -9,6 +9,8 @@ import {
   proxyVideoStream,
   proxyDashStream,
   proxySubtitle,
+  getSubtitles,
+  getSubtitleFile,
 } from '../controllers/streamingController';
 
 const router = Router();
@@ -25,5 +27,7 @@ router.get('/resolve', resolveStreamingSources);
 router.get('/dash/:token/*', proxyDashStream);
 router.get('/proxy', proxyVideoStream);
 router.get('/subtitle', proxySubtitle);
+router.get('/subtitles', getSubtitles);
+router.get('/subtitles/file', getSubtitleFile);
 
 export default router;
