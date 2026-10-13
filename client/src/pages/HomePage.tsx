@@ -164,41 +164,63 @@ export const HomePage: React.FC = () => {
     staleTime: 30 * 1000,
   });
 
-  // Multi-item recommended & featured catalog for auto-scrolling Hero Carousel
-  const heroItems = React.useMemo(() => {
-    // 1. Prioritize user's personalized recommendations
-    if (recommendationsData?.topPicks && recommendationsData.topPicks.length > 0) {
-      return recommendationsData.topPicks.slice(0, 7);
+  // Check if user has existing watch history or explicit interest signals
+  const hasWatchHistory = Boolean(
+    (user && authContinueItems.length > 0) ||
+    (!user && localContinueItems.length > 0) ||
+    (recommendationsData && !recommendationsData.isColdStart)
+  );
+
+  // Multi-item Hero Carousel:
+  // - First-time users without history: features trending new movies & series
+  // - Returning viewers with history: features tailored personalized recommendations
+  const { heroItems, heroBadgeText } = React.useMemo(() => {
+    // If user has active viewing history and personalized recommendations are ready
+    if (hasWatchHistory && recommendationsData?.topPicks && recommendationsData.topPicks.length > 0) {
+      return {
+        heroItems: recommendationsData.topPicks.slice(0, 8),
+        heroBadgeText: 'Recommended For You',
+      };
     }
-    // 2. Featured items
-    if (featuredData?.items && featuredData.items.length > 0) {
-      return featuredData.items.slice(0, 7);
-    }
-    // 3. Fallback combination of trending & top rated
-    const candidates = [
-      ...(trendingMoviesData?.items || []),
-      ...(trendingSeriesData?.items || []),
-      ...(allContentData?.items || []),
-    ];
+
+    // For first-time users without history: interleave trending new movies and series
+    const trendingMovies = trendingMoviesData?.items || [];
+    const trendingSeries = trendingSeriesData?.items || [];
+    const latestItems = allContentData?.items || [];
+
+    const trendingNewMixed: any[] = [];
     const seen = new Set<string>();
-    const uniqueList: any[] = [];
-    for (const itm of candidates) {
-      if (itm && !seen.has(itm._id)) {
-        seen.add(itm._id);
-        uniqueList.push(itm);
+
+    const maxLen = Math.max(trendingMovies.length, trendingSeries.length, latestItems.length);
+    for (let i = 0; i < maxLen; i++) {
+      if (trendingMovies[i] && !seen.has(trendingMovies[i]._id)) {
+        seen.add(trendingMovies[i]._id);
+        trendingNewMixed.push(trendingMovies[i]);
       }
-      if (uniqueList.length >= 7) break;
+      if (trendingSeries[i] && !seen.has(trendingSeries[i]._id)) {
+        seen.add(trendingSeries[i]._id);
+        trendingNewMixed.push(trendingSeries[i]);
+      }
+      if (latestItems[i] && !seen.has(latestItems[i]._id)) {
+        seen.add(latestItems[i]._id);
+        trendingNewMixed.push(latestItems[i]);
+      }
+      if (trendingNewMixed.length >= 8) break;
     }
-    return uniqueList;
-  }, [recommendationsData, featuredData, trendingMoviesData, trendingSeriesData, allContentData]);
+
+    return {
+      heroItems: trendingNewMixed,
+      heroBadgeText: '🔥 Trending Movies & Series',
+    };
+  }, [hasWatchHistory, recommendationsData, trendingMoviesData, trendingSeriesData, allContentData]);
 
   const isLoading = isFeaturedLoading && isAllLoading && isRecsLoading;
 
   return (
     <div className="min-h-screen bg-dark-base text-white pb-24 md:pb-16 space-y-6 sm:space-y-8">
-      {/* Hero Banner Section (Auto-scrolling recommended carousel) */}
+      {/* Hero Banner Section (Auto-scrolling carousel: trending new titles for first-timers, recommendations for viewers with history) */}
       {heroItems.length > 0 ? (
-        <HeroBanner items={heroItems} autoPlayInterval={5500} />
+        <HeroBanner items={heroItems} badgeText={heroBadgeText} autoPlayInterval={5500} />
       ) : isLoading ? (
         <div className="h-[52vh] sm:h-[65vh] w-full bg-dark-surface/80 animate-pulse flex flex-col items-center justify-center space-y-3">
           <Sparkles className="w-10 h-10 text-brand-500/50 animate-spin" />

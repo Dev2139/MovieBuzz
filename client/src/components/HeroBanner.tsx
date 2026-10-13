@@ -1,18 +1,20 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Content } from '../types';
-import { Play, Info, Star, Calendar, Sparkles, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Play, Info, Star, Calendar, Sparkles, ChevronLeft, ChevronRight, Flame } from 'lucide-react';
 
 interface HeroBannerProps {
   items?: Content[];
   item?: Content;
   autoPlayInterval?: number; // In milliseconds (default: 6000)
+  badgeText?: string;
 }
 
 export const HeroBanner: React.FC<HeroBannerProps> = ({
   items: rawItems,
   item: singleItem,
   autoPlayInterval = 6000,
+  badgeText,
 }) => {
   const navigate = useNavigate();
 
@@ -145,8 +147,12 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({
           {/* Badges */}
           <div className="flex flex-wrap items-center gap-2">
             <span className="inline-flex items-center space-x-1.5 bg-gradient-to-r from-brand-600 to-red-600 text-white text-[10px] sm:text-xs font-black uppercase tracking-wider px-3 py-1 rounded-full shadow-lg shadow-brand-500/30">
-              <Sparkles className="w-3.5 h-3.5 animate-pulse" />
-              <span>Recommended For You</span>
+              {badgeText?.toLowerCase().includes('trending') ? (
+                <Flame className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
+              ) : (
+                <Sparkles className="w-3.5 h-3.5 animate-pulse" />
+              )}
+              <span>{badgeText || 'Recommended For You'}</span>
             </span>
 
             {currentItem.rating > 0 && (
