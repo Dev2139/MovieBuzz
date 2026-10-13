@@ -5,6 +5,7 @@ import {
   proxyTelegramFileStream,
   transcodeTelegramFileStream,
   downloadTelegramFile,
+  downloadStreamAsMp4,
 } from '../controllers/mediaController';
 
 const router = Router();
@@ -14,5 +15,6 @@ router.get('/media/:mediaId/download', getMediaDownloadLink);
 router.get('/media/proxy-file/:fileId', proxyTelegramFileStream);
 router.get('/media/transcode-stream/:fileId', transcodeTelegramFileStream);
 router.get('/media/download-file/:fileId', downloadTelegramFile);
+router.get('/media/download-stream', downloadStreamAsMp4);
 
 export default router;

@@ -14,7 +14,7 @@ import {
 import { VideoPlayer } from '../components/VideoPlayer';
 import { ChevronLeft, ChevronRight, List, Film, Tv, Play, Sparkles, Layers } from 'lucide-react';
 import { getLocalPlaybackItem } from '../utils/localStorage';
-import { resolveMediaUrl } from '../utils/url';
+import { resolveMediaUrl, getDownloadUrl } from '../utils/url';
 import { useAuth } from '../context/AuthContext';
 
 export const WatchPage: React.FC = () => {
@@ -469,13 +469,12 @@ export const WatchPage: React.FC = () => {
                         </div>
 
                         <a
-                          href={resolveMediaUrl(m.downloadUrl || m.streamUrl)}
+                          href={getDownloadUrl(m, contentTitle)}
                           target="_blank"
                           rel="noreferrer"
-                          download
                           className="px-2.5 py-1 bg-emerald-500/20 hover:bg-emerald-500 border border-emerald-500/40 text-emerald-300 hover:text-white rounded-md text-[11px] font-semibold transition-all"
                         >
-                          Download
+                          Download MP4
                         </a>
                       </div>
                     ))}

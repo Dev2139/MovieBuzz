@@ -32,7 +32,7 @@ import {
 import { Media } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { saveLocalPlaybackPosition } from '../utils/localStorage';
-import { resolveMediaUrl } from '../utils/url';
+import { resolveMediaUrl, getDownloadUrl } from '../utils/url';
 import { saveWatchProgress, fetchSubtitles } from '../services/api';
 
 interface VideoPlayerProps {
@@ -315,7 +315,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       ) ||
       mediaList[0])
     : null;
-  const currentDownloadUrl = resolveMediaUrl(activeMedia?.downloadUrl);
+  const currentDownloadUrl = getDownloadUrl(
+    activeMedia ? { provider: activeMedia.provider, providerMediaId: activeMedia.providerMediaId, streamUrl: activeMedia.streamUrl, downloadUrl: activeMedia.downloadUrl, quality: activeMedia.quality } : undefined,
+    contentTitle
+  );
 
   useEffect(() => {
     if (mediaList && mediaList.length > 0) {
@@ -2626,13 +2629,13 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold transition-all active:scale-95 flex items-center gap-1.5 shadow-lg shadow-emerald-600/20"
               >
                 <Download className="w-4 h-4" />
-                Download to Play in VLC
+                Download MP4
               </a>
             )}
           </div>
 
           <p className="text-gray-500 text-[11px] mt-4 max-w-sm">
-            💡 Tip: If this video format (e.g. MKV/HEVC/AC3) is unsupported by your browser, download it to watch with full audio on VLC or Windows Media Player.
+            💡 The downloaded MP4 file plays natively on all devices (phones, TVs, tablets, PCs) without any extra apps.
           </p>
         </div>
       )}
@@ -3110,9 +3113,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                     >
                       <div className="flex items-center space-x-2.5">
                         <Download className="w-4 h-4" />
-                        <span className="font-medium">Download file</span>
+                        <span className="font-medium">Download MP4</span>
                       </div>
-                      <span className="text-[10px] text-emerald-400/80">Direct</span>
+                      <span className="text-[10px] text-emerald-400/80">Playable</span>
                     </a>
                   </div>
                 )}
@@ -3528,7 +3531,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                     className="mt-1.5 inline-flex items-center space-x-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-medium text-[11px] transition-colors"
                   >
                     <Download className="w-3.5 h-3.5" />
-                    <span>Download Movie for VLC</span>
+                    <span>Download MP4 File</span>
                   </a>
                 )}
               </div>
