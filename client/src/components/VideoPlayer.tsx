@@ -2109,8 +2109,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         progressive: true,
         // Prefer native-format segments so the browser MSE pipeline stays warm
         preferManagedMediaSource: false,
-        // On mobile, limit concurrent fragment downloads to avoid memory spikes
-        maxMaxBufferLength: streamingProfile.hlsMaxMaxBufferLength,
       });
 
       hls.loadSource(effectiveUrl);

@@ -6,6 +6,7 @@ import {
   fetchSeriesEpisodeByNumber,
   fetchUserHistory,
   fetchContentList,
+  fetchSimilarContent,
   resolveStreamingSourcesByTitle,
   fetchSeriesMovieBoxSeasonsEpisodes,
   fetchSubtitles,
@@ -55,10 +56,18 @@ export const WatchPage: React.FC = () => {
     staleTime: 60 * 1000,
   });
 
-  // Related Movies & Catalog Query
+  // Related Movies & Catalog Query (powered by Recommendation Engine)
+  const activeLookupSlug = slug || seriesSlug;
   const { data: relatedData } = useQuery({
-    queryKey: ['related-catalog', slug, seriesSlug],
-    queryFn: () => fetchContentList({ limit: 10 }),
+    queryKey: ['related-catalog', activeLookupSlug],
+    queryFn: async () => {
+      if (activeLookupSlug) {
+        const sim = await fetchSimilarContent(activeLookupSlug, 10).catch(() => []);
+        if (sim && sim.length > 0) return sim;
+      }
+      const fallback = await fetchContentList({ limit: 10 }).catch(() => ({ items: [] }));
+      return fallback?.items || [];
+    },
     refetchOnWindowFocus: false,
     staleTime: 5 * 60 * 1000,
   });
@@ -609,52 +618,57 @@ export const WatchPage: React.FC = () => {
             </Link>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
-            {relatedData?.items && relatedData.items.length > 0 ? (
-              relatedData.items.map((item: any) => {
-                const targetPath = item.type === 'movie' ? `/watch/movie/${item.slug}` : `/watch/series/${item.slug}/1/1`;
-                return (
-                  <div
-                    key={item._id}
-                    onClick={() => navigate(targetPath)}
-                    className="group bg-dark-card border border-dark-border/80 hover:border-gray-500 rounded-xl overflow-hidden cursor-pointer shadow-lg transition-all hover:scale-[1.03] active:scale-95"
-                  >
-                    <div className="aspect-[2/3] w-full overflow-hidden bg-dark-surface relative">
-                      <img
-                        src={item.posterUrl}
-                        alt={item.title}
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                        onError={(e) => {
-                          (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1542751371-adc38448a05e?w=800';
-                        }}
-                      />
-                      <div className="absolute inset-0 bg-black/40 group-hover:bg-black/20 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                        <div className="w-9 h-9 bg-brand-500 rounded-full flex items-center justify-center text-white shadow-xl">
-                          <Play className="w-4 h-4 fill-white ml-0.5" />
+          {(() => {
+            const list: any[] = Array.isArray(relatedData) ? relatedData : ((relatedData as any)?.items || []);
+            return (
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
+                {list.length > 0 ? (
+                  list.map((item: any) => {
+                    const targetPath = item.type === 'movie' ? `/watch/movie/${item.slug}` : `/watch/series/${item.slug}/1/1`;
+                    return (
+                      <div
+                        key={item._id}
+                        onClick={() => navigate(targetPath)}
+                        className="group bg-dark-card border border-dark-border/80 hover:border-gray-500 rounded-xl overflow-hidden cursor-pointer shadow-lg transition-all hover:scale-[1.03] active:scale-95"
+                      >
+                        <div className="aspect-[2/3] w-full overflow-hidden bg-dark-surface relative">
+                          <img
+                            src={item.posterUrl}
+                            alt={item.title}
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1542751371-adc38448a05e?w=800';
+                            }}
+                          />
+                          <div className="absolute inset-0 bg-black/40 group-hover:bg-black/20 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                            <div className="w-9 h-9 bg-brand-500 rounded-full flex items-center justify-center text-white shadow-xl">
+                              <Play className="w-4 h-4 fill-white ml-0.5" />
+                            </div>
+                          </div>
+                          <div className="absolute top-2 right-2 px-1.5 py-0.5 bg-black/75 backdrop-blur-md text-amber-400 rounded text-[10px] font-bold">
+                            ★ {item.rating && item.rating > 0 ? item.rating.toFixed(1) : 'NR'}
+                          </div>
+                        </div>
+                        <div className="p-2.5">
+                          <h4 className="font-bold text-white text-xs truncate group-hover:text-brand-400 transition-colors">
+                            {item.title}
+                          </h4>
+                          <div className="flex items-center justify-between text-[10px] text-gray-400 mt-1">
+                            <span>{item.releaseYear}</span>
+                            <span className="uppercase font-semibold text-brand-400">{item.type}</span>
+                          </div>
                         </div>
                       </div>
-                      <div className="absolute top-2 right-2 px-1.5 py-0.5 bg-black/75 backdrop-blur-md text-amber-400 rounded text-[10px] font-bold">
-                        ★ {item.rating && item.rating > 0 ? item.rating.toFixed(1) : 'NR'}
-                      </div>
-                    </div>
-                    <div className="p-2.5">
-                      <h4 className="font-bold text-white text-xs truncate group-hover:text-brand-400 transition-colors">
-                        {item.title}
-                      </h4>
-                      <div className="flex items-center justify-between text-[10px] text-gray-400 mt-1">
-                        <span>{item.releaseYear}</span>
-                        <span className="uppercase font-semibold text-brand-400">{item.type}</span>
-                      </div>
-                    </div>
+                    );
+                  })
+                ) : (
+                  <div className="col-span-full py-8 text-center text-gray-400 text-xs">
+                    Loading recommended movies...
                   </div>
-                );
-              })
-            ) : (
-              <div className="col-span-full py-8 text-center text-gray-400 text-xs">
-                Loading recommended movies...
+                )}
               </div>
-            )}
-          </div>
+            );
+          })()}
         </div>
       </div>
     </div>

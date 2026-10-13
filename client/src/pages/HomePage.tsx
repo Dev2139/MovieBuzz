@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { fetchContentList, fetchContinueWatching, fetchGenres, deleteHistoryItemApi } from '../services/api';
+import { fetchContentList, fetchContinueWatching, fetchGenres, deleteHistoryItemApi, fetchRecommendations } from '../services/api';
 import { HeroBanner } from '../components/HeroBanner';
 import { HorizontalCarousel } from '../components/HorizontalCarousel';
 import { ContinueWatchingCarousel, ContinueWatchingItem } from '../components/ContinueWatchingCarousel';
+import { RecommendationSection } from '../components/RecommendationSection';
 import { SkeletonCard, SkeletonGrid } from '../components/SkeletonCard';
 import { useAuth } from '../context/AuthContext';
-import { getLocalPlaybackHistory, removeLocalPlaybackItem } from '../utils/localStorage';
+import { getLocalPlaybackHistory, removeLocalPlaybackItem, getLocalInterests, getLocalFavorites, getLocalWatchlist } from '../utils/localStorage';
 import { LocalPlaybackState } from '../types';
 import { Play, TrendingUp, Flame, Tv, Sparkles, Clock, Compass } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -133,6 +134,36 @@ export const HomePage: React.FC = () => {
     queryFn: fetchGenres,
   });
 
+  // Personalized Recommendations Query (combining auth profile or anonymous signals)
+  const localInterests = getLocalInterests();
+  const localWatchlist = getLocalWatchlist();
+  const localFavorites = getLocalFavorites();
+
+  const {
+    data: recommendationsData,
+    isLoading: isRecsLoading,
+    refetch: refetchRecs,
+  } = useQuery({
+    queryKey: [
+      'personalized-recommendations',
+      user?.id,
+      user?.preferredGenres?.join(',') || '',
+      localContinue.length,
+      localFavorites.length,
+      localWatchlist.length,
+      localInterests.join(','),
+    ],
+    queryFn: () =>
+      fetchRecommendations({
+        genres: user?.preferredGenres && user.preferredGenres.length > 0 ? user.preferredGenres : localInterests,
+        historyIds: user ? undefined : localContinue.map((c) => c.contentId),
+        favoriteIds: user ? undefined : localFavorites,
+        watchlistIds: user ? undefined : localWatchlist,
+        limit: 15,
+      }),
+    staleTime: 30 * 1000,
+  });
+
   // Pick best available item for Hero Banner
   const heroItem =
     (featuredData?.items && featuredData.items.length > 0 ? featuredData.items[0] : null) ||
@@ -182,6 +213,14 @@ export const HomePage: React.FC = () => {
           />
         )
       )}
+
+      {/* Personalized Recommendations Section */}
+      <RecommendationSection
+        data={recommendationsData}
+        isLoading={isRecsLoading}
+        onRefresh={refetchRecs}
+        availableGenres={genresData?.genres}
+      />
 
       {/* Main Carousels */}
       {isAllLoading ? (

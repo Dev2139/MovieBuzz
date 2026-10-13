@@ -9,7 +9,9 @@ import {
   fetchMediaDownloadLink,
   toggleWatchlistApi,
   toggleFavoriteApi,
+  fetchSimilarContent,
 } from '../services/api';
+import { HorizontalCarousel } from '../components/HorizontalCarousel';
 import { Play, Download, Star, Calendar, Globe, Users, Film, Plus, Check, Heart, X, Sparkles, Layers } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
@@ -42,6 +44,14 @@ export const ContentDetailPage: React.FC = () => {
     queryFn: () => fetchSeriesMovieBoxSeasonsEpisodes(content!.title, content?.releaseYear),
     enabled: !!content && content.type === 'series',
     staleTime: 15 * 60 * 1000,
+  });
+
+  // Fetch Similar Content recommendations based on genres & actors
+  const { data: similarItems = [] } = useQuery({
+    queryKey: ['similar-content', slug],
+    queryFn: () => fetchSimilarContent(slug!, 12),
+    enabled: !!slug,
+    staleTime: 5 * 60 * 1000,
   });
 
   // Build unified, complete season-wise episode list from MovieBox
@@ -425,6 +435,18 @@ export const ContentDetailPage: React.FC = () => {
                 </div>
               )}
             </div>
+          </div>
+        )}
+
+        {/* More Like This Recommended Content */}
+        {similarItems && similarItems.length > 0 && (
+          <div className="pt-6 border-t border-dark-border/80">
+            <HorizontalCarousel
+              title="More Like This"
+              subtitle={`Recommended titles with similar themes, genres, and cast`}
+              items={similarItems}
+              icon={<Sparkles className="w-5 h-5 text-brand-500" />}
+            />
           </div>
         )}
       </div>

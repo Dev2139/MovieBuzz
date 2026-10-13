@@ -77,6 +77,39 @@ export interface User {
   isPremium?: boolean;
   favorites?: string[];
   watchlist?: string[];
+  preferredGenres?: string[];
+}
+
+export interface RecommendationFeed {
+  topPicks: Content[];
+  becauseYouWatched?: {
+    basedOn: {
+      id: string;
+      title: string;
+      slug: string;
+      posterUrl: string;
+      backdropUrl: string;
+      type: string;
+    };
+    items: Content[];
+  };
+  genrePicks?: {
+    genre: string;
+    items: Content[];
+  };
+  inspiredByFavorites?: Content[];
+  userInterests: { genre: string; score: number }[];
+  isColdStart: boolean;
+}
+
+export interface UserTasteProfile {
+  totalWatchHours: number;
+  completedTitles: number;
+  moviesWatched: number;
+  seriesEpisodesWatched: number;
+  topGenres: { genre: string; count: number }[];
+  preferredGenres: string[];
+  favoritesCount: number;
 }
 
 export interface WatchHistoryItem {
