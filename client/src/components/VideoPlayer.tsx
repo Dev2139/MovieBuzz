@@ -148,45 +148,6 @@ function parseVtt(vttString: string): Array<{ start: number; end: number; text: 
   return cues;
 }
 
-// Helper function to check if browser/device supports hardware HEVC natively without WASM software penalty
-function checkNativeHevcSupport(): boolean {
-  if (typeof window === 'undefined') return false;
-  // Apple devices (Safari, iOS WebKit) natively decode HEVC via hardware VideoToolbox
-  if (/Macintosh|iPhone|iPad|iPod/.test(navigator.userAgent) && !/Chrome|Chromium|Edg/.test(navigator.userAgent)) {
-    return true;
-  }
-  // Check MediaSource MSE support for common HEVC/H.265 codec identifiers (Chromium 107+, Android hardware decode)
-  if (typeof window.MediaSource !== 'undefined' && typeof window.MediaSource.isTypeSupported === 'function') {
-    const hevcCodecs = [
-      'video/mp4; codecs="hev1.1.6.L93.B0"',
-      'video/mp4; codecs="hvc1.1.6.L93.B0"',
-      'video/mp4; codecs="hev1.1.6.L120.90"',
-      'video/mp4; codecs="hvc1.1.6.L120.90"',
-      'video/mp4; codecs="hevc,mp4a.40.2"',
-      'video/mp4; codecs="hevc"',
-      'video/mp4; codecs="hvc1"',
-      'video/mp4; codecs="hev1"',
-    ];
-    if (hevcCodecs.some((codec) => window.MediaSource.isTypeSupported(codec))) {
-      return true;
-    }
-  }
-  // Check HTMLMediaElement canPlayType
-  if (typeof document !== 'undefined') {
-    const v = document.createElement('video');
-    if (v.canPlayType) {
-      if (
-        v.canPlayType('video/mp4; codecs="hvc1.1.6.L93.B0"') === 'probably' ||
-        v.canPlayType('video/mp4; codecs="hev1.1.6.L93.B0"') === 'probably' ||
-        v.canPlayType('video/mp4; codecs="hevc"') === 'probably'
-      ) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
 export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   mediaList,
   contentId,
@@ -233,44 +194,44 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     return isMobileUA || lowMemory || !!slowConn;
   }, []);
 
-  // Streaming profile derived from device class - tuned for instant 0.3s startup and continuous aggressive buffering
+  // Streaming profile derived from device class - tuned for fast reliable startup and continuous aggressive chunk buffering
   const streamingProfile = React.useMemo(() => {
     if (isMobileDevice) {
       return {
         // HLS
-        hlsMaxBufferLength: 300,             // 5 minutes buffer horizon ahead while playing
-        hlsMaxMaxBufferLength: 600,         // 10 minutes max limit
-        hlsMaxBufferSize: 160 * 1000 * 1000,// 160 MB buffer RAM
-        hlsBackBufferLength: 45,            // trim 45s behind playhead to protect mobile MSE memory quota
-        hlsStartLevel: -1,                  // ABR picks optimal quality
+        hlsMaxBufferLength: 180,             // 3 minutes buffer horizon ahead while playing
+        hlsMaxMaxBufferLength: 360,          // 6 minutes max limit
+        hlsMaxBufferSize: 120 * 1000 * 1000, // 120 MB buffer RAM
+        hlsBackBufferLength: 45,             // trim 45s behind playhead to protect mobile MSE memory quota
+        hlsStartLevel: -1,                   // ABR picks optimal quality
         hlsMaxFragLookUpTolerance: 0.25,
         hlsLowLatencyMode: false,
         // DASH
-        dashInitialBufferLevel: 0.3,        // Start playback in ~300ms! (was 1.2s!) Ultra-low startup threshold
-        dashBufferTimeDefault: 300,         // Maintain 5 minutes of chunks in advance while playing
-        dashBufferTimeAtTopQuality: 450,
-        dashBufferTimeAtTopQualityLongForm: 600,
-        dashInitialBitrate: 800,            // Start snappy at 800 kbps for instant first segment download on cellular
-        dashBufferToKeep: 45,               // Safe mobile memory management
+        dashInitialBufferLevel: 1.0,         // Clean 1.0s startup threshold — allows HEVC segment to transcode smoothly
+        dashBufferTimeDefault: 120,          // Maintain 2 minutes of chunks in advance while playing
+        dashBufferTimeAtTopQuality: 180,
+        dashBufferTimeAtTopQualityLongForm: 240,
+        dashInitialBitrate: 800,             // Start snappy at 800 kbps for fast segment download on cellular
+        dashBufferToKeep: 45,                // Safe mobile memory management
         dashBufferPruningInterval: 30,
       };
     }
-    // Desktop / high-memory profile — ultra-fast aggressive buffering
+    // Desktop / high-memory profile — fast aggressive buffering
     return {
-      hlsMaxBufferLength: 1200,            // 20 minutes buffer horizon while playing (was 240s)
-      hlsMaxMaxBufferLength: 2400,         // 40 minutes max
-      hlsMaxBufferSize: 600 * 1000 * 1000, // 600 MB buffer RAM
-      hlsBackBufferLength: 300,
+      hlsMaxBufferLength: 300,             // 5 minutes buffer horizon while playing
+      hlsMaxMaxBufferLength: 600,          // 10 minutes max
+      hlsMaxBufferSize: 400 * 1000 * 1000, // 400 MB buffer RAM
+      hlsBackBufferLength: 180,
       hlsStartLevel: -1,
       hlsMaxFragLookUpTolerance: 0.2,
       hlsLowLatencyMode: false,
-      dashInitialBufferLevel: 0.4,         // Start playback in ~400ms! (was 1.8s!)
-      dashBufferTimeDefault: 1200,         // Maintain 20 minutes of chunks in advance
-      dashBufferTimeAtTopQuality: 1500,
-      dashBufferTimeAtTopQualityLongForm: 1800,
+      dashInitialBufferLevel: 1.2,         // Fast 1.2s startup threshold
+      dashBufferTimeDefault: 240,          // Maintain 4 minutes of chunks in advance
+      dashBufferTimeAtTopQuality: 300,
+      dashBufferTimeAtTopQualityLongForm: 360,
       dashInitialBitrate: 2000,
-      dashBufferToKeep: 600,
-      dashBufferPruningInterval: 120,
+      dashBufferToKeep: 300,
+      dashBufferPruningInterval: 60,
     };
   }, [isMobileDevice]);
 
@@ -429,10 +390,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const gainNodeRef = useRef<GainNode | null>(null);
   const mediaSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
 
-  // Initialize or resume Web Audio API graph to control device audio output directly (bypassing mobile volume locks)
+  // Initialize or resume Web Audio API graph only when audio boost (> 100%) is explicitly enabled
   const ensureAudioContext = useCallback(() => {
     try {
-      if (!audioContextRef.current && videoRef.current) {
+      if (audioBoost > 1 && !audioContextRef.current && videoRef.current) {
         const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
         if (AudioCtx) {
           const ctx = new AudioCtx();
@@ -2027,10 +1988,13 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
       const initDash = async () => {
         try {
-          const nativeHevc = checkNativeHevcSupport();
+          const isAppleDevice =
+            typeof navigator !== 'undefined' &&
+            /Macintosh|iPhone|iPad|iPod/.test(navigator.userAgent) &&
+            !/Chrome|Chromium|Edg/.test(navigator.userAgent);
 
           const cleanup = await attachHevcSupport(player, {
-            forceTranscode: !nativeHevc,
+            forceTranscode: !isAppleDevice,
             adaptiveCompute: {
               targetSpeedX: 1.15,
               lowerAfter: 1,
@@ -2060,10 +2024,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           streaming: {
             scheduling: {
               scheduleWhilePaused: true,
-              defaultTimeout: 30, // Rapid chunk scheduling cycle (every 30ms) to load segments without hesitation
+              defaultTimeout: 60,
             },
             buffer: {
-              initialBufferLevel: streamingProfile.dashInitialBufferLevel, // 0.3s Instant startup threshold
+              initialBufferLevel: streamingProfile.dashInitialBufferLevel,
               bufferTimeDefault: streamingProfile.dashBufferTimeDefault,
               bufferTimeAtTopQuality: streamingProfile.dashBufferTimeAtTopQuality,
               bufferTimeAtTopQualityLongForm: streamingProfile.dashBufferTimeAtTopQualityLongForm,
@@ -2089,9 +2053,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               },
             },
             retryIntervals: {
-              MPD: 150,
-              InitializationSegment: 150,
-              MediaSegment: 250,
+              MPD: 250,
+              InitializationSegment: 250,
+              MediaSegment: 400,
             },
             retryAttempts: {
               MPD: 8,
@@ -2113,6 +2077,21 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           if (videoRef.current && targetPos > 0) {
             videoRef.current.currentTime = targetPos;
             hasAppliedInitialPosRef.current = true;
+          }
+          if (videoRef.current) {
+            videoRef.current.volume = volume;
+            videoRef.current.muted = isMuted;
+            const playPromise = videoRef.current.play();
+            if (playPromise !== undefined) {
+              playPromise
+                .then(() => {
+                  setIsPlaying(true);
+                  setIsBuffering(false);
+                })
+                .catch(() => {
+                  setIsBuffering(false);
+                });
+            }
           }
           try {
             const bitrates = (player as any).getBitrateInfoListFor?.('video') || (player as any).getBitrateInfoList?.('video');
@@ -2226,34 +2205,23 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         hls.startLoad(startPos);
       });
 
-      // ---- Rapid Background buffer keeper (500ms heartbeat) ----
-      // Keeps HLS and DASH actively loading all possible chunks ahead even while paused,
+      // ---- Rapid Background buffer keeper (1000ms heartbeat) ----
+      // Keeps HLS actively loading chunks ahead while paused,
       // and keeps loading further chunks continuously while playing.
       if (bgBufferIntervalRef.current) clearInterval(bgBufferIntervalRef.current);
       bgBufferIntervalRef.current = setInterval(() => {
         const vid = videoRef.current;
-        const isPaused = !vid || vid.paused || vid.ended;
+        if (!vid) return;
+        const isPaused = vid.paused || vid.ended;
 
-        if (hlsRef.current) {
+        if (hlsRef.current && isPaused) {
           try {
-            if (isPaused) {
-              const mediaDur = vid?.duration || duration || 3600;
-              const targetHorizon = Math.max(3600, mediaDur);
-              hlsRef.current.config.maxBufferLength = targetHorizon;
-              hlsRef.current.config.maxMaxBufferLength = targetHorizon * 2;
-            }
             hlsRef.current.startLoad(-1);
           } catch {}
         }
 
-        if (dashRef.current) {
-          try {
-            (dashRef.current as any).preload?.();
-          } catch {}
-        }
-
         updateBuffered();
-      }, 500);
+      }, 1000);
 
       hls.on(Hls.Events.FRAG_BUFFERED, () => {
         updateBuffered();
@@ -2398,35 +2366,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           setStreamError(null);
           setIsPlaying(true);
           setIsBuffering(false);
-          ensureAudioContext();
-
-          // While playing, maintain deep forward buffer horizon and keep loading chunks continuously
-          if (dashRef.current) {
-            try {
-              dashRef.current.updateSettings({
-                streaming: {
-                  scheduling: {
-                    scheduleWhilePaused: true,
-                    defaultTimeout: 35,
-                  },
-                  buffer: {
-                    bufferTimeDefault: streamingProfile.dashBufferTimeDefault,
-                    bufferTimeAtTopQuality: streamingProfile.dashBufferTimeAtTopQuality,
-                    bufferTimeAtTopQualityLongForm: streamingProfile.dashBufferTimeAtTopQualityLongForm,
-                  },
-                },
-              });
-              (dashRef.current as any).preload?.();
-            } catch {}
-          }
-
-          if (hlsRef.current) {
-            try {
-              hlsRef.current.config.maxBufferLength = streamingProfile.hlsMaxBufferLength;
-              hlsRef.current.config.maxMaxBufferLength = streamingProfile.hlsMaxMaxBufferLength;
-              hlsRef.current.startLoad(-1);
-            } catch {}
-          }
 
           if (videoRef.current) {
             videoRef.current.volume = isMuted ? 0 : volume;
@@ -2441,36 +2380,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         }}
         onPause={() => {
           setIsPlaying(false);
-          // 1. DASH: While paused, expand buffer horizon to entire video duration and load all possible chunks
-          if (dashRef.current) {
-            try {
-              const mediaDur = videoRef.current?.duration || duration || 3600;
-              const targetHorizon = Math.max(3600, mediaDur);
-              dashRef.current.updateSettings({
-                streaming: {
-                  scheduling: {
-                    scheduleWhilePaused: true,
-                    defaultTimeout: 25, // Rapid 25ms scheduler to pump chunks non-stop
-                  },
-                  buffer: {
-                    bufferTimeDefault: targetHorizon,
-                    bufferTimeAtTopQuality: targetHorizon,
-                    bufferTimeAtTopQualityLongForm: targetHorizon,
-                    avoidCurrentTimeRangePruning: true,
-                  },
-                },
-              });
-              (dashRef.current as any).preload?.();
-            } catch {}
-          }
-
-          // 2. HLS: While paused, expand buffer horizon and load all possible chunks of the stream
+          // Keep HLS pumping fragments while paused
           if (hlsRef.current) {
             try {
-              const mediaDur = videoRef.current?.duration || duration || 3600;
-              const targetHorizon = Math.max(3600, mediaDur);
-              hlsRef.current.config.maxBufferLength = targetHorizon;
-              hlsRef.current.config.maxMaxBufferLength = targetHorizon * 2;
               hlsRef.current.startLoad(-1);
             } catch {}
           }
