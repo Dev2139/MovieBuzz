@@ -158,14 +158,23 @@ export default {
         upstreamHeaders.set('Range', range);
       }
 
-      const upstreamRes = await fetch(targetUrl, {
+      const proxyFetchOptions: any = {
         headers: upstreamHeaders,
-      });
+        cf: {
+          cacheEverything: true,
+          cacheTtl: 86400, // Cache MP4 content at edge for 24 hours for instant re-streaming & downloads
+        },
+      };
+
+      const upstreamRes = await fetch(targetUrl, proxyFetchOptions);
 
       const respHeaders = new Headers(upstreamRes.headers);
       respHeaders.set('Access-Control-Allow-Origin', '*');
       respHeaders.set('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+      respHeaders.set('Access-Control-Allow-Headers', '*');
       respHeaders.set('Accept-Ranges', 'bytes');
+      // Signal to the browser/downstream to also cache for 24h
+      respHeaders.set('Cache-Control', 'public, max-age=86400');
 
       return new Response(upstreamRes.body, {
         status: upstreamRes.status,
