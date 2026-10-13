@@ -558,6 +558,7 @@ export const proxyDashStream = async (req: Request, res: Response) => {
     // Keep-alive hint: eliminates TCP re-handshake on mobile for each .m4s segment
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Accel-Buffering', 'no'); // Disable proxy buffering for immediate chunk delivery
 
     if (upstreamRes.headers['content-range']) {
       res.setHeader('Content-Range', String(upstreamRes.headers['content-range']));
@@ -566,6 +567,7 @@ export const proxyDashStream = async (req: Request, res: Response) => {
       res.setHeader('Content-Length', String(upstreamRes.headers['content-length']));
     }
 
+    res.flushHeaders(); // Instantly push headers to browser socket so MSE processes chunks without queuing
     upstreamRes.data.pipe(res);
 
     req.on('close', () => {
@@ -615,6 +617,7 @@ export const proxyVideoStream = async (req: Request, res: Response) => {
     res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=3600');
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Accel-Buffering', 'no');
 
     if (upstreamRes.headers['content-range']) {
       res.setHeader('Content-Range', String(upstreamRes.headers['content-range']));
@@ -623,6 +626,7 @@ export const proxyVideoStream = async (req: Request, res: Response) => {
       res.setHeader('Content-Length', String(upstreamRes.headers['content-length']));
     }
 
+    res.flushHeaders();
     upstreamRes.data.pipe(res);
 
     req.on('close', () => {
