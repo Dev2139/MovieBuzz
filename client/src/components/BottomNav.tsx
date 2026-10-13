@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Home, Search, Bookmark, User as UserIcon } from 'lucide-react';
+import { Home, Search, Bookmark, User as UserIcon, Crown } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 export const BottomNav: React.FC = () => {
@@ -12,11 +12,12 @@ export const BottomNav: React.FC = () => {
     return null;
   }
 
-  // Simplified navigation: single Search tab (replaces Movies + Series) plus Profile
+  // Simplified navigation: single Search tab (replaces Movies + Series) plus Premium & Profile
   const navItems = [
     { name: 'Home', path: '/', icon: Home },
     { name: 'Search', path: '/search', icon: Search },
     { name: 'Watchlist', path: '/watchlist', icon: Bookmark },
+    { name: 'Premium', path: '/premium', icon: Crown },
     { name: user ? 'Profile' : 'Sign in', path: user ? '/profile' : '/profile', icon: UserIcon },
   ];
 
@@ -34,16 +35,20 @@ export const BottomNav: React.FC = () => {
             <Link
               key={item.name}
               to={item.path}
-              className={`flex flex-col items-center justify-center py-1 px-3 rounded-xl transition-all duration-200 ${
+              className={`flex flex-col items-center justify-center py-1 px-2 sm:px-3 rounded-xl transition-all duration-200 ${
                 isActive
-                  ? 'text-brand-500 font-bold scale-105'
-                  : 'text-gray-400 hover:text-gray-200'
+                  ? item.path === '/premium'
+                    ? 'text-yellow-400 font-bold scale-105'
+                    : 'text-brand-500 font-bold scale-105'
+                  : item.path === '/premium'
+                    ? 'text-yellow-500/80 hover:text-yellow-300'
+                    : 'text-gray-400 hover:text-gray-200'
               }`}
             >
               <div className="relative">
                 <Icon className={`w-5 h-5 ${isActive ? 'stroke-[2.5px]' : 'stroke-2'}`} />
                 {isActive && (
-                  <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-1.5 h-1.5 bg-brand-500 rounded-full shadow-sm shadow-brand-500" />
+                  <span className={`absolute -bottom-1 left-1/2 -translate-x-1/2 w-1.5 h-1.5 rounded-full shadow-sm ${item.path === '/premium' ? 'bg-yellow-400 shadow-yellow-400' : 'bg-brand-500 shadow-brand-500'}`} />
                 )}
               </div>
               <span className="text-[10px] tracking-tight mt-1">{item.name}</span>

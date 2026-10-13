@@ -27,6 +27,7 @@ const HistoryPage = lazy(() => import('./pages/HistoryPage').then(m => ({ defaul
 const AdminDashboardPage = lazy(() => import('./pages/AdminDashboardPage').then(m => ({ default: m.AdminDashboardPage })));
 const AdminTelegramPage = lazy(() => import('./pages/AdminTelegramPage').then(m => ({ default: m.AdminTelegramPage })));
 const ProfilePage = lazy(() => import('./pages/ProfilePage').then(m => ({ default: m.ProfilePage })));
+const PremiumPage = lazy(() => import('./pages/PremiumPage').then(m => ({ default: m.PremiumPage })));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -73,6 +74,7 @@ const MainLayout: React.FC = () => {
             <Route path="/watchlist" element={<WatchlistPage />} />
             <Route path="/history" element={<HistoryPage />} />
             <Route path="/profile" element={<ProfilePage />} />
+            <Route path="/premium" element={<PremiumPage />} />
 
             {/* Admin Routes */}
             <Route

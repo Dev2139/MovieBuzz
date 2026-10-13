@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { usePWA } from '../context/PWAContext';
-import { Film, Search, Bookmark, History, Shield, LogOut, User as UserIcon, Menu, X, Sparkles, Smartphone, Download } from 'lucide-react';
+import { Film, Search, Bookmark, History, Shield, LogOut, User as UserIcon, Menu, X, Sparkles, Smartphone, Download, Crown } from 'lucide-react';
 
 export const Navbar: React.FC = () => {
   const { user, logout, openAuthModal } = useAuth();
@@ -37,8 +37,7 @@ export const Navbar: React.FC = () => {
 
   const navLinks = [
     { name: 'Home', path: '/' },
-    { name: 'Movies', path: '/movies' },
-    { name: 'Series', path: '/series' },
+    { name: 'Search', path: '/search' },
     { name: 'Genres', path: '/search?genre=all' },
     { name: 'Watchlist', path: '/watchlist' },
     { name: 'History', path: '/history' },
@@ -81,6 +80,17 @@ export const Navbar: React.FC = () => {
               </Link>
             );
           })}
+          <Link
+            to="/premium"
+            className={`flex items-center space-x-1.5 font-bold px-3 py-1 rounded-full border transition ${
+              location.pathname === '/premium'
+                ? 'bg-gradient-to-r from-yellow-400 to-brand-500 text-black border-transparent shadow-lg shadow-brand-500/30'
+                : 'bg-gradient-to-r from-yellow-400/20 to-brand-500/20 text-yellow-300 border-yellow-400/40 hover:from-yellow-400/30 hover:to-brand-500/30'
+            }`}
+          >
+            <Crown className="w-3.5 h-3.5" />
+            <span>Premium</span>
+          </Link>
           {user?.role === 'admin' && (
             <Link
               to="/admin"
@@ -282,6 +292,14 @@ export const Navbar: React.FC = () => {
                 {link.name}
               </Link>
             ))}
+            <Link
+              to="/premium"
+              onClick={() => setIsMobileMenuOpen(false)}
+              className="col-span-2 flex items-center justify-center gap-2 px-3.5 py-2.5 bg-gradient-to-r from-yellow-400/20 to-brand-500/20 rounded-xl text-xs font-bold text-yellow-300 border border-yellow-400/40 transition-colors"
+            >
+              <Crown className="w-4 h-4" />
+              Premium · Earn CineCoins
+            </Link>
           </div>
 
           {user?.role === 'admin' && (
