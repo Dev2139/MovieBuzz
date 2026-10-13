@@ -1,5 +1,7 @@
-// --- CineStream PWA App Shell Caching ---
-const CACHE_NAME = 'cinestream-pwa-v3';
+// --- CineStream PWA App Shell + API Cache ---
+const CACHE_NAME = 'cinestream-pwa-v4';
+const API_CACHE_NAME = 'cinestream-api-v4';
+
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
@@ -8,6 +10,27 @@ const ASSETS_TO_CACHE = [
   '/icons/icon-192x192.png',
   '/icons/icon-512x512.png',
   '/icons/apple-touch-icon.png',
+];
+
+// API routes we proactively cache for instant mobile loads (stale-while-revalidate)
+// Streaming segments (.mpd, .m4s, .mp4 proxies) are intentionally NOT cached here
+// to avoid exhausting device storage.
+const CACHEABLE_API_PATTERNS = [
+  /\/api\/content\/?(\?|$)/,         // content list
+  /\/api\/content\/[^/]+$/,           // single content detail
+  /\/api\/series\/[^/]+$/,            // series detail
+  /\/api\/content\/list/,
+  /\/api\/search/,
+];
+
+// Streaming proxies should never be cached in SW (they're byte-range streams)
+const STREAMING_PATTERNS = [
+  /\/api\/streaming\/dash\//,
+  /\/api\/streaming\/proxy/,
+  /\/api\/streaming\/proxy-file\//,
+  /\/api\/streaming\/transcode-stream\//,
+  /\.m4s$/,
+  /\.mpd$/,
 ];
 
 // Install Event
@@ -19,13 +42,13 @@ self.addEventListener('install', (event) => {
   );
 });
 
-// Activate Event
+// Activate Event — clean up old caches
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((cacheNames) => {
       return Promise.all(
         cacheNames.map((cache) => {
-          if (cache !== CACHE_NAME) {
+          if (cache !== CACHE_NAME && cache !== API_CACHE_NAME) {
             return caches.delete(cache);
           }
         })
@@ -34,15 +57,49 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Fetch Intercept (Network First for API & Navigation, Stale-While-Revalidate for Static Assets)
+// Fetch Intercept
 self.addEventListener('fetch', (event) => {
-  // Ignore non-GET or non-http(s) requests
   if (event.request.method !== 'GET' || !event.request.url.startsWith('http')) return;
 
   const url = new URL(event.request.url);
 
-  // API Requests: Network only / fallback JSON Response
+  // Never intercept streaming byte-range proxies — let them go direct
+  const isStreamingRequest = STREAMING_PATTERNS.some((p) => p.test(url.pathname));
+  if (isStreamingRequest) return;
+
+  // API Requests: cacheable catalogue endpoints get stale-while-revalidate
   if (url.pathname.startsWith('/api')) {
+    const isCacheable = CACHEABLE_API_PATTERNS.some((p) => p.test(url.pathname + url.search));
+
+    if (isCacheable) {
+      event.respondWith(
+        (async () => {
+          const cache = await caches.open(API_CACHE_NAME);
+          const cached = await cache.match(event.request);
+
+          // Fire network request in background regardless
+          const fetchPromise = fetch(event.request).then(async (networkRes) => {
+            if (networkRes && networkRes.status === 200) {
+              cache.put(event.request, networkRes.clone());
+            }
+            return networkRes;
+          }).catch(() => null);
+
+          // If we have a cached response, return it immediately (stale-while-revalidate)
+          if (cached) return cached;
+
+          // Otherwise wait for network
+          const networkRes = await fetchPromise;
+          return networkRes || new Response(
+            JSON.stringify({ error: 'Offline mode active. Reconnect to browse content.' }),
+            { status: 503, headers: { 'Content-Type': 'application/json' } }
+          );
+        })()
+      );
+      return;
+    }
+
+    // Non-cacheable API (auth, progress, etc.): network-only
     event.respondWith(
       fetch(event.request).catch(() => {
         return new Response(
