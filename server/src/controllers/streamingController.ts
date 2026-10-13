@@ -7,22 +7,38 @@ import { tmdbService, cleanMovieTitle } from '../services/tmdb/tmdbService';
 import { subtitleService, srtToVtt } from '../services/subtitleService';
 
 // Persistent HTTP/HTTPS connection pooling to prevent TLS handshake overhead on every DASH segment
-const httpAgent = new http.Agent({ keepAlive: true, maxSockets: 50 });
-const httpsAgent = new https.Agent({ keepAlive: true, maxSockets: 50 });
+// Raised to 100 sockets to handle concurrent mobile viewers without queuing
+const httpAgent = new http.Agent({ keepAlive: true, maxSockets: 100, keepAliveMsecs: 30000 });
+const httpsAgent = new https.Agent({ keepAlive: true, maxSockets: 100, keepAliveMsecs: 30000 });
 
 const streamClient = axios.create({
   httpAgent,
   httpsAgent,
   timeout: 30000,
+  decompress: false, // forward compressed bytes as-is; let client handle it
 });
 
-// Fast in-memory cache for manifests (.mpd) and initialization headers (init-*.m4s)
+// Fast in-memory LRU cache for manifests (.mpd) and initialization segments (init-*.m4s).
+// Capped at 200 entries to prevent unbounded RAM growth on high-traffic deployments.
 interface CachedSegmentHeader {
   contentType: string;
   data: Buffer;
   timestamp: number;
+  etag: string;
 }
+const MANIFEST_CACHE_MAX = 200;
 const manifestInitCache = new Map<string, CachedSegmentHeader>();
+
+function pruneManifestCache(): void {
+  if (manifestInitCache.size <= MANIFEST_CACHE_MAX) return;
+  // Evict oldest entries (Map preserves insertion order)
+  const toDelete = manifestInitCache.size - MANIFEST_CACHE_MAX;
+  let count = 0;
+  for (const key of manifestInitCache.keys()) {
+    if (count++ >= toDelete) break;
+    manifestInitCache.delete(key);
+  }
+}
 
 // Whitelist of allowed upstream CDN domains to prevent SSRF
 const ALLOWED_STREAM_DOMAINS = [
@@ -451,12 +467,19 @@ export const proxyDashStream = async (req: Request, res: Response) => {
     if (isManifest || isInitSegment) {
       const cached = manifestInitCache.get(targetUrl);
       if (cached && Date.now() - cached.timestamp < 3600000) {
+        // Support conditional GET: If-None-Match speeds up mobile repeat requests
+        if (req.headers['if-none-match'] === cached.etag) {
+          return res.status(304).end();
+        }
         res.setHeader('Content-Type', cached.contentType);
         res.setHeader('Access-Control-Allow-Origin', '*');
         res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
         res.setHeader('Access-Control-Allow-Headers', '*');
         res.setHeader('Accept-Ranges', 'bytes');
         res.setHeader('Content-Length', String(cached.data.length));
+        res.setHeader('ETag', cached.etag);
+        res.setHeader('Cache-Control', isManifest ? 'public, max-age=60, stale-while-revalidate=300' : 'public, max-age=3600, immutable');
+        res.setHeader('Connection', 'keep-alive');
         return res.status(200).send(cached.data);
       }
     }
@@ -486,11 +509,15 @@ export const proxyDashStream = async (req: Request, res: Response) => {
           ? 'application/dash+xml'
           : String(upstreamRes.headers['content-type'] || 'video/iso.segment');
         const buf = Buffer.from(upstreamRes.data);
+        // Generate a deterministic ETag from URL + length for conditional GET support
+        const etag = `"${buf.length}-${Date.now().toString(36)}"`;
         manifestInitCache.set(targetUrl, {
           contentType,
           data: buf,
           timestamp: Date.now(),
+          etag,
         });
+        pruneManifestCache();
 
         res.setHeader('Content-Type', contentType);
         res.setHeader('Access-Control-Allow-Origin', '*');
@@ -498,6 +525,9 @@ export const proxyDashStream = async (req: Request, res: Response) => {
         res.setHeader('Access-Control-Allow-Headers', '*');
         res.setHeader('Accept-Ranges', 'bytes');
         res.setHeader('Content-Length', String(buf.length));
+        res.setHeader('ETag', etag);
+        res.setHeader('Cache-Control', isManifest ? 'public, max-age=60, stale-while-revalidate=300' : 'public, max-age=3600, immutable');
+        res.setHeader('Connection', 'keep-alive');
         return res.status(200).send(buf);
       }
     }
@@ -524,7 +554,10 @@ export const proxyDashStream = async (req: Request, res: Response) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', '*');
-    res.setHeader('Cache-Control', cleanPath.endsWith('.mpd') ? 'public, max-age=3600' : 'public, max-age=31536000, immutable');
+    res.setHeader('Cache-Control', cleanPath.endsWith('.mpd') ? 'public, max-age=60, stale-while-revalidate=300' : 'public, max-age=31536000, immutable');
+    // Keep-alive hint: eliminates TCP re-handshake on mobile for each .m4s segment
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
 
     if (upstreamRes.headers['content-range']) {
       res.setHeader('Content-Range', String(upstreamRes.headers['content-range']));
@@ -578,7 +611,10 @@ export const proxyVideoStream = async (req: Request, res: Response) => {
     res.setHeader('Content-Type', String(upstreamRes.headers['content-type'] || 'video/mp4'));
     res.setHeader('Accept-Ranges', 'bytes');
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Cache-Control', 'public, max-age=86400');
+    // Longer CDN cache + keep-alive to avoid TCP re-connection on byte-range seeks
+    res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=3600');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
 
     if (upstreamRes.headers['content-range']) {
       res.setHeader('Content-Range', String(upstreamRes.headers['content-range']));

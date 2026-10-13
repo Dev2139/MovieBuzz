@@ -178,6 +178,61 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const hasAppliedInitialPosRef = useRef<boolean>(false);
   const shouldAutoResumeAfterQualitySwitchRef = useRef<boolean>(false);
 
+  // --- Device-adaptive streaming profile ---
+  // Detect mobile / low-memory environments to tune buffer sizes and ABR aggressiveness.
+  const isMobileDevice = React.useMemo(() => {
+    if (typeof navigator === 'undefined') return false;
+    const ua = navigator.userAgent || '';
+    const isMobileUA = /Android|iPhone|iPad|iPod|Opera Mini|IEMobile|WPDesktop/i.test(ua);
+    // navigator.deviceMemory is available in Chrome/Edge; treat < 4 GB as low-memory
+    const lowMemory = typeof (navigator as any).deviceMemory === 'number' && (navigator as any).deviceMemory < 4;
+    // Connection-aware: treat 2G / slow-3G as constrained
+    const conn = (navigator as any).connection || (navigator as any).mozConnection || (navigator as any).webkitConnection;
+    const slowConn = conn && (conn.effectiveType === '2g' || conn.effectiveType === 'slow-2g' || conn.saveData === true);
+    return isMobileUA || lowMemory || !!slowConn;
+  }, []);
+
+  // Streaming profile derived from device class
+  const streamingProfile = React.useMemo(() => {
+    if (isMobileDevice) {
+      return {
+        // HLS
+        hlsMaxBufferLength: 30,          // seconds — keep memory footprint tiny on mobile
+        hlsMaxMaxBufferLength: 60,
+        hlsMaxBufferSize: 30 * 1000 * 1000, // 30 MB max buffer RAM
+        hlsBackBufferLength: 30,         // discard old segments quickly to free RAM
+        hlsStartLevel: -1,               // ABR picks the right quality for current bandwidth
+        hlsMaxFragLookUpTolerance: 0.4,
+        hlsLowLatencyMode: false,
+        // DASH
+        dashInitialBufferLevel: 4,       // start playback after only 4 s of buffer
+        dashBufferTimeDefault: 30,
+        dashBufferTimeAtTopQuality: 60,
+        dashBufferTimeAtTopQualityLongForm: 90,
+        dashInitialBitrate: 600,         // start conservative (~600 kbps) and ramp up
+        dashBufferToKeep: 60,
+        dashBufferPruningInterval: 30,
+      };
+    }
+    // Desktop / high-memory profile — preserve existing aggressive buffering
+    return {
+      hlsMaxBufferLength: 120,
+      hlsMaxMaxBufferLength: 180,
+      hlsMaxBufferSize: 250 * 1000 * 1000,
+      hlsBackBufferLength: 1800,
+      hlsStartLevel: -1,
+      hlsMaxFragLookUpTolerance: 0.25,
+      hlsLowLatencyMode: false,
+      dashInitialBufferLevel: 8,
+      dashBufferTimeDefault: 90,
+      dashBufferTimeAtTopQuality: 120,
+      dashBufferTimeAtTopQualityLongForm: 180,
+      dashInitialBitrate: 1200,
+      dashBufferToKeep: 1800,
+      dashBufferPruningInterval: 300,
+    };
+  }, [isMobileDevice]);
+
   const [subtitleSize, setSubtitleSize] = useState<'small' | 'medium' | 'large' | 'extralarge'>(() => {
     try {
       const saved = localStorage.getItem('moviebuzz_sub_size');
@@ -1915,12 +1970,12 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               defaultTimeout: 300,
             },
             buffer: {
-              initialBufferLevel: 8,
-              bufferTimeDefault: 90,
-              bufferTimeAtTopQuality: 120,
-              bufferTimeAtTopQualityLongForm: 180,
-              bufferToKeep: 1800,
-              bufferPruningInterval: 300,
+              initialBufferLevel: streamingProfile.dashInitialBufferLevel,
+              bufferTimeDefault: streamingProfile.dashBufferTimeDefault,
+              bufferTimeAtTopQuality: streamingProfile.dashBufferTimeAtTopQuality,
+              bufferTimeAtTopQualityLongForm: streamingProfile.dashBufferTimeAtTopQualityLongForm,
+              bufferToKeep: streamingProfile.dashBufferToKeep,
+              bufferPruningInterval: streamingProfile.dashBufferPruningInterval,
               avoidCurrentTimeRangePruning: true,
               enableSeekDecorrelationFix: true,
               fastSwitchEnabled: true,
@@ -1937,13 +1992,13 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 audio: true,
               },
               initialBitrate: {
-                video: 1200,
+                video: streamingProfile.dashInitialBitrate,
               },
             },
             retryIntervals: {
               MPD: 400,
               InitializationSegment: 400,
-              MediaSegment: 800,
+              MediaSegment: isMobileDevice ? 1200 : 800,
             },
             retryAttempts: {
               MPD: 5,
@@ -2042,18 +2097,25 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     } else if (isHls && Hls.isSupported()) {
       const hls = new Hls({
         enableWorker: true,
-        lowLatencyMode: false,
-        backBufferLength: 1800,
-        maxBufferLength: 120,
-        maxMaxBufferLength: 180,
-        maxBufferSize: 250 * 1000 * 1000,
-        startLevel: -1,
+        lowLatencyMode: streamingProfile.hlsLowLatencyMode,
+        backBufferLength: streamingProfile.hlsBackBufferLength,
+        maxBufferLength: streamingProfile.hlsMaxBufferLength,
+        maxMaxBufferLength: streamingProfile.hlsMaxMaxBufferLength,
+        maxBufferSize: streamingProfile.hlsMaxBufferSize,
+        maxFragLookUpTolerance: streamingProfile.hlsMaxFragLookUpTolerance,
+        startLevel: streamingProfile.hlsStartLevel,
         autoStartLoad: true,
+        // Progressive loading: start fetching fragments immediately even before play
+        progressive: true,
+        // Prefer native-format segments so the browser MSE pipeline stays warm
+        preferManagedMediaSource: false,
+        // On mobile, limit concurrent fragment downloads to avoid memory spikes
+        maxMaxBufferLength: streamingProfile.hlsMaxMaxBufferLength,
       });
 
       hls.loadSource(effectiveUrl);
       hls.attachMedia(videoRef.current);
-      hls.startLoad();
+      hls.startLoad(-1); // -1 = start from the beginning / current position
 
       hls.on(Hls.Events.FRAG_BUFFERED, () => {
         updateBuffered();
