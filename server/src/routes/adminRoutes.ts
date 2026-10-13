@@ -22,6 +22,12 @@ import {
   updateRequestStatus,
   deleteRequest,
 } from '../controllers/requestController';
+import {
+  adminListRedemptions,
+  adminApproveRedemption,
+  adminRejectRedemption,
+  adminCoinsStats,
+} from '../controllers/coinsController';
 import { authenticate, requireAdmin } from '../middleware/authMiddleware';
 
 const router = Router();
@@ -59,5 +65,11 @@ router.post('/telegram/sync', syncTelegramChannel);
 router.post('/telegram/parse', parseTelegramPost);
 router.post('/telegram/publish', publishTelegramImport);
 router.post('/enrich', enrichCatalogMetadata);
+
+// CineCoins Redemption Management
+router.get('/redemptions', adminListRedemptions);
+router.post('/redemptions/:id/approve', adminApproveRedemption);
+router.post('/redemptions/:id/reject', adminRejectRedemption);
+router.get('/coins/stats', adminCoinsStats);
 
 export default router;

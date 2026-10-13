@@ -9,6 +9,26 @@ const generateToken = (userId: string): string => {
   return jwt.sign({ id: userId }, secret, { expiresIn: '30d' });
 };
 
+const publicUserPayload = (u: any) => ({
+  id: u._id,
+  name: u.name,
+  email: u.email,
+  role: u.role,
+  isPremium: Boolean(u.isPremium),
+  cineCoins: u.cineCoins || 0,
+  totalCoinsEarned: u.totalCoinsEarned || 0,
+  watchTimeCounter: u.watchTimeCounter || 0,
+  subscriptionPlan: u.subscriptionPlan || null,
+  subscriptionStartedAt: u.subscriptionStartedAt || null,
+  subscriptionExpiresAt: u.subscriptionExpiresAt || null,
+  subscriptionActive: Boolean(
+    u.subscriptionPlan &&
+    u.subscriptionExpiresAt &&
+    new Date(u.subscriptionExpiresAt).getTime() > Date.now()
+  ),
+  upiId: u.upiId || null,
+});
+
 export const register = async (req: Request, res: Response) => {
   try {
     const { name, email, password } = req.body;
@@ -45,13 +65,7 @@ export const register = async (req: Request, res: Response) => {
 
     return res.status(201).json({
       token,
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        isPremium: Boolean(user.isPremium),
-      },
+      user: publicUserPayload(user),
     });
   } catch (error) {
     console.error('Register error:', error);
@@ -88,13 +102,7 @@ export const login = async (req: Request, res: Response) => {
 
     return res.json({
       token,
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        isPremium: Boolean(user.isPremium),
-      },
+      user: publicUserPayload(user),
     });
   } catch (error) {
     console.error('Login error:', error);
@@ -113,11 +121,7 @@ export const getMe = async (req: AuthRequest, res: Response) => {
   }
   return res.json({
     user: {
-      id: req.user._id,
-      name: req.user.name,
-      email: req.user.email,
-      role: req.user.role,
-      isPremium: Boolean(req.user.isPremium),
+      ...publicUserPayload(req.user),
       favorites: req.user.favorites,
       watchlist: req.user.watchlist,
     },

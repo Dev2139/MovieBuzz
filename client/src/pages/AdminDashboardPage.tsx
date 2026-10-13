@@ -13,6 +13,10 @@ import {
   deleteAdminRequestApi,
   fetchAdminUsersApi,
   toggleAdminUserPremiumApi,
+  fetchAdminRedemptionsApi,
+  approveRedemptionApi,
+  rejectRedemptionApi,
+  fetchAdminCoinsStatsApi,
 } from '../services/api';
 import {
   Film,
@@ -38,11 +42,12 @@ import {
   Check,
   Crown,
   UserX,
+  Wallet,
 } from 'lucide-react';
 
 export const AdminDashboardPage: React.FC = () => {
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState<'overview' | 'manage' | 'requests' | 'users' | 'add-movie' | 'add-series'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'manage' | 'requests' | 'users' | 'redemptions' | 'add-movie' | 'add-series'>('overview');
 
   // Stats query
   const { data: stats } = useQuery({
@@ -116,6 +121,39 @@ export const AdminDashboardPage: React.FC = () => {
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['admin-users'] });
       queryClient.invalidateQueries({ queryKey: ['admin-stats'] });
+    },
+  });
+
+  // CineCoins Redemption Management
+  const [redemptionStatusFilter, setRedemptionStatusFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('pending');
+
+  const { data: redemptionsData, isLoading: isRedemptionsLoading } = useQuery({
+    queryKey: ['admin-redemptions', redemptionStatusFilter],
+    queryFn: () => fetchAdminRedemptionsApi(redemptionStatusFilter === 'all' ? undefined : redemptionStatusFilter),
+  });
+
+  const { data: coinsStats } = useQuery({
+    queryKey: ['admin-coins-stats'],
+    queryFn: fetchAdminCoinsStatsApi,
+  });
+
+  const approveRedemptionMutation = useMutation({
+    mutationFn: ({ id, adminNote }: { id: string; adminNote?: string }) =>
+      approveRedemptionApi(id, adminNote),
+    onSuccess: (data) => {
+      alert(data.message || 'Redemption approved');
+      queryClient.invalidateQueries({ queryKey: ['admin-redemptions'] });
+      queryClient.invalidateQueries({ queryKey: ['admin-coins-stats'] });
+    },
+  });
+
+  const rejectRedemptionMutation = useMutation({
+    mutationFn: ({ id, adminNote }: { id: string; adminNote?: string }) =>
+      rejectRedemptionApi(id, adminNote),
+    onSuccess: (data) => {
+      alert(data.message || 'Redemption rejected – coins refunded');
+      queryClient.invalidateQueries({ queryKey: ['admin-redemptions'] });
+      queryClient.invalidateQueries({ queryKey: ['admin-coins-stats'] });
     },
   });
 
@@ -316,6 +354,7 @@ export const AdminDashboardPage: React.FC = () => {
           { id: 'overview', label: 'Dashboard Overview' },
           { id: 'users', label: `Users & Premium (${usersData?.totalUsers ?? stats?.totalUsers ?? 0})` },
           { id: 'requests', label: `User Requests (${stats?.pendingRequests || 0})` },
+          { id: 'redemptions', label: 'CineCoins Redemptions' },
           { id: 'manage', label: `Manage Catalog (${catalog?.total || 0})` },
           { id: 'add-movie', label: 'Add New Movie' },
           { id: 'add-series', label: 'Add New Series' },
@@ -989,6 +1028,143 @@ export const AdminDashboardPage: React.FC = () => {
                   })}
                 </tbody>
               </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* CineCoins Redemptions Tab */}
+      {activeTab === 'redemptions' && (
+        <div className="bg-dark-card border border-dark-border rounded-2xl p-6 space-y-6 animate-fade-in">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-dark-border pb-4">
+            <div>
+              <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                <Wallet className="w-5 h-5 text-brand-400" /> CineCoins Redemptions
+              </h3>
+              <p className="text-xs text-gray-400 mt-1">
+                Review user redemption requests. Approved payouts are sent to the user's UPI ID externally.
+                Rejected requests automatically refund the coins.
+              </p>
+            </div>
+            <div className="flex gap-2 flex-wrap">
+              {(['pending', 'approved', 'rejected', 'all'] as const).map((s) => (
+                <button
+                  key={s}
+                  onClick={() => setRedemptionStatusFilter(s)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold capitalize transition ${
+                    redemptionStatusFilter === s
+                      ? 'bg-brand-500 text-white'
+                      : 'bg-dark-base border border-dark-border text-gray-400 hover:text-white'
+                  }`}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Global coin stats */}
+          {coinsStats && (
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+              <div className="p-3 bg-dark-base border border-dark-border rounded-xl">
+                <div className="text-[10px] text-gray-500 uppercase font-bold">Lifetime Earned</div>
+                <div className="text-xl font-black text-brand-300">{coinsStats.totalCoinsEarned}</div>
+              </div>
+              <div className="p-3 bg-dark-base border border-dark-border rounded-xl">
+                <div className="text-[10px] text-gray-500 uppercase font-bold">Redeemed</div>
+                <div className="text-xl font-black text-white">{coinsStats.totalCoinsRedeemed}</div>
+              </div>
+              <div className="p-3 bg-dark-base border border-dark-border rounded-xl">
+                <div className="text-[10px] text-gray-500 uppercase font-bold">Paid Out</div>
+                <div className="text-xl font-black text-green-400">₹{coinsStats.totalPayoutINR}</div>
+              </div>
+              <div className="p-3 bg-dark-base border border-dark-border rounded-xl">
+                <div className="text-[10px] text-gray-500 uppercase font-bold">Pending</div>
+                <div className="text-xl font-black text-yellow-400">{coinsStats.pendingRedemptions}</div>
+              </div>
+              <div className="p-3 bg-dark-base border border-dark-border rounded-xl">
+                <div className="text-[10px] text-gray-500 uppercase font-bold">Subscribers</div>
+                <div className="text-xl font-black text-purple-400">{coinsStats.activeSubscribers}</div>
+              </div>
+            </div>
+          )}
+
+          {isRedemptionsLoading ? (
+            <div className="text-gray-500 text-sm">Loading redemptions…</div>
+          ) : (redemptionsData?.redemptions || []).length === 0 ? (
+            <div className="text-center py-10 text-gray-500 text-sm bg-dark-base border border-dark-border rounded-xl">
+              No redemptions in this state.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {(redemptionsData?.redemptions || []).map((r: any) => {
+                const u = r.userId || {};
+                return (
+                  <div
+                    key={r._id}
+                    className="p-4 bg-dark-base border border-dark-border rounded-xl"
+                  >
+                    <div className="flex flex-col md:flex-row md:items-center gap-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-white font-bold">{u.name || 'User'}</span>
+                          <span className="text-gray-500 text-xs truncate">{u.email}</span>
+                          <span
+                            className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${
+                              r.status === 'pending'
+                                ? 'bg-yellow-500/20 text-yellow-300'
+                                : r.status === 'approved'
+                                  ? 'bg-green-500/20 text-green-300'
+                                  : 'bg-red-500/20 text-red-300'
+                            }`}
+                          >
+                            {r.status}
+                          </span>
+                        </div>
+                        <div className="text-sm text-brand-300 mt-1">
+                          <b>{r.coins}</b> coins → <b>₹{r.amountINR}</b>
+                        </div>
+                        <div className="text-xs text-gray-400 mt-1">
+                          UPI: <span className="font-mono text-white">{r.upiId}</span>
+                        </div>
+                        <div className="text-xs text-gray-500 mt-0.5">
+                          Plan: {r.subscriptionPlan} • Submitted{' '}
+                          {new Date(r.createdAt).toLocaleString()}
+                        </div>
+                        {r.adminNote && (
+                          <div className="text-xs italic text-gray-400 mt-1">
+                            Note: "{r.adminNote}"
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex gap-2 shrink-0">
+                        {r.status === 'pending' && (
+                          <>
+                            <button
+                              onClick={() => {
+                                const note = prompt('Admin note (optional):', 'Paid via UPI') || '';
+                                approveRedemptionMutation.mutate({ id: r._id, adminNote: note });
+                              }}
+                              className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-green-500/80 hover:bg-green-500 text-white text-xs font-bold transition"
+                            >
+                              <Check className="w-3 h-3" /> Approve
+                            </button>
+                            <button
+                              onClick={() => {
+                                const note = prompt('Reason for rejection:', 'Invalid UPI ID') || '';
+                                rejectRedemptionMutation.mutate({ id: r._id, adminNote: note });
+                              }}
+                              className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-red-500/80 hover:bg-red-500 text-white text-xs font-bold transition"
+                            >
+                              <Ban className="w-3 h-3" /> Reject
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>

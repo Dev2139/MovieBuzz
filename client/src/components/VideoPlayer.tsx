@@ -33,7 +33,7 @@ import { Media } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { saveLocalPlaybackPosition } from '../utils/localStorage';
 import { resolveMediaUrl, getDownloadUrl } from '../utils/url';
-import { saveWatchProgress, fetchSubtitles } from '../services/api';
+import { saveWatchProgress, fetchSubtitles, trackWatchTimeApi } from '../services/api';
 
 interface VideoPlayerProps {
   mediaList: Media[];
@@ -165,7 +165,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   subtitles,
   dubs = [],
 }) => {
-  const { user, isLoading: isAuthLoading } = useAuth();
+  const { user, isLoading: isAuthLoading, patchUser } = useAuth();
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const hlsRef = useRef<Hls | null>(null);
@@ -1498,6 +1498,51 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }, 500);
     return () => clearInterval(timer);
   }, [updateBuffered]);
+
+  // ---- CineCoins watch-time tracker ----
+  // Every 60 seconds, IF the user is signed in AND the video is genuinely playing (not paused,
+  // not hidden, not showing the pre-roll ad), report 60 active seconds to the server.
+  // Server-side buffering / network stalls (isBuffering) DO count as watch time (per user's requirement),
+  // but pausing, tab switching, or leaving the player are NOT counted.
+  useEffect(() => {
+    if (!user) return;         // guests do not earn (must be logged in to store coins)
+    if (!contentId) return;
+
+    const TICK_MS = 60 * 1000;
+    const coinTick = async () => {
+      const vid = videoRef.current;
+      if (!vid) return;
+      // Requirements for countable watch time:
+      //   1. Not paused / ended
+      //   2. Tab visible
+      //   3. Not showing the pre-roll ad (the underlying stream is deliberately paused during ads)
+      if (vid.paused || vid.ended) return;
+      if (typeof document !== 'undefined' && document.hidden) return;
+      if (isPlayingAd && !isAdFreeUser) return;
+
+      try {
+        const res = await trackWatchTimeApi(60, contentId);
+        if (res && res.earned > 0) {
+          patchUser({
+            cineCoins: res.cineCoins,
+            totalCoinsEarned: res.totalCoinsEarned,
+            watchTimeCounter: res.watchTimeCounter,
+          });
+          showToast(`+${res.earned} CineCoins earned! 🎬`);
+        } else if (res) {
+          patchUser({
+            cineCoins: res.cineCoins,
+            watchTimeCounter: res.watchTimeCounter,
+          });
+        }
+      } catch {
+        // silent fail – tracker is best-effort, never interrupts playback
+      }
+    };
+
+    const timer = setInterval(coinTick, TICK_MS);
+    return () => clearInterval(timer);
+  }, [user, contentId, isPlayingAd, isAdFreeUser, patchUser, showToast]);
 
   // Background byte-range prefetcher for direct MP4 / proxy / Telegram streams:
   // Runs continuously to keep prefetching forward bytes into the browser HTTP cache, both while

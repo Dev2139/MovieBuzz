@@ -13,6 +13,14 @@ import {
   getUserPreferences,
   updateUserPreferences,
 } from '../controllers/userController';
+import {
+  trackWatchTime,
+  getUserCoins,
+  redeemCoins,
+  purchaseSubscription,
+  listSubscriptionPlans,
+  saveUpiId,
+} from '../controllers/coinsController';
 import { authenticate } from '../middleware/authMiddleware';
 
 const router = Router();
@@ -37,5 +45,13 @@ router.post('/watchlist/:contentId', toggleWatchlist);
 router.delete('/watchlist/:contentId', toggleWatchlist);
 
 router.post('/migrate-local-data', migrateLocalData);
+
+// --- CineCoins loyalty system ---
+router.get('/subscription/plans', listSubscriptionPlans);
+router.post('/subscription/purchase', purchaseSubscription);
+router.post('/coins/track', trackWatchTime);
+router.get('/coins', getUserCoins);
+router.post('/coins/redeem', redeemCoins);
+router.post('/coins/upi', saveUpiId);
 
 export default router;

@@ -78,6 +78,50 @@ export interface User {
   favorites?: string[];
   watchlist?: string[];
   preferredGenres?: string[];
+  // CineCoins loyalty system
+  cineCoins?: number;
+  totalCoinsEarned?: number;
+  watchTimeCounter?: number;
+  subscriptionPlan?: 'basic' | 'pro' | 'premium' | null;
+  subscriptionStartedAt?: string | null;
+  subscriptionExpiresAt?: string | null;
+  subscriptionActive?: boolean;
+  upiId?: string | null;
+}
+
+export interface CoinTransactionItem {
+  _id: string;
+  userId: string;
+  type: 'earned' | 'redeemed' | 'refund' | 'admin-adjust';
+  amount: number;
+  balanceAfter: number;
+  watchSeconds?: number;
+  contentId?: string;
+  redemptionId?: string;
+  note?: string;
+  createdAt: string;
+}
+
+export interface RedemptionItem {
+  _id: string;
+  userId: any;
+  coins: number;
+  amountINR: number;
+  upiId: string;
+  subscriptionPlan: string;
+  status: 'pending' | 'approved' | 'rejected';
+  adminNote?: string;
+  processedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SubscriptionPlanItem {
+  id: string;
+  name: string;
+  priceINR: number;
+  durationDays: number;
+  perks: string[];
 }
 
 export interface RecommendationFeed {

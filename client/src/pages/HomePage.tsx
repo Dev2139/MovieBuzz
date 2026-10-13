@@ -9,7 +9,7 @@ import { SkeletonCard, SkeletonGrid } from '../components/SkeletonCard';
 import { useAuth } from '../context/AuthContext';
 import { getLocalPlaybackHistory, removeLocalPlaybackItem, getLocalInterests, getLocalFavorites, getLocalWatchlist } from '../utils/localStorage';
 import { LocalPlaybackState } from '../types';
-import { Play, TrendingUp, Flame, Tv, Sparkles, Clock, Compass } from 'lucide-react';
+import { Play, TrendingUp, Flame, Tv, Sparkles, Clock, Compass, Coins, Wallet, Crown, Zap, ShieldCheck } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 
 export const HomePage: React.FC = () => {
@@ -332,6 +332,101 @@ export const HomePage: React.FC = () => {
           </div>
         </section>
       )}
+
+      {/* Premium Features & CineCoins Loyalty Program */}
+      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-10">
+        <div className="relative overflow-hidden rounded-3xl border border-brand-500/30 bg-gradient-to-br from-brand-950/60 via-dark-card to-dark-surface p-6 sm:p-10">
+          <div className="absolute -top-16 -right-16 w-64 h-64 bg-brand-500/10 rounded-full blur-3xl" />
+          <div className="absolute -bottom-20 -left-10 w-72 h-72 bg-purple-500/10 rounded-full blur-3xl" />
+
+          <div className="relative z-10">
+            <div className="flex items-center gap-2 mb-2">
+              <Coins className="w-5 h-5 text-brand-400" />
+              <span className="text-brand-300 text-xs font-bold uppercase tracking-widest">Premium Features</span>
+            </div>
+            <h2 className="text-2xl sm:text-4xl font-black text-white mb-3 tracking-tight">
+              Watch Movies. Earn <span className="text-brand-400">CineCoins</span>. Get Real Money.
+            </h2>
+            <p className="text-gray-300 text-sm sm:text-base mb-6 max-w-2xl">
+              Every 30 minutes you actively watch a movie or series, we credit <b className="text-brand-300">2 CineCoins</b> to
+              your account. 1 CineCoin = <b className="text-brand-300">₹1 real money</b>. Buy any subscription plan
+              and cash out directly to your UPI wallet.
+            </p>
+
+            {/* Rate + rules badges */}
+            <div className="flex flex-wrap gap-2 sm:gap-3 mb-6">
+              <div className="flex items-center gap-2 bg-dark-base/70 border border-brand-500/30 rounded-full px-3 py-1.5 text-xs sm:text-sm">
+                <Zap className="w-4 h-4 text-yellow-400" />
+                <span className="text-white font-bold">30 min = 2 coins</span>
+              </div>
+              <div className="flex items-center gap-2 bg-dark-base/70 border border-brand-500/30 rounded-full px-3 py-1.5 text-xs sm:text-sm">
+                <Wallet className="w-4 h-4 text-green-400" />
+                <span className="text-white font-bold">1 coin = ₹1</span>
+              </div>
+              <div className="flex items-center gap-2 bg-dark-base/70 border border-brand-500/30 rounded-full px-3 py-1.5 text-xs sm:text-sm">
+                <ShieldCheck className="w-4 h-4 text-purple-400" />
+                <span className="text-white font-bold">Pause / hide tab = no coins</span>
+              </div>
+              <div className="flex items-center gap-2 bg-dark-base/70 border border-brand-500/30 rounded-full px-3 py-1.5 text-xs sm:text-sm">
+                <Clock className="w-4 h-4 text-brand-400" />
+                <span className="text-white font-bold">Our buffering still counts</span>
+              </div>
+            </div>
+
+            {/* How it works - 4 cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-6">
+              <div className="bg-dark-base/60 border border-dark-border rounded-2xl p-4">
+                <div className="w-9 h-9 rounded-full bg-brand-500/20 text-brand-300 flex items-center justify-center mb-3 font-bold">1</div>
+                <div className="text-white font-bold mb-1">Sign in</div>
+                <p className="text-gray-400 text-xs leading-relaxed">Create a free account so we can store the CineCoins you earn.</p>
+              </div>
+              <div className="bg-dark-base/60 border border-dark-border rounded-2xl p-4">
+                <div className="w-9 h-9 rounded-full bg-brand-500/20 text-brand-300 flex items-center justify-center mb-3 font-bold">2</div>
+                <div className="text-white font-bold mb-1">Watch actively</div>
+                <p className="text-gray-400 text-xs leading-relaxed">Press play on any movie or episode. Keep the tab visible. Every 30 min of active watching = +2 coins.</p>
+              </div>
+              <div className="bg-dark-base/60 border border-dark-border rounded-2xl p-4">
+                <div className="w-9 h-9 rounded-full bg-brand-500/20 text-brand-300 flex items-center justify-center mb-3 font-bold">3</div>
+                <div className="text-white font-bold mb-1">Buy a plan</div>
+                <p className="text-gray-400 text-xs leading-relaxed">Subscription unlocks redemption. Your coins stay safe even if the plan expires.</p>
+              </div>
+              <div className="bg-dark-base/60 border border-dark-border rounded-2xl p-4">
+                <div className="w-9 h-9 rounded-full bg-brand-500/20 text-brand-300 flex items-center justify-center mb-3 font-bold">4</div>
+                <div className="text-white font-bold mb-1">Cash out to UPI</div>
+                <p className="text-gray-400 text-xs leading-relaxed">Enter your UPI ID, we process the payout and track it in your dashboard.</p>
+              </div>
+            </div>
+
+            {/* CTA */}
+            <div className="flex flex-wrap gap-3">
+              {user ? (
+                <Link
+                  to="/profile"
+                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-brand-500 hover:bg-brand-600 text-white font-bold shadow-lg shadow-brand-500/30 transition"
+                >
+                  <Wallet className="w-4 h-4" />
+                  Go to my Profile ({user.cineCoins || 0} coins)
+                </Link>
+              ) : (
+                <Link
+                  to="/profile"
+                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-brand-500 hover:bg-brand-600 text-white font-bold shadow-lg shadow-brand-500/30 transition"
+                >
+                  <Coins className="w-4 h-4" />
+                  Sign in to start earning
+                </Link>
+              )}
+              <Link
+                to="/profile#plans"
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-dark-border/60 hover:bg-dark-border border border-dark-border text-white font-semibold transition"
+              >
+                <Crown className="w-4 h-4 text-yellow-400" />
+                View subscription plans
+              </Link>
+            </div>
+          </div>
+        </div>
+      </section>
     </div>
   );
 };

@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Home, Search, Film, Tv, Bookmark, History } from 'lucide-react';
+import { Home, Search, Bookmark, User as UserIcon } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 export const BottomNav: React.FC = () => {
@@ -12,12 +12,12 @@ export const BottomNav: React.FC = () => {
     return null;
   }
 
+  // Simplified navigation: single Search tab (replaces Movies + Series) plus Profile
   const navItems = [
     { name: 'Home', path: '/', icon: Home },
-    { name: 'Movies', path: '/movies', icon: Film },
-    { name: 'Series', path: '/series', icon: Tv },
     { name: 'Search', path: '/search', icon: Search },
     { name: 'Watchlist', path: '/watchlist', icon: Bookmark },
+    { name: user ? 'Profile' : 'Sign in', path: user ? '/profile' : '/profile', icon: UserIcon },
   ];
 
   return (

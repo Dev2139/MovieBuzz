@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { Content, Season, Episode, Media, User, WatchHistoryItem, AdminStats, TelegramImportItem, ContentRequest, AdminCatalogResponse, RecommendationFeed, UserTasteProfile } from '../types';
+import { Content, Season, Episode, Media, User, WatchHistoryItem, AdminStats, TelegramImportItem, ContentRequest, AdminCatalogResponse, RecommendationFeed, UserTasteProfile, CoinTransactionItem, RedemptionItem, SubscriptionPlanItem } from '../types';
 
 const API_URL =
   import.meta.env.VITE_API_URL ||
@@ -467,6 +467,105 @@ export const fetchSeriesMovieBoxSeasonsEpisodes = async (
   const res = await api.get<MovieBoxSeriesDetails>('/streaming/series/seasons-episodes', {
     params: { title, year, subjectId },
   });
+  return res.data;
+};
+
+// --- CineCoins & Subscription APIs ---
+export const fetchSubscriptionPlans = async () => {
+  const res = await api.get<{
+    plans: SubscriptionPlanItem[];
+    coinValueINR: number;
+    earnRate: { seconds: number; coins: number };
+  }>('/users/subscription/plans');
+  return res.data;
+};
+
+export const purchaseSubscriptionApi = async (planId: string) => {
+  const res = await api.post<{
+    message: string;
+    plan: SubscriptionPlanItem;
+    cineCoins: number;
+    subscriptionPlan: string | null;
+    subscriptionActive: boolean;
+    subscriptionExpiresAt: string | null;
+  }>('/users/subscription/purchase', { planId });
+  return res.data;
+};
+
+export const trackWatchTimeApi = async (seconds: number, contentId?: string) => {
+  const res = await api.post<{
+    earned: number;
+    cineCoins: number;
+    totalCoinsEarned: number;
+    watchTimeCounter: number;
+    subscriptionActive: boolean;
+  }>('/users/coins/track', { seconds, contentId });
+  return res.data;
+};
+
+export const fetchUserCoinsApi = async () => {
+  const res = await api.get<{
+    cineCoins: number;
+    totalCoinsEarned: number;
+    watchTimeCounter: number;
+    subscriptionPlan: string | null;
+    subscriptionStartedAt: string | null;
+    subscriptionExpiresAt: string | null;
+    subscriptionActive: boolean;
+    upiId: string | null;
+    coinValueINR: number;
+    earnRate: { seconds: number; coins: number };
+    transactions: CoinTransactionItem[];
+    redemptions: RedemptionItem[];
+  }>('/users/coins');
+  return res.data;
+};
+
+export const redeemCoinsApi = async (coins: number, upiId: string) => {
+  const res = await api.post<{ message: string; redemption: RedemptionItem; cineCoins: number }>(
+    '/users/coins/redeem',
+    { coins, upiId }
+  );
+  return res.data;
+};
+
+export const saveUpiIdApi = async (upiId: string) => {
+  const res = await api.post<{ message: string; upiId: string }>('/users/coins/upi', { upiId });
+  return res.data;
+};
+
+// --- Admin redemption APIs ---
+export const fetchAdminRedemptionsApi = async (status?: string) => {
+  const res = await api.get<{ redemptions: RedemptionItem[] }>('/admin/redemptions', {
+    params: status ? { status } : {},
+  });
+  return res.data;
+};
+
+export const approveRedemptionApi = async (id: string, adminNote?: string) => {
+  const res = await api.post<{ message: string; redemption: RedemptionItem }>(
+    `/admin/redemptions/${id}/approve`,
+    { adminNote }
+  );
+  return res.data;
+};
+
+export const rejectRedemptionApi = async (id: string, adminNote?: string) => {
+  const res = await api.post<{ message: string; redemption: RedemptionItem }>(
+    `/admin/redemptions/${id}/reject`,
+    { adminNote }
+  );
+  return res.data;
+};
+
+export const fetchAdminCoinsStatsApi = async () => {
+  const res = await api.get<{
+    totalCoinsEarned: number;
+    totalCoinsRedeemed: number;
+    totalPayoutINR: number;
+    pendingRedemptions: number;
+    activeSubscribers: number;
+  }>('/admin/coins/stats');
   return res.data;
 };
 

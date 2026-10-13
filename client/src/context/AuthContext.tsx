@@ -13,6 +13,8 @@ interface AuthContextType {
   openAuthModal: () => void;
   closeAuthModal: () => void;
   isAuthModalOpen: boolean;
+  refreshUser: () => Promise<void>;
+  patchUser: (patch: Partial<User>) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -97,6 +99,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localStorage.removeItem('cinestream_token');
   };
 
+  const refreshUser = async () => {
+    if (!localStorage.getItem('cinestream_token')) return;
+    try {
+      const res = await api.get('/auth/me');
+      if (res.data && res.data.user) setUser(res.data.user);
+    } catch {
+      // ignore
+    }
+  };
+
+  const patchUser = (patch: Partial<User>) => {
+    setUser((prev) => (prev ? { ...prev, ...patch } : prev));
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -109,6 +125,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         openAuthModal: () => setIsAuthModalOpen(true),
         closeAuthModal: () => setIsAuthModalOpen(false),
         isAuthModalOpen,
+        refreshUser,
+        patchUser,
       }}
     >
       {children}
