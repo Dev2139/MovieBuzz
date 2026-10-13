@@ -165,7 +165,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   subtitles,
   dubs = [],
 }) => {
-  const { user } = useAuth();
+  const { user, isLoading: isAuthLoading } = useAuth();
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const hlsRef = useRef<Hls | null>(null);
@@ -857,22 +857,26 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   // Double click skip feedback indicator
   const [skipFeedback, setSkipFeedback] = useState<{ side: 'left' | 'right'; text: string; id: number } | null>(null);
 
-  // In-Player Video Ad States (Bypassed for ALL users to guarantee 0-delay instant streaming across all devices)
-  const isAdFreeUser = true; // All users (guest, signed-in, premium) receive instant 0s playback
-  const adCompletedRef = useRef<boolean>(true);
+  // In-Player Pre-Roll Ad System
+  // Premium members & admins are ad-free. Guests and free signed-in users must watch the pre-roll ad.
+  // While the ad plays, the real movie/series stream keeps buffering chunks in the background
+  // (HLS heartbeat at attach time + byte-range prefetcher + aggressive DASH/HLS buffer profiles),
+  // so playback starts instantly the moment the ad ends - no black screen, no re-buffer.
+  const isAdFreeUser = Boolean(user?.isPremium || user?.role === 'admin');
+  const adCompletedRef = useRef<boolean>(false);
   const [isPlayingAd, setIsPlayingAd] = useState<boolean>(false);
   const [adDuration, setAdDuration] = useState<number>(0);
   const [adCurrentTime, setAdCurrentTime] = useState<number>(0);
-  const [isAdMuted, setIsAdMuted] = useState<boolean>(false);
+  const [isAdMuted, setIsAdMuted] = useState<boolean>(true); // start muted so autoplay is never blocked (prevents black screen)
   const adVideoRef = useRef<HTMLVideoElement>(null);
-
-  useEffect(() => {
-    adCompletedRef.current = true;
-    setIsPlayingAd(false);
-  }, []);
+  const adWatchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleAdFinished = useCallback(() => {
     adCompletedRef.current = true;
+    if (adWatchdogRef.current) {
+      clearTimeout(adWatchdogRef.current);
+      adWatchdogRef.current = null;
+    }
     if (adVideoRef.current) {
       try {
         adVideoRef.current.pause();
@@ -908,7 +912,15 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         }
         const p = videoRef.current.play();
         if (p !== undefined) {
-          p.catch(() => {});
+          p.catch(() => {
+            // Autoplay with sound was blocked (no user gesture yet): start muted so the stream still
+            // rolls instantly with no black/frozen screen. The user can tap the player to unmute.
+            if (videoRef.current) {
+              videoRef.current.muted = true;
+              const mp = videoRef.current.play();
+              if (mp !== undefined) mp.catch(() => {});
+            }
+          });
         }
         setIsPlaying(true);
         setIsBuffering(false);
@@ -916,15 +928,91 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }, 100);
   }, [initialPosition, ensureAudioContext]);
 
-  // Instant switch for all users without blocking ads
+  // Free users see the pre-roll ad again whenever they switch stream quality or audio language.
   const triggerAdForSwitch = useCallback(() => {
-    // No blocking ad: instant 0ms switch for all users
-  }, []);
+    if (isAdFreeUser || isPlayingAd) return;
+    adCompletedRef.current = false;
+    setAdCurrentTime(0);
+    setAdDuration(0);
+    setIsAdMuted(true);
+    setIsPlayingAd(true);
+    if (videoRef.current) {
+      try {
+        videoRef.current.pause();
+      } catch {}
+    }
+    setIsPlaying(false);
+    setTimeout(() => {
+      const ad = adVideoRef.current;
+      if (ad) {
+        ad.currentTime = 0;
+        ad.muted = true;
+        ad.play().catch(() => {});
+      }
+    }, 60);
+  }, [isAdFreeUser, isPlayingAd]);
 
-  // No-op for ad playback
+  // Decide whether to run the pre-roll once the auth tier is known (guests & free users only).
+  // Waiting for auth to resolve avoids briefly flashing an ad at premium/admin members.
   useEffect(() => {
-    setIsPlayingAd(false);
-  }, []);
+    if (isAuthLoading) return;
+    if (isAdFreeUser) {
+      adCompletedRef.current = true;
+      setIsPlayingAd(false);
+      return;
+    }
+    if (!adCompletedRef.current) {
+      setIsPlayingAd(true);
+    }
+  }, [isAuthLoading, isAdFreeUser]);
+
+  // Kickstart ad playback whenever it is active, plus an anti-blackout watchdog:
+  // if the ad stalls before rendering, auto-dismiss so the movie is never trapped behind a black screen.
+  useEffect(() => {
+    if (!isPlayingAd || isAdFreeUser) return;
+    const tryPlay = () => {
+      const ad = adVideoRef.current;
+      if (ad) {
+        ad.muted = true;
+        const p = ad.play();
+        if (p !== undefined) p.catch(() => {});
+      }
+    };
+    const startTimer = setTimeout(tryPlay, 60);
+    if (adWatchdogRef.current) clearTimeout(adWatchdogRef.current);
+    adWatchdogRef.current = setTimeout(() => {
+      const ad = adVideoRef.current;
+      if (!ad || ad.currentTime < 0.25) {
+        handleAdFinished();
+      }
+    }, 12000);
+    return () => {
+      clearTimeout(startTimer);
+    };
+  }, [isPlayingAd, isAdFreeUser, handleAdFinished]);
+
+  // While the ad is on screen, force the real stream to stay paused & silent at the user's resume position.
+  // This prevents the movie playhead from drifting forward during the ad (no skipped content) and stops any
+  // audio leaking from behind the overlay, while MSE/HLS/DASH keep loading chunks ahead in the background.
+  useEffect(() => {
+    if (!isPlayingAd || isAdFreeUser || !videoRef.current) return;
+    const v = videoRef.current;
+    v.muted = true;
+    const resumePos = playbackPositionRef.current > 0 ? playbackPositionRef.current : initialPosition;
+    const keepPinned = () => {
+      if (!v.paused) {
+        try {
+          v.pause();
+        } catch {}
+      }
+      if (resumePos > 0 && Math.abs(v.currentTime - resumePos) > 0.5) {
+        v.currentTime = resumePos;
+      }
+    };
+    keepPinned();
+    const pin = setInterval(keepPinned, 500);
+    return () => clearInterval(pin);
+  }, [isPlayingAd, isAdFreeUser, initialPosition]);
 
   const controlsTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSavedTimeRef = useRef<number>(0);
@@ -2079,18 +2167,24 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             hasAppliedInitialPosRef.current = true;
           }
           if (videoRef.current) {
-            videoRef.current.volume = volume;
-            videoRef.current.muted = isMuted;
-            const playPromise = videoRef.current.play();
-            if (playPromise !== undefined) {
-              playPromise
-                .then(() => {
-                  setIsPlaying(true);
-                  setIsBuffering(false);
-                })
-                .catch(() => {
-                  setIsBuffering(false);
-                });
+            if (!adCompletedRef.current) {
+              // Pre-roll ad is playing: keep DASH buffering chunks ahead but stay muted & paused behind the overlay
+              // so no audio leaks. handleAdFinished resumes playback instantly once the ad ends.
+              videoRef.current.muted = true;
+            } else {
+              videoRef.current.volume = volume;
+              videoRef.current.muted = isMuted;
+              const playPromise = videoRef.current.play();
+              if (playPromise !== undefined) {
+                playPromise
+                  .then(() => {
+                    setIsPlaying(true);
+                    setIsBuffering(false);
+                  })
+                  .catch(() => {
+                    setIsBuffering(false);
+                  });
+              }
             }
           }
           try {
@@ -2362,6 +2456,17 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           }
         }}
         onPlay={() => {
+          // Never let the real stream play (and advance its playhead) while the pre-roll ad is on screen.
+          // The buffer/HLS-heartbeat/byte-prefetcher still load chunks ahead while it stays paused.
+          if (isPlayingAd && !isAdFreeUser) {
+            if (videoRef.current) {
+              videoRef.current.muted = true;
+              try {
+                videoRef.current.pause();
+              } catch {}
+            }
+            return;
+          }
           autoRetryAttemptsRef.current = 0;
           setStreamError(null);
           setIsPlaying(true);
@@ -3467,6 +3572,11 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               const vid = e.currentTarget;
               setAdCurrentTime(vid.currentTime);
               if (vid.duration && !isNaN(vid.duration)) setAdDuration(vid.duration);
+              // Ad is rendering frames: cancel the anti-blackout watchdog
+              if (vid.currentTime > 0.25 && adWatchdogRef.current) {
+                clearTimeout(adWatchdogRef.current);
+                adWatchdogRef.current = null;
+              }
             }}
             onEnded={handleAdFinished}
             className="w-full h-full object-contain cursor-pointer"
