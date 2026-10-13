@@ -3,6 +3,7 @@ import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { usePWA } from '../context/PWAContext';
 import { Film, Search, Bookmark, History, Shield, LogOut, User as UserIcon, Menu, X, Sparkles, Smartphone, Download, Crown } from 'lucide-react';
+import { NotificationBell } from './NotificationBell';
 
 export const Navbar: React.FC = () => {
   const { user, logout, openAuthModal } = useAuth();
@@ -38,6 +39,7 @@ export const Navbar: React.FC = () => {
   const navLinks = [
     { name: 'Home', path: '/' },
     { name: 'Search', path: '/search' },
+    { name: 'Requests', path: '/requests' },
     { name: 'Genres', path: '/search?genre=all' },
     { name: 'Watchlist', path: '/watchlist' },
     { name: 'History', path: '/history' },
@@ -125,6 +127,8 @@ export const Navbar: React.FC = () => {
             />
             <Search className="absolute left-3 top-2 w-3.5 h-3.5 text-gray-400" />
           </form>
+
+          <NotificationBell />
 
           {user ? (
             <div className="relative">
@@ -218,6 +222,8 @@ export const Navbar: React.FC = () => {
           >
             <Search className="w-4 h-4" />
           </button>
+
+          <NotificationBell />
 
           {user ? (
             <button

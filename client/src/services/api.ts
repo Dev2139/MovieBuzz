@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { Content, Season, Episode, Media, User, WatchHistoryItem, AdminStats, TelegramImportItem, ContentRequest, AdminCatalogResponse, RecommendationFeed, UserTasteProfile, CoinTransactionItem, RedemptionItem, SubscriptionPlanItem, SubscriberItem, SubscriptionPurchaseItem } from '../types';
+import { Content, Season, Episode, Media, User, WatchHistoryItem, AdminStats, TelegramImportItem, ContentRequest, AdminCatalogResponse, RecommendationFeed, UserTasteProfile, CoinTransactionItem, RedemptionItem, SubscriptionPlanItem, SubscriberItem, SubscriptionPurchaseItem, LeaderboardRequestItem, AppNotification } from '../types';
 
 const API_URL =
   import.meta.env.VITE_API_URL ||
@@ -286,7 +286,42 @@ export const submitContentRequestApi = async (data: {
   userName?: string;
   userEmail?: string;
 }) => {
-  const res = await api.post<{ message: string; request: ContentRequest }>('/requests', data);
+  const res = await api.post<{ message: string; request: ContentRequest; merged?: boolean }>('/requests', data);
+  return res.data;
+};
+
+// --- Community Requests Leaderboard APIs ---
+export const fetchRequestsLeaderboardApi = async (params?: {
+  search?: string;
+  type?: 'movie' | 'series' | 'all';
+}) => {
+  const res = await api.get<{ requests: LeaderboardRequestItem[] }>('/requests/leaderboard', { params });
+  return res.data;
+};
+
+export const voteRequestApi = async (id: string) => {
+  const res = await api.post<{ message: string; voteCount: number; hasVoted: boolean }>(
+    `/requests/${id}/vote`
+  );
+  return res.data;
+};
+
+// --- Notifications APIs ---
+export const fetchNotificationsApi = async () => {
+  const res = await api.get<{
+    notifications: AppNotification[];
+    unreadCount: number;
+  }>('/notifications');
+  return res.data;
+};
+
+export const markNotificationReadApi = async (id: string) => {
+  const res = await api.post<{ message: string }>(`/notifications/${id}/read`);
+  return res.data;
+};
+
+export const markAllNotificationsReadApi = async () => {
+  const res = await api.post<{ message: string }>('/notifications/read-all');
   return res.data;
 };
 

@@ -24,6 +24,7 @@ import searchRoutes from './routes/searchRoutes';
 import userRoutes from './routes/userRoutes';
 import adminRoutes from './routes/adminRoutes';
 import requestRoutes from './routes/requestRoutes';
+import notificationRoutes from './routes/notificationRoutes';
 import streamingRoutes from './routes/streamingRoutes';
 import recommendationRoutes from './routes/recommendationRoutes';
 
@@ -68,6 +69,7 @@ app.use('/api', searchRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/requests', requestRoutes);
+app.use('/api/notifications', notificationRoutes);
 app.use('/api/streaming', streamingRoutes);
 app.use('/api/recommendations', recommendationRoutes);
 

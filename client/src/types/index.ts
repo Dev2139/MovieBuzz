@@ -266,10 +266,33 @@ export interface ContentRequest {
   requestedBy?: string;
   userName?: string;
   userEmail?: string;
+  votes?: string[];
   status: 'pending' | 'fulfilled' | 'rejected';
   adminNotes?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface LeaderboardRequestItem {
+  _id: string;
+  title: string;
+  type: 'movie' | 'series';
+  releaseYear?: number;
+  voteCount: number;
+  hasVoted: boolean;
+  isMine: boolean;
+  createdAt: string;
+}
+
+export interface AppNotification {
+  _id: string;
+  userId: string;
+  type: 'request' | 'system';
+  title: string;
+  body?: string;
+  link?: string;
+  read: boolean;
+  createdAt: string;
 }
 
 export interface AdminCatalogResponse {
