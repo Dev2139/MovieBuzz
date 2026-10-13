@@ -115,3 +115,24 @@ export const toggleLocalFavorites = (contentId: string): boolean => {
   localStorage.setItem(FAVORITES_KEY, JSON.stringify(list));
   return isAdded;
 };
+
+// --- Anonymous Interests / Preferred Genres ---
+const INTERESTS_KEY = 'cinestream_user_interests';
+
+export const getLocalInterests = (): string[] => {
+  try {
+    const raw = localStorage.getItem(INTERESTS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+};
+
+export const saveLocalInterests = (genres: string[]): void => {
+  try {
+    localStorage.setItem(INTERESTS_KEY, JSON.stringify(genres));
+  } catch (error) {
+    console.error('Failed to save local interests', error);
+  }
+};
+

@@ -213,15 +213,65 @@ export const migrateLocalData = async (req: AuthRequest, res: Response) => {
       }
     }
 
+    // 4. Migrate Preferred Interests/Genres if provided
+    if (req.body.localInterests && Array.isArray(req.body.localInterests)) {
+      if (!user.preferredGenres) user.preferredGenres = [];
+      for (const g of req.body.localInterests) {
+        if (!user.preferredGenres.includes(g)) {
+          user.preferredGenres.push(g);
+        }
+      }
+    }
+
     await user.save();
 
     return res.json({
       message: 'Local browsing history and watchlist migrated successfully!',
       watchlistCount: user.watchlist.length,
       favoritesCount: user.favorites.length,
+      preferredGenres: user.preferredGenres || [],
     });
   } catch (error) {
     console.error('migrateLocalData error:', error);
     return res.status(500).json({ message: 'Error migrating local user data' });
   }
 };
+
+export const getUserPreferences = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) return res.status(401).json({ message: 'Unauthorized' });
+    const user = await User.findById(req.user._id).select('preferredGenres favorites watchlist');
+    return res.json({
+      preferredGenres: user?.preferredGenres || [],
+      favoritesCount: user?.favorites?.length || 0,
+      watchlistCount: user?.watchlist?.length || 0,
+    });
+  } catch (error) {
+    return res.status(500).json({ message: 'Error retrieving user preferences' });
+  }
+};
+
+export const updateUserPreferences = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) return res.status(401).json({ message: 'Unauthorized' });
+    const { preferredGenres } = req.body;
+    if (!Array.isArray(preferredGenres)) {
+      return res.status(400).json({ message: 'preferredGenres must be an array of strings' });
+    }
+
+    const sanitized = preferredGenres.map((g) => String(g).trim()).filter(Boolean);
+    const user = await User.findByIdAndUpdate(
+      req.user._id,
+      { preferredGenres: sanitized },
+      { new: true }
+    );
+
+    return res.json({
+      message: 'Preferences updated successfully',
+      preferredGenres: user?.preferredGenres || [],
+    });
+  } catch (error) {
+    return res.status(500).json({ message: 'Error updating user preferences' });
+  }
+};
+

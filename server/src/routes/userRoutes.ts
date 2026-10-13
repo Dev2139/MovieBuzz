@@ -10,12 +10,17 @@ import {
   toggleWatchlist,
   getWatchlist,
   migrateLocalData,
+  getUserPreferences,
+  updateUserPreferences,
 } from '../controllers/userController';
 import { authenticate } from '../middleware/authMiddleware';
 
 const router = Router();
 
 router.use(authenticate);
+
+router.get('/preferences', getUserPreferences);
+router.put('/preferences', updateUserPreferences);
 
 router.post('/history', saveWatchHistory);
 router.get('/history', getUserHistory);

@@ -8,6 +8,7 @@ export interface IUser extends Document {
   isPremium?: boolean;
   favorites: mongoose.Types.ObjectId[];
   watchlist: mongoose.Types.ObjectId[];
+  preferredGenres?: string[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -21,6 +22,7 @@ const UserSchema: Schema = new Schema(
     isPremium: { type: Boolean, default: false },
     favorites: [{ type: Schema.Types.ObjectId, ref: 'Content' }],
     watchlist: [{ type: Schema.Types.ObjectId, ref: 'Content' }],
+    preferredGenres: [{ type: String, trim: true }],
   },
   { timestamps: true }
 );

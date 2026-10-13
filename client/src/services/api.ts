@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { Content, Season, Episode, Media, User, WatchHistoryItem, AdminStats, TelegramImportItem, ContentRequest, AdminCatalogResponse } from '../types';
+import { Content, Season, Episode, Media, User, WatchHistoryItem, AdminStats, TelegramImportItem, ContentRequest, AdminCatalogResponse, RecommendationFeed, UserTasteProfile } from '../types';
 
 const API_URL =
   import.meta.env.VITE_API_URL ||
@@ -156,8 +156,57 @@ export const migrateLocalDataApi = async (payload: {
   localHistory: any[];
   localWatchlist: string[];
   localFavorites: string[];
+  localInterests?: string[];
 }) => {
   const res = await api.post('/users/migrate-local-data', payload);
+  return res.data;
+};
+
+// --- Recommendation & Personalization APIs ---
+export const fetchRecommendations = async (params?: {
+  genres?: string[];
+  historyIds?: string[];
+  favoriteIds?: string[];
+  watchlistIds?: string[];
+  limit?: number;
+}) => {
+  const queryParams: Record<string, any> = {};
+  if (params?.limit) queryParams.limit = params.limit;
+  if (params?.genres?.length) queryParams.genres = params.genres.join(',');
+  if (params?.historyIds?.length) queryParams.historyIds = params.historyIds.join(',');
+  if (params?.favoriteIds?.length) queryParams.favoriteIds = params.favoriteIds.join(',');
+  if (params?.watchlistIds?.length) queryParams.watchlistIds = params.watchlistIds.join(',');
+
+  const res = await api.get<{ success: boolean; data: RecommendationFeed }>('/recommendations', {
+    params: queryParams,
+  });
+  return res.data.data;
+};
+
+export const fetchSimilarContent = async (slugOrId: string, limit: number = 10) => {
+  const res = await api.get<{ success: boolean; items: Content[] }>(`/recommendations/similar/${slugOrId}`, {
+    params: { limit },
+  });
+  return res.data.items;
+};
+
+export const fetchUserTasteProfile = async () => {
+  const res = await api.get<{ success: boolean; profile: UserTasteProfile }>('/recommendations/taste-profile');
+  return res.data.profile;
+};
+
+export const updateUserPreferencesApi = async (preferredGenres: string[]) => {
+  const res = await api.put<{ success: boolean; message: string; preferredGenres: string[] }>(
+    '/users/preferences',
+    { preferredGenres }
+  );
+  return res.data;
+};
+
+export const fetchUserPreferencesApi = async () => {
+  const res = await api.get<{ preferredGenres: string[]; favoritesCount: number; watchlistCount: number }>(
+    '/users/preferences'
+  );
   return res.data;
 };
 
