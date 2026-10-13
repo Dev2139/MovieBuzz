@@ -88,6 +88,9 @@ export interface User {
   subscriptionPlan?: 'basic' | 'pro' | 'premium' | null;
   subscriptionStartedAt?: string | null;
   subscriptionExpiresAt?: string | null;
+  subscriptionCancelledAt?: string | null;
+  subscriptionPaidINR?: number;
+  subscriptionLastPaymentAt?: string | null;
   subscriptionActive?: boolean;
   upiId?: string | null;
 }
@@ -125,6 +128,44 @@ export interface SubscriptionPlanItem {
   priceINR: number;
   durationDays: number;
   perks: string[];
+}
+
+export interface SubscriptionPurchaseItem {
+  _id: string;
+  userId: string;
+  planId: string;
+  planName: string;
+  priceINR: number;
+  durationDays: number;
+  startedAt: string;
+  expiresAt: string;
+  status: 'active' | 'expired' | 'cancelled';
+  cancelledAt?: string | null;
+  cancelNote?: string | null;
+  createdAt: string;
+}
+
+export interface SubscriberItem {
+  user: {
+    _id: string;
+    name: string;
+    email: string;
+    isPremium: boolean;
+    cineCoins: number;
+    totalCoinsEarned: number;
+    upiId: string | null;
+    createdAt: string;
+  };
+  subscription: {
+    plan: string | null;
+    startedAt: string | null;
+    expiresAt: string | null;
+    cancelledAt: string | null;
+    paidINR: number;
+    lastPaymentAt: string | null;
+    active: boolean;
+  };
+  purchases: SubscriptionPurchaseItem[];
 }
 
 export interface RecommendationFeed {

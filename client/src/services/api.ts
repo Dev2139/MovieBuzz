@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { Content, Season, Episode, Media, User, WatchHistoryItem, AdminStats, TelegramImportItem, ContentRequest, AdminCatalogResponse, RecommendationFeed, UserTasteProfile, CoinTransactionItem, RedemptionItem, SubscriptionPlanItem } from '../types';
+import { Content, Season, Episode, Media, User, WatchHistoryItem, AdminStats, TelegramImportItem, ContentRequest, AdminCatalogResponse, RecommendationFeed, UserTasteProfile, CoinTransactionItem, RedemptionItem, SubscriptionPlanItem, SubscriberItem, SubscriptionPurchaseItem } from '../types';
 
 const API_URL =
   import.meta.env.VITE_API_URL ||
@@ -572,6 +572,31 @@ export const fetchAdminCoinsStatsApi = async () => {
     pendingRedemptions: number;
     activeSubscribers: number;
   }>('/admin/coins/stats');
+  return res.data;
+};
+
+// ---------- ADMIN: PREMIUM MEMBERSHIP MANAGEMENT ----------
+
+export const fetchAdminSubscribersApi = async (status: 'all' | 'active' | 'expired' | 'cancelled' = 'all', q = '') => {
+  const res = await api.get<{
+    subscribers: SubscriberItem[];
+    stats: { totalRevenueINR: number; totalPurchases: number };
+  }>('/admin/subscribers', { params: { status, ...(q ? { q } : {}) } });
+  return res.data;
+};
+
+export const cancelSubscriptionApi = async (userId: string, note?: string) => {
+  const res = await api.post<{ message: string }>(`/admin/subscribers/${userId}/cancel`, { note });
+  return res.data;
+};
+
+export const extendSubscriptionApi = async (userId: string, days: number) => {
+  const res = await api.post<{ message: string }>(`/admin/subscribers/${userId}/extend`, { days });
+  return res.data;
+};
+
+export const fetchSubscriberPurchasesApi = async (userId: string) => {
+  const res = await api.get<{ purchases: SubscriptionPurchaseItem[] }>(`/admin/subscribers/${userId}/purchases`);
   return res.data;
 };
 

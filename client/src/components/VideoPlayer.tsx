@@ -1523,7 +1523,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   useEffect(() => {
     if (!user) return;                    // guests do not earn (must be logged in to store coins)
     if (!contentId) return;
-    if (user.role === 'admin' || user.isPremium) return; // premium / admin bypass
+    // Admins never earn; premium members without an active sub don't earn either
+    // (active subscribers DO earn — buying a subscription makes you premium)
+    if (user.role === 'admin') return;
+    if (user.isPremium && !user.subscriptionActive) return;
 
     const TICK_MS = 60 * 1000;
     const coinTick = async () => {
@@ -3774,7 +3777,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       )}
 
       {/* In-Website CineCoins Earned Popup (only for eligible signed-in free users) */}
-      {coinPopup && user && user.role !== 'admin' && !user.isPremium && (
+      {coinPopup && user && user.role !== 'admin' && !(user.isPremium && !user.subscriptionActive) && (
         <div className="absolute inset-0 z-[60] flex items-center justify-center pointer-events-none p-4">
           <div className="pointer-events-auto bg-gradient-to-br from-brand-900 via-dark-card to-dark-surface border-2 border-brand-500/60 rounded-2xl shadow-2xl shadow-brand-500/40 max-w-sm w-full p-5 sm:p-6 relative overflow-hidden animate-fade-in-scale">
             {/* Glow */}

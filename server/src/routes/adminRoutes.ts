@@ -27,6 +27,10 @@ import {
   adminApproveRedemption,
   adminRejectRedemption,
   adminCoinsStats,
+  adminListSubscribers,
+  adminCancelSubscription,
+  adminExtendSubscription,
+  adminSubscriberPurchases,
 } from '../controllers/coinsController';
 import { authenticate, requireAdmin } from '../middleware/authMiddleware';
 
@@ -71,5 +75,11 @@ router.get('/redemptions', adminListRedemptions);
 router.post('/redemptions/:id/approve', adminApproveRedemption);
 router.post('/redemptions/:id/reject', adminRejectRedemption);
 router.get('/coins/stats', adminCoinsStats);
+
+// Premium Membership (Subscription) Management
+router.get('/subscribers', adminListSubscribers);
+router.get('/subscribers/:userId/purchases', adminSubscriberPurchases);
+router.post('/subscribers/:userId/cancel', adminCancelSubscription);
+router.post('/subscribers/:userId/extend', adminExtendSubscription);
 
 export default router;

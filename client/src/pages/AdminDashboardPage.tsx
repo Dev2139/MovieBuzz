@@ -17,6 +17,9 @@ import {
   approveRedemptionApi,
   rejectRedemptionApi,
   fetchAdminCoinsStatsApi,
+  fetchAdminSubscribersApi,
+  cancelSubscriptionApi,
+  extendSubscriptionApi,
 } from '../services/api';
 import {
   Film,
@@ -47,7 +50,7 @@ import {
 
 export const AdminDashboardPage: React.FC = () => {
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState<'overview' | 'manage' | 'requests' | 'users' | 'redemptions' | 'add-movie' | 'add-series'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'manage' | 'requests' | 'users' | 'redemptions' | 'subscribers' | 'add-movie' | 'add-series'>('overview');
 
   // Stats query
   const { data: stats } = useQuery({
@@ -153,6 +156,38 @@ export const AdminDashboardPage: React.FC = () => {
     onSuccess: (data) => {
       alert(data.message || 'Redemption rejected – coins refunded');
       queryClient.invalidateQueries({ queryKey: ['admin-redemptions'] });
+      queryClient.invalidateQueries({ queryKey: ['admin-coins-stats'] });
+    },
+  });
+
+  // Premium Membership (Subscribers) Management
+  const [subscriberStatusFilter, setSubscriberStatusFilter] = useState<'all' | 'active' | 'expired' | 'cancelled'>('all');
+  const [subscriberSearch, setSubscriberSearch] = useState('');
+  const [expandedSubscriber, setExpandedSubscriber] = useState<string | null>(null);
+
+  const { data: subscribersData, isLoading: isSubscribersLoading } = useQuery({
+    queryKey: ['admin-subscribers', subscriberStatusFilter, subscriberSearch],
+    queryFn: () => fetchAdminSubscribersApi(subscriberStatusFilter, subscriberSearch),
+  });
+
+  const cancelSubscriptionMutation = useMutation({
+    mutationFn: ({ userId, note }: { userId: string; note?: string }) =>
+      cancelSubscriptionApi(userId, note),
+    onSuccess: (data) => {
+      alert(data.message || 'Subscription cancelled');
+      queryClient.invalidateQueries({ queryKey: ['admin-subscribers'] });
+      queryClient.invalidateQueries({ queryKey: ['admin-users'] });
+      queryClient.invalidateQueries({ queryKey: ['admin-coins-stats'] });
+    },
+  });
+
+  const extendSubscriptionMutation = useMutation({
+    mutationFn: ({ userId, days }: { userId: string; days: number }) =>
+      extendSubscriptionApi(userId, days),
+    onSuccess: (data) => {
+      alert(data.message || 'Subscription extended');
+      queryClient.invalidateQueries({ queryKey: ['admin-subscribers'] });
+      queryClient.invalidateQueries({ queryKey: ['admin-users'] });
       queryClient.invalidateQueries({ queryKey: ['admin-coins-stats'] });
     },
   });
@@ -355,6 +390,7 @@ export const AdminDashboardPage: React.FC = () => {
           { id: 'users', label: `Users & Premium (${usersData?.totalUsers ?? stats?.totalUsers ?? 0})` },
           { id: 'requests', label: `User Requests (${stats?.pendingRequests || 0})` },
           { id: 'redemptions', label: 'CineCoins Redemptions' },
+          { id: 'subscribers', label: `Premium Members (${subscribersData?.subscribers?.length ?? 0})` },
           { id: 'manage', label: `Manage Catalog (${catalog?.total || 0})` },
           { id: 'add-movie', label: 'Add New Movie' },
           { id: 'add-series', label: 'Add New Series' },
@@ -1162,6 +1198,222 @@ export const AdminDashboardPage: React.FC = () => {
                         )}
                       </div>
                     </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Premium Members (Subscribers) Tab */}
+      {activeTab === 'subscribers' && (
+        <div className="bg-dark-card border border-dark-border rounded-2xl p-6 space-y-6 animate-fade-in">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-dark-border pb-4">
+            <div>
+              <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                <Crown className="w-5 h-5 text-yellow-400" /> Premium Members
+              </h3>
+              <p className="text-xs text-gray-400 mt-1">
+                Everyone who subscribed to a plan. View payments, extend membership, or cancel early —
+                cancelling removes their premium status immediately.
+              </p>
+            </div>
+            <div className="flex gap-2 flex-wrap items-center">
+              <input
+                type="text"
+                placeholder="Search name or email…"
+                value={subscriberSearch}
+                onChange={(e) => setSubscriberSearch(e.target.value)}
+                className="bg-dark-base border border-dark-border rounded-lg px-3 py-1.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-brand-500 w-44"
+              />
+              {(['all', 'active', 'expired', 'cancelled'] as const).map((s) => (
+                <button
+                  key={s}
+                  onClick={() => setSubscriberStatusFilter(s)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold capitalize transition ${
+                    subscriberStatusFilter === s
+                      ? 'bg-brand-500 text-white'
+                      : 'bg-dark-base border border-dark-border text-gray-400 hover:text-white'
+                  }`}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Revenue stats */}
+          {subscribersData && (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="p-3 bg-dark-base border border-dark-border rounded-xl">
+                <div className="text-[10px] text-gray-500 uppercase font-bold">Subscription Revenue</div>
+                <div className="text-xl font-black text-green-400">₹{subscribersData.stats.totalRevenueINR}</div>
+              </div>
+              <div className="p-3 bg-dark-base border border-dark-border rounded-xl">
+                <div className="text-[10px] text-gray-500 uppercase font-bold">Total Purchases</div>
+                <div className="text-xl font-black text-white">{subscribersData.stats.totalPurchases}</div>
+              </div>
+              <div className="p-3 bg-dark-base border border-dark-border rounded-xl">
+                <div className="text-[10px] text-gray-500 uppercase font-bold">Active Members</div>
+                <div className="text-xl font-black text-yellow-400">{coinsStats?.activeSubscribers ?? 0}</div>
+              </div>
+              <div className="p-3 bg-dark-base border border-dark-border rounded-xl">
+                <div className="text-[10px] text-gray-500 uppercase font-bold">Shown</div>
+                <div className="text-xl font-black text-purple-400">{subscribersData.subscribers.length}</div>
+              </div>
+            </div>
+          )}
+
+          {isSubscribersLoading ? (
+            <div className="text-gray-500 text-sm">Loading premium members…</div>
+          ) : (subscribersData?.subscribers || []).length === 0 ? (
+            <div className="text-center py-10 text-gray-500 text-sm bg-dark-base border border-dark-border rounded-xl">
+              No subscribers match this filter.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {(subscribersData?.subscribers || []).map((row) => {
+                const u = row.user;
+                const s = row.subscription;
+                const isExpanded = expandedSubscriber === u._id;
+                const daysLeft = s.active && s.expiresAt
+                  ? Math.max(0, Math.ceil((new Date(s.expiresAt).getTime() - Date.now()) / 86400000))
+                  : 0;
+                return (
+                  <div key={u._id} className="p-4 bg-dark-base border border-dark-border rounded-xl">
+                    <div className="flex flex-col lg:flex-row lg:items-center gap-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-white font-bold">{u.name}</span>
+                          <span className="text-gray-500 text-xs truncate">{u.email}</span>
+                          <span className="text-[10px] px-2 py-0.5 rounded-full font-bold uppercase bg-brand-500/20 text-brand-300 capitalize">
+                            {s.plan || '—'}
+                          </span>
+                          <span
+                            className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${
+                              s.cancelledAt
+                                ? 'bg-red-500/20 text-red-300'
+                                : s.active
+                                  ? 'bg-green-500/20 text-green-300'
+                                  : 'bg-gray-500/20 text-gray-300'
+                            }`}
+                          >
+                            {s.cancelledAt ? 'cancelled' : s.active ? 'active' : 'expired'}
+                          </span>
+                        </div>
+                        <div className="text-xs text-gray-400 mt-1.5 space-y-0.5">
+                          <div>
+                            Paid: <b className="text-green-400">₹{s.paidINR}</b>
+                            {s.lastPaymentAt && (
+                              <span> • last payment {new Date(s.lastPaymentAt).toLocaleDateString()}</span>
+                            )}
+                          </div>
+                          <div>
+                            Started: {s.startedAt ? new Date(s.startedAt).toLocaleDateString() : '—'}
+                            {' • '}
+                            {s.cancelledAt
+                              ? <>Cancelled: <b className="text-red-300">{new Date(s.cancelledAt).toLocaleString()}</b></>
+                              : s.expiresAt && (
+                                  <>
+                                    Expires: <b className={s.active ? 'text-white' : 'text-gray-500'}>{new Date(s.expiresAt).toLocaleDateString()}</b>
+                                    {s.active && <span className="text-yellow-300"> ({daysLeft}d left)</span>}
+                                  </>
+                                )}
+                          </div>
+                          <div>
+                            Coins: <b className="text-brand-300">{u.cineCoins}</b> held /{' '}
+                            <b className="text-brand-300">{u.totalCoinsEarned}</b> lifetime
+                            {u.upiId && (
+                              <span> • UPI: <span className="font-mono text-white">{u.upiId}</span></span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex gap-2 shrink-0 flex-wrap">
+                        <button
+                          onClick={() => setExpandedSubscriber(isExpanded ? null : u._id)}
+                          className="px-3 py-1.5 rounded-lg bg-dark-border hover:bg-dark-hover text-gray-200 text-xs font-bold transition"
+                        >
+                          {isExpanded ? 'Hide payments' : `Payments (${row.purchases.length})`}
+                        </button>
+                        <button
+                          onClick={() => {
+                            const input = prompt('Grant extra premium days:', '30');
+                            const days = Math.floor(Number(input) || 0);
+                            if (days > 0) extendSubscriptionMutation.mutate({ userId: u._id, days });
+                          }}
+                          disabled={extendSubscriptionMutation.isPending}
+                          className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-blue-500/80 hover:bg-blue-500 text-white text-xs font-bold transition disabled:opacity-50"
+                        >
+                          <Plus className="w-3 h-3" /> Extend
+                        </button>
+                        {!s.cancelledAt && s.active && (
+                          <button
+                            onClick={() => {
+                              const note = prompt('Reason for cancellation (optional):', 'Cancelled by admin') || '';
+                              if (confirm(`Cancel ${u.name}'s premium membership immediately?`)) {
+                                cancelSubscriptionMutation.mutate({ userId: u._id, note });
+                              }
+                            }}
+                            disabled={cancelSubscriptionMutation.isPending}
+                            className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-red-500/80 hover:bg-red-500 text-white text-xs font-bold transition disabled:opacity-50"
+                          >
+                            <Ban className="w-3 h-3" /> Cancel
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Purchase history ledger */}
+                    {isExpanded && (
+                      <div className="mt-3 border-t border-dark-border pt-3">
+                        {row.purchases.length === 0 ? (
+                          <div className="text-xs text-gray-500">No purchase records.</div>
+                        ) : (
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-xs">
+                              <thead>
+                                <tr className="text-gray-500 uppercase text-[10px] text-left">
+                                  <th className="py-1.5 pr-3 font-bold">Date</th>
+                                  <th className="py-1.5 pr-3 font-bold">Plan</th>
+                                  <th className="py-1.5 pr-3 font-bold">Amount</th>
+                                  <th className="py-1.5 pr-3 font-bold">Duration</th>
+                                  <th className="py-1.5 pr-3 font-bold">Valid Until</th>
+                                  <th className="py-1.5 font-bold">Status</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {row.purchases.map((p) => (
+                                  <tr key={p._id} className="border-t border-dark-border/50 text-gray-300">
+                                    <td className="py-1.5 pr-3">{new Date(p.createdAt).toLocaleDateString()}</td>
+                                    <td className="py-1.5 pr-3 font-semibold text-white">{p.planName}</td>
+                                    <td className="py-1.5 pr-3">{p.priceINR > 0 ? `₹${p.priceINR}` : 'Free (admin)'}</td>
+                                    <td className="py-1.5 pr-3">{p.durationDays}d</td>
+                                    <td className="py-1.5 pr-3">{new Date(p.expiresAt).toLocaleDateString()}</td>
+                                    <td className="py-1.5">
+                                      <span
+                                        className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${
+                                          p.status === 'active'
+                                            ? 'bg-green-500/20 text-green-300'
+                                            : p.status === 'cancelled'
+                                              ? 'bg-red-500/20 text-red-300'
+                                              : 'bg-gray-500/20 text-gray-300'
+                                        }`}
+                                      >
+                                        {p.status}
+                                        {p.cancelNote ? ` – ${p.cancelNote}` : ''}
+                                      </span>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
               })}

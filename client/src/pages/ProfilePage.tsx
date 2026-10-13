@@ -227,8 +227,25 @@ export const ProfilePage: React.FC = () => {
                     ).toLocaleDateString()}
                   </span>
                 </div>
-                <div className="flex items-center gap-1 text-green-400 text-xs">
+                <div className="flex items-center gap-1 text-green-400 text-xs mb-2">
                   <CheckCircle2 className="w-3 h-3" /> Redemption unlocked
+                </div>
+                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-gradient-to-r from-yellow-400/20 to-brand-500/20 border border-yellow-400/40 text-yellow-300 text-[10px] font-black uppercase tracking-wider mb-2">
+                  <Crown className="w-3 h-3" /> Premium Member
+                </div>
+                <div className="text-xs text-gray-400">
+                  Total paid:{' '}
+                  <b className="text-green-400">
+                    ₹{(coins as any)?.subscriptionPaidINR ?? user.subscriptionPaidINR ?? 0}
+                  </b>
+                  {((coins as any)?.subscriptionLastPaymentAt || user.subscriptionLastPaymentAt) && (
+                    <>
+                      {' • last payment '}
+                      {new Date(
+                        (coins as any)?.subscriptionLastPaymentAt || user.subscriptionLastPaymentAt || Date.now()
+                      ).toLocaleDateString()}
+                    </>
+                  )}
                 </div>
               </>
             ) : (

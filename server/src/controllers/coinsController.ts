@@ -1,8 +1,10 @@
 import { Response } from 'express';
+import mongoose from 'mongoose';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { User } from '../models/User';
 import { CoinTransaction } from '../models/CoinTransaction';
 import { Redemption } from '../models/Redemption';
+import { SubscriptionPurchase } from '../models/SubscriptionPurchase';
 
 /**
  * CineCoins loyalty system:
@@ -57,20 +59,47 @@ const isSubscriptionActive = (user: any): boolean => {
   return new Date(user.subscriptionExpiresAt).getTime() > Date.now();
 };
 
+/**
+ * Lazy subscription lifecycle: if a user's subscription has lapsed, demote them
+ * from premium (isPremium = false) so they return to free-user state and can earn
+ * coins again. Callers must re-save the user if this returns true.
+ */
+const syncSubscriptionState = async (user: any): Promise<boolean> => {
+  if (!user) return false;
+  const stillActive =
+    user.subscriptionPlan &&
+    user.subscriptionExpiresAt &&
+    new Date(user.subscriptionExpiresAt).getTime() > Date.now();
+  let changed = false;
+  if (!stillActive && user.subscriptionPlan) {
+    // Lapsed → remove premium badge but keep plan history fields
+    if (user.isPremium) {
+      user.isPremium = false;
+      changed = true;
+    }
+  }
+  return changed ? user.save().then(() => true) : false;
+};
+
 const planMultiplier = (planId: string | null): number => {
   if (planId === 'premium') return 1.5;
   return 1;
 };
 
 /**
- * Only signed-in FREE users earn coins.
- * Premium accounts (legacy `isPremium = true`) and admin accounts are exempt
- * from the whole loyalty programme per the product spec.
+ * Coin earning eligibility:
+ *   - Guests: no (not logged in)
+ *   - Admins: no
+ *   - Premium members WITHOUT an active subscription: no (per product spec,
+ *     premium accounts don't earn; once their sub lapses they become free again
+ *     via syncSubscriptionState and resume earning)
+ * Subscribers with an ACTIVE subscription still earn (premium plan = 1.5× rate)
+ * because they need coins to redeem.
  */
 const canUserEarnCoins = (user: any): boolean => {
   if (!user) return false;
   if (user.role === 'admin') return false;
-  if (user.isPremium === true) return false;
+  if (user.isPremium === true && !isSubscriptionActive(user)) return false;
   return true;
 };
 
@@ -116,6 +145,9 @@ const serializeUserCoins = (user: any) => ({
   subscriptionPlan: user.subscriptionPlan || null,
   subscriptionStartedAt: user.subscriptionStartedAt || null,
   subscriptionExpiresAt: user.subscriptionExpiresAt || null,
+  subscriptionCancelledAt: user.subscriptionCancelledAt || null,
+  subscriptionPaidINR: user.subscriptionPaidINR || 0,
+  subscriptionLastPaymentAt: user.subscriptionLastPaymentAt || null,
   subscriptionActive: isSubscriptionActive(user),
   upiId: user.upiId || null,
   canEarnCoins: canUserEarnCoins(user),
@@ -132,19 +164,23 @@ export const trackWatchTime = async (req: AuthRequest, res: Response) => {
     if (!req.user) return res.status(401).json({ message: 'Unauthorized' });
     const { seconds, contentId } = req.body || {};
 
-    // Admin & legacy premium accounts are not eligible for the loyalty programme.
-    if (!canUserEarnCoins(req.user)) {
-      return res.json({ ignored: true, reason: 'not eligible', ...serializeUserCoins(req.user) });
+    // Load fresh user first so eligibility uses up-to-date subscription state
+    const user = await User.findById(req.user._id);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    // Demote lapsed subscriptions back to free state (mutates + saves in place)
+    await syncSubscriptionState(user);
+
+    // Admin & inactive-premium accounts are not eligible for the loyalty programme.
+    if (!canUserEarnCoins(user)) {
+      return res.json({ ignored: true, reason: 'not eligible', ...serializeUserCoins(user) });
     }
 
     // Sanity clamp: never accept more than 5 minutes at once, must be positive
     const sec = Math.min(Math.max(Number(seconds) || 0, 0), 300);
     if (sec <= 0) {
-      return res.json({ ignored: true, ...serializeUserCoins(req.user) });
+      return res.json({ ignored: true, ...serializeUserCoins(user) });
     }
-
-    const user = await User.findById(req.user._id);
-    if (!user) return res.status(404).json({ message: 'User not found' });
 
     // Expire any stale balance first so the new earn starts a fresh 5h window
     await expireStaleCoins(user);
@@ -200,6 +236,9 @@ export const getUserCoins = async (req: AuthRequest, res: Response) => {
     if (!req.user) return res.status(401).json({ message: 'Unauthorized' });
     const user = await User.findById(req.user._id);
     if (!user) return res.status(404).json({ message: 'User not found' });
+
+    // Demote lapsed subscriptions back to free state
+    await syncSubscriptionState(user);
 
     // Lazily expire stale coins before showing the balance
     await expireStaleCoins(user);
@@ -315,10 +354,27 @@ export const purchaseSubscription = async (req: AuthRequest, res: Response) => {
     user.subscriptionPlan = plan.id;
     if (!user.subscriptionStartedAt) user.subscriptionStartedAt = now;
     user.subscriptionExpiresAt = newExpiry;
+    user.subscriptionCancelledAt = null;
+    user.subscriptionLastPaymentAt = now;
+    user.subscriptionPaidINR = (user.subscriptionPaidINR || 0) + plan.priceINR;
+    // Buying a subscription makes the user a PREMIUM member
+    user.isPremium = true;
     await user.save();
 
+    // Payment ledger entry (one per purchase) for admin visibility
+    await SubscriptionPurchase.create({
+      userId: user._id,
+      planId: plan.id,
+      planName: plan.name,
+      priceINR: plan.priceINR,
+      durationDays: plan.durationDays,
+      startedAt: now,
+      expiresAt: newExpiry,
+      status: 'active',
+    });
+
     return res.json({
-      message: `Subscribed to ${plan.name}! Coins can now be redeemed to your UPI.`,
+      message: `Subscribed to ${plan.name}! You are now a Premium member and can redeem CineCoins to your UPI.`,
       plan,
       ...serializeUserCoins(user),
     });
@@ -464,5 +520,199 @@ export const adminCoinsStats = async (_req: AuthRequest, res: Response) => {
     });
   } catch (error) {
     return res.status(500).json({ message: 'Error loading coin stats' });
+  }
+};
+
+// ---------- ADMIN: PREMIUM MEMBERSHIP MANAGEMENT ----------
+
+/**
+ * GET /api/admin/subscribers?status=all|active|expired|cancelled&q=search
+ * Lists all users who ever bought a subscription with payment info + purchase history.
+ */
+export const adminListSubscribers = async (req: AuthRequest, res: Response) => {
+  try {
+    const status = (req.query.status as string) || 'all';
+    const q = ((req.query.q as string) || '').trim();
+
+    const filter: any = { subscriptionPlan: { $ne: null } };
+    if (status === 'active') {
+      filter.subscriptionExpiresAt = { $gt: new Date() };
+      filter.subscriptionCancelledAt = null;
+    } else if (status === 'expired') {
+      filter.subscriptionExpiresAt = { $lte: new Date() };
+      filter.subscriptionCancelledAt = null;
+    } else if (status === 'cancelled') {
+      filter.subscriptionCancelledAt = { $ne: null };
+    }
+    if (q) {
+      filter.$or = [
+        { name: { $regex: q, $options: 'i' } },
+        { email: { $regex: q, $options: 'i' } },
+      ];
+    }
+
+    const users = await User.find(filter)
+      .sort({ subscriptionPaidINR: -1, subscriptionExpiresAt: -1 })
+      .limit(200)
+      .select('name email isPremium cineCoins totalCoinsEarned subscriptionPlan subscriptionStartedAt subscriptionExpiresAt subscriptionCancelledAt subscriptionPaidINR subscriptionLastPaymentAt upiId createdAt');
+
+    // Attach purchase ledger for each displayed user
+    const ids = users.map((u: any) => u._id);
+    const purchases = await SubscriptionPurchase.find({ userId: { $in: ids } })
+      .sort({ createdAt: -1 })
+      .limit(1000)
+      .select('userId planId planName priceINR durationDays startedAt expiresAt status cancelledAt cancelNote createdAt');
+
+    const byUser = new Map<string, any[]>();
+    purchases.forEach((p: any) => {
+      const key = String(p.userId);
+      if (!byUser.has(key)) byUser.set(key, []);
+      byUser.get(key)!.push(p);
+    });
+
+    const now = Date.now();
+    const result = users.map((u: any) => {
+      const active =
+        !!u.subscriptionPlan &&
+        !u.subscriptionCancelledAt &&
+        u.subscriptionExpiresAt &&
+        new Date(u.subscriptionExpiresAt).getTime() > now;
+      return {
+        user: {
+          _id: u._id,
+          name: u.name,
+          email: u.email,
+          isPremium: u.isPremium,
+          cineCoins: u.cineCoins || 0,
+          totalCoinsEarned: u.totalCoinsEarned || 0,
+          upiId: u.upiId || null,
+          createdAt: u.createdAt,
+        },
+        subscription: {
+          plan: u.subscriptionPlan || null,
+          startedAt: u.subscriptionStartedAt || null,
+          expiresAt: u.subscriptionExpiresAt || null,
+          cancelledAt: u.subscriptionCancelledAt || null,
+          paidINR: u.subscriptionPaidINR || 0,
+          lastPaymentAt: u.subscriptionLastPaymentAt || null,
+          active,
+        },
+        purchases: byUser.get(String(u._id)) || [],
+      };
+    });
+
+    // Revenue stats
+    const totalRevenueAgg = await SubscriptionPurchase.aggregate([
+      { $match: { status: { $ne: 'cancelled' } } },
+      { $group: { _id: null, total: { $sum: '$priceINR' }, count: { $sum: 1 } } },
+    ]);
+
+    return res.json({
+      subscribers: result,
+      stats: {
+        totalRevenueINR: totalRevenueAgg[0]?.total || 0,
+        totalPurchases: totalRevenueAgg[0]?.count || 0,
+      },
+    });
+  } catch (error) {
+    console.error('adminListSubscribers error:', error);
+    return res.status(500).json({ message: 'Error listing subscribers' });
+  }
+};
+
+/**
+ * POST /api/admin/subscribers/:userId/cancel
+ * Body: { note?: string }
+ * Admin cancels a premium membership immediately: expiry pulled to now,
+ * premium badge removed, active purchase ledger entries marked cancelled.
+ */
+export const adminCancelSubscription = async (req: AuthRequest, res: Response) => {
+  try {
+    const { userId } = req.params;
+    const note = String(req.body?.note || '').trim() || null;
+
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    if (!user.subscriptionPlan) return res.status(400).json({ message: 'User has no subscription' });
+
+    const now = new Date();
+    user.subscriptionExpiresAt = now;
+    user.subscriptionCancelledAt = now;
+    user.isPremium = false;
+    await user.save();
+
+    await SubscriptionPurchase.updateMany(
+      { userId: user._id, status: 'active' },
+      { $set: { status: 'cancelled', cancelledAt: now, cancelNote: note } }
+    );
+
+    return res.json({ message: 'Subscription cancelled', user: serializeUserCoins(user) });
+  } catch (error) {
+    console.error('adminCancelSubscription error:', error);
+    return res.status(500).json({ message: 'Error cancelling subscription' });
+  }
+};
+
+/**
+ * POST /api/admin/subscribers/:userId/extend
+ * Body: { days: number, note?: string }
+ * Admin grants extra premium days (e.g. support goodwill or manual payment).
+ * Cancels any pending cancellation state and re-premiums the user.
+ */
+export const adminExtendSubscription = async (req: AuthRequest, res: Response) => {
+  try {
+    const { userId } = req.params;
+    const days = Math.floor(Number(req.body?.days) || 0);
+    if (days <= 0 || days > 3650) {
+      return res.status(400).json({ message: 'days must be between 1 and 3650' });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    const now = new Date();
+    const currentExpiry = user.subscriptionExpiresAt ? new Date(user.subscriptionExpiresAt) : null;
+    const baseDate = currentExpiry && currentExpiry > now ? currentExpiry : now;
+    const newExpiry = new Date(baseDate.getTime() + days * 24 * 60 * 60 * 1000);
+
+    user.subscriptionExpiresAt = newExpiry;
+    user.subscriptionCancelledAt = null;
+    if (!user.subscriptionPlan) user.subscriptionPlan = 'pro'; // default plan for manual grants
+    if (!user.subscriptionStartedAt) user.subscriptionStartedAt = now;
+    user.isPremium = true;
+    await user.save();
+
+    await SubscriptionPurchase.create({
+      userId: user._id,
+      planId: 'admin-grant',
+      planName: `Admin grant (${days} days)`,
+      priceINR: 0,
+      durationDays: days,
+      startedAt: now,
+      expiresAt: newExpiry,
+      status: 'active',
+    });
+
+    return res.json({ message: `Extended subscription by ${days} days`, user: serializeUserCoins(user) });
+  } catch (error) {
+    console.error('adminExtendSubscription error:', error);
+    return res.status(500).json({ message: 'Error extending subscription' });
+  }
+};
+
+/**
+ * GET /api/admin/subscribers/:userId/purchases
+ * Full payment history for one subscriber.
+ */
+export const adminSubscriberPurchases = async (req: AuthRequest, res: Response) => {
+  try {
+    const { userId } = req.params;
+    if (!mongoose.isValidObjectId(userId)) {
+      return res.status(400).json({ message: 'Invalid user id' });
+    }
+    const purchases = await SubscriptionPurchase.find({ userId }).sort({ createdAt: -1 });
+    return res.json({ purchases });
+  } catch (error) {
+    return res.status(500).json({ message: 'Error loading purchases' });
   }
 };

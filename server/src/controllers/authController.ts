@@ -20,10 +20,15 @@ const publicUserPayload = (u: any) => ({
   watchTimeCounter: u.watchTimeCounter || 0,
   coinsExpiryAt: u.coinsExpiryAt || null,
   coinTtlMs: 5 * 60 * 60 * 1000,
-  canEarnCoins: u.role !== 'admin' && !u.isPremium,
+  canEarnCoins:
+    u.role !== 'admin' &&
+    !(u.isPremium && !(u.subscriptionPlan && u.subscriptionExpiresAt && new Date(u.subscriptionExpiresAt).getTime() > Date.now())),
   subscriptionPlan: u.subscriptionPlan || null,
   subscriptionStartedAt: u.subscriptionStartedAt || null,
   subscriptionExpiresAt: u.subscriptionExpiresAt || null,
+  subscriptionCancelledAt: u.subscriptionCancelledAt || null,
+  subscriptionPaidINR: u.subscriptionPaidINR || 0,
+  subscriptionLastPaymentAt: u.subscriptionLastPaymentAt || null,
   subscriptionActive: Boolean(
     u.subscriptionPlan &&
     u.subscriptionExpiresAt &&

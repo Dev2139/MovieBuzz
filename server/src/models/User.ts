@@ -18,6 +18,9 @@ export interface IUser extends Document {
   subscriptionPlan: string | null; // 'basic' | 'pro' | 'premium'
   subscriptionStartedAt: Date | null;
   subscriptionExpiresAt: Date | null;
+  subscriptionCancelledAt: Date | null;  // set when admin cancels the membership
+  subscriptionPaidINR: number;           // lifetime amount the user paid for subscriptions
+  subscriptionLastPaymentAt: Date | null; // most recent payment date
   upiId: string | null;            // saved for redemption payouts
 
   createdAt: Date;
@@ -43,6 +46,9 @@ const UserSchema: Schema = new Schema(
     subscriptionPlan: { type: String, default: null },
     subscriptionStartedAt: { type: Date, default: null },
     subscriptionExpiresAt: { type: Date, default: null },
+    subscriptionCancelledAt: { type: Date, default: null },
+    subscriptionPaidINR: { type: Number, default: 0 },
+    subscriptionLastPaymentAt: { type: Date, default: null },
     upiId: { type: String, default: null, trim: true },
   },
   { timestamps: true }
