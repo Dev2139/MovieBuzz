@@ -164,21 +164,41 @@ export const HomePage: React.FC = () => {
     staleTime: 30 * 1000,
   });
 
-  // Pick best available item for Hero Banner
-  const heroItem =
-    (featuredData?.items && featuredData.items.length > 0 ? featuredData.items[0] : null) ||
-    (trendingMoviesData?.items && trendingMoviesData.items.length > 0 ? trendingMoviesData.items[0] : null) ||
-    (trendingSeriesData?.items && trendingSeriesData.items.length > 0 ? trendingSeriesData.items[0] : null) ||
-    (popularMoviesData?.items && popularMoviesData.items.length > 0 ? popularMoviesData.items[0] : null) ||
-    (allContentData?.items && allContentData.items.length > 0 ? allContentData.items[0] : null);
+  // Multi-item recommended & featured catalog for auto-scrolling Hero Carousel
+  const heroItems = React.useMemo(() => {
+    // 1. Prioritize user's personalized recommendations
+    if (recommendationsData?.topPicks && recommendationsData.topPicks.length > 0) {
+      return recommendationsData.topPicks.slice(0, 7);
+    }
+    // 2. Featured items
+    if (featuredData?.items && featuredData.items.length > 0) {
+      return featuredData.items.slice(0, 7);
+    }
+    // 3. Fallback combination of trending & top rated
+    const candidates = [
+      ...(trendingMoviesData?.items || []),
+      ...(trendingSeriesData?.items || []),
+      ...(allContentData?.items || []),
+    ];
+    const seen = new Set<string>();
+    const uniqueList: any[] = [];
+    for (const itm of candidates) {
+      if (itm && !seen.has(itm._id)) {
+        seen.add(itm._id);
+        uniqueList.push(itm);
+      }
+      if (uniqueList.length >= 7) break;
+    }
+    return uniqueList;
+  }, [recommendationsData, featuredData, trendingMoviesData, trendingSeriesData, allContentData]);
 
-  const isLoading = isFeaturedLoading && isAllLoading;
+  const isLoading = isFeaturedLoading && isAllLoading && isRecsLoading;
 
   return (
     <div className="min-h-screen bg-dark-base text-white pb-24 md:pb-16 space-y-6 sm:space-y-8">
-      {/* Hero Banner Section */}
-      {heroItem ? (
-        <HeroBanner item={heroItem} />
+      {/* Hero Banner Section (Auto-scrolling recommended carousel) */}
+      {heroItems.length > 0 ? (
+        <HeroBanner items={heroItems} autoPlayInterval={5500} />
       ) : isLoading ? (
         <div className="h-[52vh] sm:h-[65vh] w-full bg-dark-surface/80 animate-pulse flex flex-col items-center justify-center space-y-3">
           <Sparkles className="w-10 h-10 text-brand-500/50 animate-spin" />
