@@ -14,6 +14,7 @@ export interface IUser extends Document {
   cineCoins: number;               // spendable / redeemable balance
   totalCoinsEarned: number;        // lifetime counter (for stats only)
   watchTimeCounter: number;        // pending seconds not yet converted into coins
+  coinsExpiryAt: Date | null;      // coins expire 5 hours after first unspent earn (unless redeemed)
   subscriptionPlan: string | null; // 'basic' | 'pro' | 'premium'
   subscriptionStartedAt: Date | null;
   subscriptionExpiresAt: Date | null;
@@ -38,6 +39,7 @@ const UserSchema: Schema = new Schema(
     cineCoins: { type: Number, default: 0, min: 0 },
     totalCoinsEarned: { type: Number, default: 0 },
     watchTimeCounter: { type: Number, default: 0 },
+    coinsExpiryAt: { type: Date, default: null },
     subscriptionPlan: { type: String, default: null },
     subscriptionStartedAt: { type: Date, default: null },
     subscriptionExpiresAt: { type: Date, default: null },

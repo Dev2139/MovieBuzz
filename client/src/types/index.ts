@@ -82,6 +82,9 @@ export interface User {
   cineCoins?: number;
   totalCoinsEarned?: number;
   watchTimeCounter?: number;
+  coinsExpiryAt?: string | null;
+  coinTtlMs?: number;
+  canEarnCoins?: boolean;
   subscriptionPlan?: 'basic' | 'pro' | 'premium' | null;
   subscriptionStartedAt?: string | null;
   subscriptionExpiresAt?: string | null;
@@ -92,7 +95,7 @@ export interface User {
 export interface CoinTransactionItem {
   _id: string;
   userId: string;
-  type: 'earned' | 'redeemed' | 'refund' | 'admin-adjust';
+  type: 'earned' | 'redeemed' | 'refund' | 'admin-adjust' | 'expired';
   amount: number;
   balanceAfter: number;
   watchSeconds?: number;

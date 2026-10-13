@@ -357,6 +357,21 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [isBuffering, setIsBuffering] = useState<boolean>(true);
+
+  // In-website CineCoins earned popup
+  const [coinPopup, setCoinPopup] = useState<{
+    amount: number;
+    balance: number;
+    expiresAt: string | null;
+    ts: number;
+  } | null>(null);
+
+  // Auto-dismiss the coin popup after 6 seconds
+  useEffect(() => {
+    if (!coinPopup) return;
+    const t = setTimeout(() => setCoinPopup(null), 6000);
+    return () => clearTimeout(t);
+  }, [coinPopup]);
   const [currentTime, setCurrentTime] = useState<number>(initialPosition);
   const [duration, setDuration] = useState<number>(0);
   const [streamError, setStreamError] = useState<string | null>(null);
@@ -1504,9 +1519,11 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   // not hidden, not showing the pre-roll ad), report 60 active seconds to the server.
   // Server-side buffering / network stalls (isBuffering) DO count as watch time (per user's requirement),
   // but pausing, tab switching, or leaving the player are NOT counted.
+  // Premium (legacy isPremium) and admin accounts are not eligible for the loyalty programme.
   useEffect(() => {
-    if (!user) return;         // guests do not earn (must be logged in to store coins)
+    if (!user) return;                    // guests do not earn (must be logged in to store coins)
     if (!contentId) return;
+    if (user.role === 'admin' || user.isPremium) return; // premium / admin bypass
 
     const TICK_MS = 60 * 1000;
     const coinTick = async () => {
@@ -1527,12 +1544,20 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             cineCoins: res.cineCoins,
             totalCoinsEarned: res.totalCoinsEarned,
             watchTimeCounter: res.watchTimeCounter,
+            coinsExpiryAt: res.coinsExpiryAt ?? null,
           });
-          showToast(`+${res.earned} CineCoins earned! 🎬`);
+          // Trigger the big in-website popup notification (auto-dismisses in 6s)
+          setCoinPopup({
+            amount: res.earned,
+            balance: res.cineCoins,
+            expiresAt: res.coinsExpiryAt ?? null,
+            ts: Date.now(),
+          });
         } else if (res) {
           patchUser({
             cineCoins: res.cineCoins,
             watchTimeCounter: res.watchTimeCounter,
+            coinsExpiryAt: res.coinsExpiryAt ?? null,
           });
         }
       } catch {
@@ -1542,7 +1567,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
     const timer = setInterval(coinTick, TICK_MS);
     return () => clearInterval(timer);
-  }, [user, contentId, isPlayingAd, isAdFreeUser, patchUser, showToast]);
+  }, [user, contentId, isPlayingAd, isAdFreeUser, patchUser]);
 
   // Background byte-range prefetcher for direct MP4 / proxy / Telegram streams:
   // Runs continuously to keep prefetching forward bytes into the browser HTTP cache, both while
@@ -3744,6 +3769,100 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 width: `${adDuration > 0 ? (adCurrentTime / adDuration) * 100 : 0}%`,
               }}
             />
+          </div>
+        </div>
+      )}
+
+      {/* In-Website CineCoins Earned Popup (only for eligible signed-in free users) */}
+      {coinPopup && user && user.role !== 'admin' && !user.isPremium && (
+        <div className="absolute inset-0 z-[60] flex items-center justify-center pointer-events-none p-4">
+          <div className="pointer-events-auto bg-gradient-to-br from-brand-900 via-dark-card to-dark-surface border-2 border-brand-500/60 rounded-2xl shadow-2xl shadow-brand-500/40 max-w-sm w-full p-5 sm:p-6 relative overflow-hidden animate-fade-in-scale">
+            {/* Glow */}
+            <div className="absolute -top-12 -right-12 w-40 h-40 bg-brand-500/30 rounded-full blur-3xl pointer-events-none" />
+
+            {/* Close */}
+            <button
+              onClick={() => setCoinPopup(null)}
+              className="absolute top-2 right-2 p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/10 transition z-10"
+              aria-label="Close"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            <div className="relative z-10 flex items-start gap-4">
+              {/* Coin icon */}
+              <div className="shrink-0 w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-gradient-to-br from-yellow-400 to-brand-500 flex items-center justify-center shadow-lg shadow-brand-500/40 animate-coin-pop">
+                <span className="text-2xl sm:text-3xl">🎬</span>
+              </div>
+
+              <div className="flex-1 min-w-0">
+                <div className="text-[10px] uppercase tracking-widest font-bold text-brand-300 mb-1">
+                  CineCoins Earned
+                </div>
+                <div className="text-2xl sm:text-3xl font-black text-white mb-1 leading-none">
+                  +{coinPopup.amount} <span className="text-brand-300 text-base sm:text-lg font-bold">coins</span>
+                </div>
+                <div className="text-sm text-gray-200 mb-2">
+                  You watched <b className="text-white">30 minutes</b> straight. Keep it up!
+                </div>
+                <div className="text-xs text-brand-300 font-semibold">
+                  Balance: <span className="text-white font-black">{coinPopup.balance} coins</span>
+                  {' = ₹'}{coinPopup.balance}
+                </div>
+              </div>
+            </div>
+
+            {/* 5-hour expiry warning */}
+            <div className="relative z-10 mt-4 flex items-center gap-2 bg-red-500/10 border border-red-500/40 rounded-xl px-3 py-2">
+              <svg className="w-4 h-4 text-red-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3m0 4h.01M4.93 19.07A7.97 7.97 0 0112 4a7.97 7.97 0 016.66 3.57c.5.83.83 1.77.98 2.76a7.97 7.97 0 01-2.19 7.24A7.97 7.97 0 0112 20a7.97 7.97 0 01-7.07-4.93" />
+              </svg>
+              <div className="text-[11px] sm:text-xs text-red-200 leading-tight">
+                <b>Expires in 5 hours</b> if not redeemed. Buy any subscription plan to cash out to your UPI.
+              </div>
+            </div>
+
+            {/* Countdown bar to expiry */}
+            {coinPopup.expiresAt && (() => {
+              const msLeft = new Date(coinPopup.expiresAt).getTime() - Date.now();
+              const hrsLeft = Math.max(0, Math.floor(msLeft / 3600000));
+              const minsLeft = Math.max(0, Math.floor((msLeft % 3600000) / 60000));
+              const pct = Math.max(0, Math.min(100, (msLeft / (5 * 3600000)) * 100));
+              return (
+                <div className="relative z-10 mt-3">
+                  <div className="flex justify-between text-[10px] text-gray-400 mb-1 font-semibold">
+                    <span>⏳ {hrsLeft}h {minsLeft}m to redeem</span>
+                    <span>5h window</span>
+                  </div>
+                  <div className="h-1.5 bg-dark-base/60 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-gradient-to-r from-red-500 via-yellow-500 to-green-500 transition-all"
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                </div>
+              );
+            })()}
+
+            <div className="relative z-10 mt-4 flex gap-2">
+              <a
+                href="/profile"
+                onClick={(e) => {
+                  e.preventDefault();
+                  setCoinPopup(null);
+                  window.location.href = '/profile';
+                }}
+                className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-brand-500 hover:bg-brand-600 text-white text-xs font-bold transition"
+              >
+                Redeem now
+              </a>
+              <button
+                onClick={() => setCoinPopup(null)}
+                className="flex-1 px-3 py-2 rounded-xl bg-dark-border hover:bg-dark-border/70 text-gray-200 text-xs font-bold transition"
+              >
+                Keep watching
+              </button>
+            </div>
           </div>
         </div>
       )}

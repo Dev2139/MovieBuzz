@@ -499,6 +499,9 @@ export const trackWatchTimeApi = async (seconds: number, contentId?: string) => 
     totalCoinsEarned: number;
     watchTimeCounter: number;
     subscriptionActive: boolean;
+    coinsExpiryAt: string | null;
+    coinTtlMs: number;
+    canEarnCoins: boolean;
   }>('/users/coins/track', { seconds, contentId });
   return res.data;
 };
@@ -508,6 +511,9 @@ export const fetchUserCoinsApi = async () => {
     cineCoins: number;
     totalCoinsEarned: number;
     watchTimeCounter: number;
+    coinsExpiryAt: string | null;
+    coinTtlMs: number;
+    canEarnCoins: boolean;
     subscriptionPlan: string | null;
     subscriptionStartedAt: string | null;
     subscriptionExpiresAt: string | null;

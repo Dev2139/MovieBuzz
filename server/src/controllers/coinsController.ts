@@ -18,6 +18,7 @@ import { Redemption } from '../models/Redemption';
 export const COIN_EARN_SECONDS = 1800;   // 30 min of active watching
 export const COIN_EARN_AMOUNT = 2;       // 2 coins per 30 min
 export const COIN_VALUE_INR = 1;         // 1 coin = ₹1
+export const COIN_TTL_MS = 5 * 60 * 60 * 1000; // Unredeemed coins expire 5 hours after earning
 
 export interface SubscriptionPlanDef {
   id: string;
@@ -61,15 +62,63 @@ const planMultiplier = (planId: string | null): number => {
   return 1;
 };
 
+/**
+ * Only signed-in FREE users earn coins.
+ * Premium accounts (legacy `isPremium = true`) and admin accounts are exempt
+ * from the whole loyalty programme per the product spec.
+ */
+const canUserEarnCoins = (user: any): boolean => {
+  if (!user) return false;
+  if (user.role === 'admin') return false;
+  if (user.isPremium === true) return false;
+  return true;
+};
+
+/**
+ * Lazily expire coins older than COIN_TTL_MS. Called before every read/write.
+ * Logs an `expired` transaction so the user's activity feed shows the drop.
+ * Mutates the in-memory user doc; caller still needs to `.save()` if it changes.
+ */
+const expireStaleCoins = async (user: any): Promise<boolean> => {
+  if (!user) return false;
+  if (!user.cineCoins || user.cineCoins <= 0) {
+    // Nothing to expire – just make sure stale expiry pointer is cleared
+    if (user.coinsExpiryAt) {
+      user.coinsExpiryAt = null;
+      await user.save();
+      return true;
+    }
+    return false;
+  }
+  if (user.coinsExpiryAt && new Date(user.coinsExpiryAt).getTime() <= Date.now()) {
+    const lost = user.cineCoins;
+    user.cineCoins = 0;
+    user.coinsExpiryAt = null;
+    await user.save();
+    await CoinTransaction.create({
+      userId: user._id,
+      type: 'expired',
+      amount: -lost,
+      balanceAfter: 0,
+      note: `Coins expired after 5 hours of non-redemption`,
+    });
+    return true;
+  }
+  return false;
+};
+
 const serializeUserCoins = (user: any) => ({
   cineCoins: user.cineCoins || 0,
   totalCoinsEarned: user.totalCoinsEarned || 0,
   watchTimeCounter: user.watchTimeCounter || 0,
+  coinsExpiryAt: user.coinsExpiryAt || null,
+  coinTtlMs: COIN_TTL_MS,
   subscriptionPlan: user.subscriptionPlan || null,
   subscriptionStartedAt: user.subscriptionStartedAt || null,
   subscriptionExpiresAt: user.subscriptionExpiresAt || null,
   subscriptionActive: isSubscriptionActive(user),
   upiId: user.upiId || null,
+  canEarnCoins: canUserEarnCoins(user),
 });
 
 /**
@@ -83,6 +132,11 @@ export const trackWatchTime = async (req: AuthRequest, res: Response) => {
     if (!req.user) return res.status(401).json({ message: 'Unauthorized' });
     const { seconds, contentId } = req.body || {};
 
+    // Admin & legacy premium accounts are not eligible for the loyalty programme.
+    if (!canUserEarnCoins(req.user)) {
+      return res.json({ ignored: true, reason: 'not eligible', ...serializeUserCoins(req.user) });
+    }
+
     // Sanity clamp: never accept more than 5 minutes at once, must be positive
     const sec = Math.min(Math.max(Number(seconds) || 0, 0), 300);
     if (sec <= 0) {
@@ -91,6 +145,9 @@ export const trackWatchTime = async (req: AuthRequest, res: Response) => {
 
     const user = await User.findById(req.user._id);
     if (!user) return res.status(404).json({ message: 'User not found' });
+
+    // Expire any stale balance first so the new earn starts a fresh 5h window
+    await expireStaleCoins(user);
 
     // Premium users still earn coins (they get 1.5× on Premium plan)
     let counter = (user.watchTimeCounter || 0) + sec;
@@ -103,8 +160,13 @@ export const trackWatchTime = async (req: AuthRequest, res: Response) => {
     }
 
     if (earned > 0) {
+      const hadNoBalance = !user.cineCoins || user.cineCoins <= 0;
       user.cineCoins = (user.cineCoins || 0) + earned;
       user.totalCoinsEarned = (user.totalCoinsEarned || 0) + earned;
+      // First unspent coin in a new cycle → set expiry timestamp (5 hours from now)
+      if (hadNoBalance || !user.coinsExpiryAt) {
+        user.coinsExpiryAt = new Date(Date.now() + COIN_TTL_MS);
+      }
       await CoinTransaction.create({
         userId: user._id,
         type: 'earned',
@@ -138,6 +200,9 @@ export const getUserCoins = async (req: AuthRequest, res: Response) => {
     if (!req.user) return res.status(401).json({ message: 'Unauthorized' });
     const user = await User.findById(req.user._id);
     if (!user) return res.status(404).json({ message: 'User not found' });
+
+    // Lazily expire stale coins before showing the balance
+    await expireStaleCoins(user);
 
     const [transactions, redemptions] = await Promise.all([
       CoinTransaction.find({ userId: user._id }).sort({ createdAt: -1 }).limit(60),
@@ -179,6 +244,9 @@ export const redeemCoins = async (req: AuthRequest, res: Response) => {
 
     const user = await User.findById(req.user._id);
     if (!user) return res.status(404).json({ message: 'User not found' });
+
+    // Fresh state after any lazy expiry
+    await expireStaleCoins(user);
 
     if (!isSubscriptionActive(user)) {
       return res.status(403).json({
