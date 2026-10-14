@@ -157,6 +157,53 @@ function isSafeExternalUrl(targetUrl: string): boolean {
   }
 }
 
+/** Detect an HLS manifest by URL extension. */
+function looksLikeHlsManifest(url: string): boolean {
+  return /\.m3u8(\?|$)/i.test(url);
+}
+
+/**
+ * Rewrite an HLS (.m3u8) playlist so that EVERY child URI (segments, variant
+ * playlists, EXT-X-KEY / EXT-X-MAP URIs) is routed back through the embed-proxy
+ * as an absolute URL. This lets captured HLS with relative segments play in the
+ * browser, because hls.js would otherwise resolve them against our proxy host
+ * instead of the upstream CDN. Child playlists are re-marked with ext=.m3u8 so
+ * they get recursively rewritten on the next request.
+ */
+function rewriteHlsManifest(text: string, manifestUrl: string, referer: string | undefined, proxyBase: string): string {
+  const resolveAbs = (u: string): string => new URL(u, manifestUrl).toString();
+  const wrap = (abs: string, isManifest: boolean): string => {
+    const p = new URLSearchParams({ url: abs });
+    if (referer) p.set('r', referer);
+    if (isManifest) p.set('ext', '.m3u8');
+    return `${proxyBase}?${p.toString()}`;
+  };
+
+  const lines = text.split(/\r?\n/);
+  const out = lines.map((line) => {
+    const trimmed = line.trim();
+    if (trimmed === '') return line;
+    if (trimmed.startsWith('#')) {
+      // Rewrite quoted URI="..." attributes (KEY / MAP / MEDIA / PART / etc.).
+      return line.replace(/URI="([^"]+)"/g, (_m, uri) => {
+        try {
+          return `URI="${wrap(resolveAbs(uri), looksLikeHlsManifest(uri))}"`;
+        } catch {
+          return _m;
+        }
+      });
+    }
+    // A bare (non-comment) line is a segment or child-playlist URI.
+    try {
+      const abs = resolveAbs(trimmed);
+      return wrap(abs, looksLikeHlsManifest(abs));
+    } catch {
+      return line;
+    }
+  });
+  return out.join('\n');
+}
+
 function embedKindToFormat(kind: ValidatedEmbedSource['kind']) {
   if (kind === 'hls') return { format: 'HLS', mimeType: 'application/vnd.apple.mpegurl' };
   if (kind === 'dash') return { format: 'DASH', mimeType: 'application/dash+xml' };
@@ -170,12 +217,17 @@ function embedKindToFormat(kind: ValidatedEmbedSource['kind']) {
  * embed proxy which re-fetches the CDN with the correct hotlink Referer.
  */
 function formatEmbedSources(sources: ValidatedEmbedSource[], baseUrl: string) {
+  // Prefer the Cloudflare Worker relay (free/unmetered egress) so video bytes
+  // never touch Render's bandwidth. Fall back to Render's own embed-proxy only
+  // when no CF worker base is configured.
+  const cfRoot = (process.env.CLOUDFLARE_STREAM_PROXY_URL || '').trim().replace(/\/+$/, '');
+  const proxyEndpoint = cfRoot ? `${cfRoot}/embed` : `${baseUrl}/api/streaming/embed-proxy`;
   return sources.map((s, idx) => {
     const { format, mimeType } = embedKindToFormat(s.kind);
     const marker = s.kind === 'hls' ? '.m3u8' : s.kind === 'dash' ? '.mpd' : '.mp4';
     const params = new URLSearchParams({ url: s.url });
     if (s.referer) params.set('r', s.referer);
-    const streamUrl = `${baseUrl}/api/streaming/embed-proxy?${params.toString()}&ext=${marker}`;
+    const streamUrl = `${proxyEndpoint}?${params.toString()}&ext=${marker}`;
     const sizeGb = s.sizeBytes ? `${(s.sizeBytes / (1024 * 1024 * 1024)).toFixed(2)} GB` : 'Standard';
     return {
       resourceId: `embed-${s.provider}-${idx}`,
@@ -791,6 +843,48 @@ export const proxyEmbedStream = async (req: Request, res: Response) => {
       /* ignore */
     }
   }
+  // HLS manifests are fetched as text and rewritten so that every relative
+  // segment / key / child-playlist resolves back through this proxy (recursively).
+  // Everything else (MP4 files, media segments) is byte-range streamed below.
+  const wantsManifest = looksLikeHlsManifest(targetUrl) || req.query.ext === '.m3u8';
+  if (wantsManifest) {
+    try {
+      const manifestRes = await streamClient.get(targetUrl, {
+        headers: { ...requestHeaders, Accept: 'application/vnd.apple.mpegurl, application/x-mpegURL, */*' },
+        responseType: 'text',
+        validateStatus: () => true,
+        timeout: 20000,
+        maxRedirects: 5,
+      });
+      const finalUrl: string =
+        (manifestRes as any).request?.res?.responseUrl ||
+        (manifestRes as any).request?.responseUrl ||
+        targetUrl;
+      const text = String(manifestRes.data || '');
+
+      const mHost = req.get('host') || 'localhost:5000';
+      const mProto = (req.headers['x-forwarded-proto'] as string) || req.protocol || 'http';
+      const proxyBase = `${mProto}://${mHost}/api/streaming/embed-proxy`;
+
+      res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', '*');
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+
+      if (manifestRes.status !== 200 || !text.startsWith('#EXTM3U')) {
+        return res.status(manifestRes.status || 502).json({ error: 'Failed to fetch HLS manifest.' });
+      }
+      const rewritten = rewriteHlsManifest(text, finalUrl, referer, proxyBase);
+      return res.status(200).send(rewritten);
+    } catch (error: any) {
+      console.error('proxyEmbedStream manifest error:', error.message);
+      if (!res.headersSent) return res.status(502).json({ error: 'Failed to fetch HLS manifest.' });
+      return;
+    }
+  }
+
   if (range) requestHeaders['Range'] = range;
 
   try {

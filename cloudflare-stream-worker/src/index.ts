@@ -44,6 +44,72 @@ function corsHeaders(): Headers {
   return h;
 }
 
+// ---------------------------------------------------------------------------
+// Generic embed relay (arbitrary CDN host + per-source Referer)
+// ---------------------------------------------------------------------------
+
+// SSRF guard: only public http(s) hosts, never loopback/private/link-local.
+function isSafeExternalUrl(targetUrl: string): boolean {
+  try {
+    const parsed = new URL(targetUrl);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+    const host = parsed.hostname;
+    if (!host) return false;
+    if (host === 'localhost' || /\.(local|internal|localdomain)$/.test(host)) return false;
+    const ipv4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+    if (ipv4) {
+      const a = parseInt(ipv4[1], 10);
+      const b = parseInt(ipv4[2], 10);
+      if (a === 0 || a === 10 || a === 127) return false;
+      if (a === 169 && b === 254) return false;
+      if (a === 172 && b >= 16 && b <= 31) return false;
+      if (a === 192 && b === 168) return false;
+      if (a === 100 && b >= 64 && b <= 127) return false;
+    }
+    if (host === '::1' || host.startsWith('fe80') || host.startsWith('fd') || host.startsWith('fc')) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function looksLikeM3u8(u: string): boolean {
+  return /\.m3u8(\?|$)/i.test(u);
+}
+
+// Rewrite an HLS playlist so every child URI (segments, variant playlists,
+// EXT-X-KEY / EXT-X-MAP URIs) resolves back through this /embed endpoint.
+function rewriteHlsManifest(text: string, manifestUrl: string, referer: string, proxyBase: string): string {
+  const resolveAbs = (u: string): string => new URL(u, manifestUrl).toString();
+  const wrap = (abs: string, isManifest: boolean): string => {
+    const p = new URLSearchParams({ url: abs });
+    if (referer) p.set('r', referer);
+    if (isManifest) p.set('ext', '.m3u8');
+    return `${proxyBase}?${p.toString()}`;
+  };
+  const lines = text.split(/\r?\n/);
+  const out = lines.map((line) => {
+    const t = line.trim();
+    if (t === '') return line;
+    if (t.startsWith('#')) {
+      return line.replace(/URI="([^"]+)"/g, (_m, uri) => {
+        try {
+          return `URI="${wrap(resolveAbs(uri), looksLikeM3u8(uri))}"`;
+        } catch {
+          return _m;
+        }
+      });
+    }
+    try {
+      const abs = resolveAbs(t);
+      return wrap(abs, looksLikeM3u8(abs));
+    } catch {
+      return line;
+    }
+  });
+  return out.join('\n');
+}
+
 export default {
   async fetch(request: Request, env: any, ctx: any): Promise<Response> {
     const url = new URL(request.url);
@@ -180,6 +246,68 @@ export default {
         status: upstreamRes.status,
         headers: respHeaders,
       });
+    }
+
+    // 5. Generic embed relay: /embed?url=...&r=<referer>&ext=<marker>
+    //    Carries arbitrary embed-CDN streams (found by the headless extractor)
+    //    through Cloudflare's free/unmetered egress so the origin server uses no
+    //    bandwidth. Injects the per-source hotlink Referer and rewrites HLS.
+    if (url.pathname === '/embed') {
+      const targetUrl = url.searchParams.get('url') || '';
+      const referer = url.searchParams.get('r') || '';
+      const ext = url.searchParams.get('ext') || '';
+      if (!targetUrl || !isSafeExternalUrl(targetUrl)) {
+        return new Response('Invalid or disallowed video URL', { status: 400 });
+      }
+
+      const upstreamHeaders = new Headers();
+      upstreamHeaders.set(
+        'User-Agent',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+      );
+      if (referer) {
+        upstreamHeaders.set('Referer', referer);
+        try {
+          upstreamHeaders.set('Origin', new URL(referer).origin);
+        } catch {
+          /* ignore */
+        }
+      }
+      const range = request.headers.get('range');
+      if (range) upstreamHeaders.set('Range', range);
+
+      // HLS manifests are fetched as text and rewritten (recursively).
+      if (looksLikeM3u8(targetUrl) || ext === '.m3u8') {
+        const res = await fetch(targetUrl, { headers: upstreamHeaders, redirect: 'follow' });
+        const finalUrl = res.url || targetUrl;
+        const text = await res.text();
+        const proxyBase = `${url.protocol}//${url.host}/embed`;
+        const h = corsHeaders();
+        h.set('Content-Type', 'application/vnd.apple.mpegurl');
+        h.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+        if (res.status !== 200 || !text.startsWith('#EXTM3U')) {
+          return new Response('Failed to fetch HLS manifest', { status: res.status || 502, headers: h });
+        }
+        return new Response(rewriteHlsManifest(text, finalUrl, referer, proxyBase), { status: 200, headers: h });
+      }
+
+      // Everything else (MP4 files, media segments) is relayed + edge-cached.
+      const isSegment = /\.(m4s|mp4|ts|webm|aac|m4v|mka)(\?|$)/i.test(targetUrl);
+      const relayOptions: any = {
+        headers: upstreamHeaders,
+        redirect: 'follow',
+        cf: { cacheEverything: true, cacheTtl: isSegment ? 86400 : 3600 },
+      };
+      const upstreamRes = await fetch(targetUrl, relayOptions);
+
+      const respHeaders = new Headers(upstreamRes.headers);
+      respHeaders.set('Access-Control-Allow-Origin', '*');
+      respHeaders.set('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+      respHeaders.set('Access-Control-Allow-Headers', '*');
+      respHeaders.set('Accept-Ranges', 'bytes');
+      if (isSegment) respHeaders.set('Cache-Control', 'public, max-age=86400');
+
+      return new Response(upstreamRes.body, { status: upstreamRes.status, headers: respHeaders });
     }
 
     return new Response('Not Found', { status: 404 });

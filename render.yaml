@@ -1,0 +1,32 @@
+# Render Blueprint — one-click deploy of the headless stream extractor.
+#
+# How to use:
+#   1. Commit this file to your GitHub repo (it lives at the repo root).
+#   2. In Render: New + -> Blueprint -> connect the MovieBuzz repo -> Apply.
+#   3. Render creates the `stream-extractor` web service from stream-extractor/.
+#   4. Copy the resulting URL (https://stream-extractor.onrender.com) and set it
+#      as STREAM_EXTRACTOR_URL on your existing `moviebuzz-server` service.
+#
+# Note: this blueprint ONLY adds the extractor. It does not touch your existing
+# moviebuzz-server, so nothing there is overwritten.
+
+services:
+  - type: web
+    name: stream-extractor
+    runtime: docker
+    rootDir: stream-extractor
+    dockerfilePath: ./Dockerfile
+    plan: free
+    region: oregon
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # Tunables (defaults are fine; raise WAIT_FOR_MEDIA if a provider is slow).
+      - key: NAV_TIMEOUT
+        value: "25000"
+      - key: WAIT_FOR_MEDIA
+        value: "16000"
+      - key: CACHE_TTL_MS
+        value: "1200000"
