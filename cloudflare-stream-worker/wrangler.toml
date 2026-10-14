@@ -4,3 +4,12 @@ compatibility_date = "2024-04-01"
 
 [placement]
 mode = "smart"
+
+# Workers Logs — lets you see every /embed request for debugging.
+[observability]
+enabled = true
+
+[observability.logs]
+enabled = true
+invocation_logs = true
+persist = true
