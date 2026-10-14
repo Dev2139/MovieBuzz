@@ -1,17 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { Link, useNavigate, useLocation } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { usePWA } from '../context/PWAContext';
-import { Film, Search, Bookmark, History, Shield, LogOut, User as UserIcon, Menu, X, Sparkles, Smartphone, Download, Crown } from 'lucide-react';
+import { Film, Bookmark, History, Shield, LogOut, User as UserIcon, Menu, Crown } from 'lucide-react';
 import { NotificationBell } from './NotificationBell';
 
 export const Navbar: React.FC = () => {
   const { user, logout, openAuthModal } = useAuth();
-  const { canInstall, isInstalled, promptInstall } = usePWA();
-  const navigate = useNavigate();
   const location = useLocation();
   const [isScrolled, setIsScrolled] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
 
@@ -28,18 +24,9 @@ export const Navbar: React.FC = () => {
     return null;
   }
 
-  const handleSearchSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (searchQuery.trim()) {
-      navigate(`/search?q=${encodeURIComponent(searchQuery.trim())}`);
-      setIsMobileMenuOpen(false);
-    }
-  };
-
   const navLinks = [
     { name: 'Home', path: '/' },
     { name: 'Search', path: '/search' },
-    { name: 'Requests', path: '/requests' },
     { name: 'Genres', path: '/search?genre=all' },
     { name: 'Watchlist', path: '/watchlist' },
     { name: 'History', path: '/history' },
@@ -106,28 +93,6 @@ export const Navbar: React.FC = () => {
 
         {/* Right Search & Profile Area (Desktop) */}
         <div className="hidden md:flex items-center space-x-3">
-          {canInstall && !isInstalled && (
-            <button
-              onClick={promptInstall}
-              className="flex items-center space-x-1.5 bg-gradient-to-r from-brand-500 to-red-600 hover:from-brand-600 hover:to-red-700 text-white text-xs font-extrabold px-3 py-1.5 rounded-full shadow-lg shadow-brand-500/25 transition-all transform hover:scale-105 active:scale-95 animate-pulse"
-              title="Install MovieBuzz App directly on your device"
-            >
-              <Smartphone className="w-3.5 h-3.5" />
-              <span>Install App</span>
-            </button>
-          )}
-
-          <form onSubmit={handleSearchSubmit} className="relative">
-            <input
-              type="text"
-              placeholder="Search movies, series..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="bg-dark-surface/90 border border-dark-border rounded-full pl-9 pr-4 py-1.5 text-xs text-white placeholder-gray-400 focus:outline-none focus:border-brand-500 w-44 focus:w-60 transition-all duration-300"
-            />
-            <Search className="absolute left-3 top-2 w-3.5 h-3.5 text-gray-400" />
-          </form>
-
           <NotificationBell />
 
           {user ? (
@@ -204,25 +169,6 @@ export const Navbar: React.FC = () => {
 
         {/* Mobile Header Icons */}
         <div className="md:hidden flex items-center space-x-2">
-          {canInstall && !isInstalled && (
-            <button
-              onClick={promptInstall}
-              className="flex items-center space-x-1 bg-brand-500/20 text-brand-400 border border-brand-500/40 hover:bg-brand-500 hover:text-white px-2.5 py-1 rounded-xl text-xs font-bold transition-all"
-              title="Install App"
-            >
-              <Download className="w-3.5 h-3.5" />
-              <span>Install</span>
-            </button>
-          )}
-
-          <button
-            onClick={() => navigate('/search')}
-            className="p-2 text-gray-300 hover:text-white bg-dark-surface/80 rounded-xl border border-dark-border/60"
-            aria-label="Search"
-          >
-            <Search className="w-4 h-4" />
-          </button>
-
           <NotificationBell />
 
           {user ? (
@@ -249,30 +195,6 @@ export const Navbar: React.FC = () => {
       {/* Mobile Drawer Slide-Down */}
       {isMobileMenuOpen && (
         <div className="md:hidden fixed inset-x-0 top-[57px] bg-dark-card/95 backdrop-blur-2xl border-b border-dark-border px-4 py-5 space-y-4 shadow-2xl animate-fade-in z-50">
-          {canInstall && !isInstalled && (
-            <button
-              onClick={() => {
-                promptInstall();
-                setIsMobileMenuOpen(false);
-              }}
-              className="w-full flex items-center justify-center space-x-2 py-3 bg-gradient-to-r from-brand-500 to-red-600 hover:from-brand-600 hover:to-red-700 text-white font-extrabold text-xs rounded-xl shadow-lg shadow-brand-500/25 animate-pulse"
-            >
-              <Smartphone className="w-4 h-4" />
-              <span>Install MovieBuzz App to Device</span>
-            </button>
-          )}
-
-          <form onSubmit={handleSearchSubmit} className="relative">
-            <input
-              type="text"
-              placeholder="Search catalog..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-dark-surface border border-dark-border rounded-xl pl-9 pr-4 py-2 text-sm text-white focus:outline-none focus:border-brand-500"
-            />
-            <Search className="absolute left-3 top-3 w-4 h-4 text-gray-400" />
-          </form>
-
           {user && (
             <div className="bg-dark-surface p-3 rounded-xl border border-dark-border flex items-center justify-between">
               <div>

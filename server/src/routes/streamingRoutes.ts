@@ -7,6 +7,8 @@ import {
   getEpisodeSources,
   resolveStreamingSources,
   proxyVideoStream,
+  proxyEmbedStream,
+  diagnoseEmbedProviders,
   proxyDashStream,
   proxySubtitle,
   getSubtitles,
@@ -22,10 +24,12 @@ router.get('/series/seasons-episodes', getSeriesSeasonsEpisodes);
 router.get('/series/:id/seasons', getSeriesSeasons);
 router.get('/episodes/:id/sources', getEpisodeSources);
 router.get('/resolve', resolveStreamingSources);
+router.get('/providers/diagnose', diagnoseEmbedProviders);
 
 // Media & subtitle streaming proxies
 router.get('/dash/:token/*', proxyDashStream);
 router.get('/proxy', proxyVideoStream);
+router.get('/embed-proxy', proxyEmbedStream);
 router.get('/subtitle', proxySubtitle);
 router.get('/subtitles', getSubtitles);
 router.get('/subtitles/file', getSubtitleFile);

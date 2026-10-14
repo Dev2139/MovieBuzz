@@ -75,16 +75,19 @@ export const WatchPage: React.FC = () => {
   // MovieBox Dynamic Playback Source Resolution
   const rawTitle = isMovie ? movieData?.content?.title : seriesData?.series?.title;
   const rawYear = isMovie ? movieData?.content?.releaseYear : seriesData?.series?.releaseYear;
+  const rawImdbId = isMovie ? movieData?.content?.imdbId : seriesData?.series?.imdbId;
+  const rawTmdbId = isMovie ? movieData?.content?.tmdbId : seriesData?.series?.tmdbId;
 
   const { data: movieboxData, isLoading: isMovieboxLoading } = useQuery({
-    queryKey: ['moviebox-sources', rawTitle, rawYear, isMovie ? 'movie' : 'series', currentSeasonNum, currentEpNum],
+    queryKey: ['moviebox-sources', rawTitle, rawYear, isMovie ? 'movie' : 'series', currentSeasonNum, currentEpNum, rawImdbId, rawTmdbId],
     queryFn: () =>
       resolveStreamingSourcesByTitle(
         rawTitle!,
         rawYear,
         isMovie ? 'movie' : 'series',
         currentSeasonNum,
-        currentEpNum
+        currentEpNum,
+        { imdbId: rawImdbId, tmdbId: rawTmdbId }
       ),
     enabled: Boolean(rawTitle),
     refetchOnWindowFocus: false,
@@ -185,9 +188,19 @@ export const WatchPage: React.FC = () => {
         isOriginal: s.isOriginal,
       }));
     }
+    // Fallback to catalog-stored media, but only sources that are NOT legacy Telegram
+    // proxy-file records (Telegram streaming is retired and those URLs return 503).
     const directFallback = isMovie ? movieData?.media : seriesData?.media;
     if (directFallback && Array.isArray(directFallback) && directFallback.length > 0) {
-      return directFallback;
+      const usable = directFallback.filter((m: any) => {
+        const url: string = m?.streamUrl || m?.downloadUrl || '';
+        const isTelegramProxy =
+          m?.provider === 'telegram' ||
+          url.includes('/api/media/proxy-file/') ||
+          url.includes('/proxy-file/');
+        return !isTelegramProxy && Boolean(url);
+      });
+      if (usable.length > 0) return usable;
     }
     return [];
   }, [movieboxData?.sources, isMovie, movieData?.media, seriesData?.media]);

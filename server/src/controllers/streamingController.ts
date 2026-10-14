@@ -5,6 +5,7 @@ import axios from 'axios';
 import { movieboxService } from '../services/movieboxService';
 import { tmdbService, cleanMovieTitle } from '../services/tmdb/tmdbService';
 import { subtitleService, srtToVtt } from '../services/subtitleService';
+import { resolveEmbedSources, diagnoseProviders, ValidatedEmbedSource, EmbedResolveContext } from '../services/embedProviderService';
 
 // Persistent HTTP/HTTPS connection pooling to prevent TLS handshake overhead on every DASH segment
 // Raised to 100 sockets to handle concurrent mobile viewers without queuing
@@ -121,6 +122,104 @@ function formatStreamingSources(sources: any[], baseUrl: string) {
 
 function formatStreamingSource(s: any, baseUrl: string) {
   return formatStreamingSources([s], baseUrl)[0];
+}
+
+// ---------------------------------------------------------------------------
+// Embed-provider (on-demand, zero-storage) playback support
+// ---------------------------------------------------------------------------
+
+/**
+ * SSRF guard for the on-the-fly embed proxy. Unlike /proxy (fixed allow-list),
+ * embed sources resolve to arbitrary CDN hosts, so we validate the target is a
+ * public http(s) URL and refuse loopback / private / link-local / metadata IPs.
+ */
+function isSafeExternalUrl(targetUrl: string): boolean {
+  try {
+    const parsed = new URL(targetUrl);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+    const host = parsed.hostname;
+    if (!host) return false;
+    if (host === 'localhost' || host.endsWith('.local') || host.endsWith('.internal')) return false;
+    // Reject raw IPv4 literals that are private / loopback / link-local / CGNAT.
+    const ipv4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+    if (ipv4) {
+      const [a, b] = [parseInt(ipv4[1], 10), parseInt(ipv4[2], 10)];
+      if (a === 0 || a === 10 || a === 127) return false;
+      if (a === 169 && b === 254) return false;      // link-local / cloud metadata
+      if (a === 172 && b >= 16 && b <= 31) return false;
+      if (a === 192 && b === 168) return false;
+      if (a === 100 && b >= 64 && b <= 127) return false; // CGNAT
+    }
+    if (host === '::1' || host.startsWith('fe80') || host.startsWith('fd') || host.startsWith('fc')) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function embedKindToFormat(kind: ValidatedEmbedSource['kind']) {
+  if (kind === 'hls') return { format: 'HLS', mimeType: 'application/vnd.apple.mpegurl' };
+  if (kind === 'dash') return { format: 'DASH', mimeType: 'application/dash+xml' };
+  return { format: 'MP4', mimeType: 'video/mp4' };
+}
+
+/**
+ * Turn validated embed sources into the exact shape the client's VideoPlayer
+ * expects. The streamUrl always carries a literal marker (`.mp4` / `.m3u8` /
+ * `.mpd`) so the player auto-selects the right engine, and it points at our
+ * embed proxy which re-fetches the CDN with the correct hotlink Referer.
+ */
+function formatEmbedSources(sources: ValidatedEmbedSource[], baseUrl: string) {
+  return sources.map((s, idx) => {
+    const { format, mimeType } = embedKindToFormat(s.kind);
+    const marker = s.kind === 'hls' ? '.m3u8' : s.kind === 'dash' ? '.mpd' : '.mp4';
+    const params = new URLSearchParams({ url: s.url });
+    if (s.referer) params.set('r', s.referer);
+    const streamUrl = `${baseUrl}/api/streaming/embed-proxy?${params.toString()}&ext=${marker}`;
+    const sizeGb = s.sizeBytes ? `${(s.sizeBytes / (1024 * 1024 * 1024)).toFixed(2)} GB` : 'Standard';
+    return {
+      resourceId: `embed-${s.provider}-${idx}`,
+      quality: `${format} • ${s.provider}`,
+      resolution: 'Auto',
+      codecName: 'auto',
+      fileSize: sizeGb,
+      streamUrl,
+      rawStreamUrl: s.url,
+      format,
+      mimeType,
+      provider: `cinestream-${s.provider}`,
+      audioLang: 'en',
+      audioName: 'Original Audio',
+      isOriginal: true,
+    };
+  });
+}
+
+/**
+ * Resolve embed sources, filling in any missing imdb/tmdb ids via TMDB so the
+ * providers get accurate identifiers even when the client only sent a title.
+ */
+async function resolveEmbedViaFallback(
+  ctx: EmbedResolveContext & { tmdbId?: string }
+) {
+  let { imdbId, tmdbId } = ctx;
+  if (!imdbId && !tmdbId) {
+    try {
+      const meta: any = await tmdbService.fetchMetadata(ctx.title, ctx.year, ctx.type);
+      if (meta) {
+        imdbId = imdbId || meta.imdbId;
+        tmdbId = tmdbId || (meta.tmdbId ? String(meta.tmdbId) : undefined);
+      }
+    } catch {
+      /* ignore metadata lookup failures */
+    }
+  }
+  try {
+    const sources = await resolveEmbedSources({ ...ctx, imdbId, tmdbId });
+    return sources;
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -391,17 +490,40 @@ export const resolveStreamingSources = async (req: Request, res: Response) => {
     const type = (req.query.type as string || 'movie') === 'series' ? 'series' : 'movie';
     const season = parseInt(req.query.season as string || '1', 10);
     const episode = parseInt(req.query.episode as string || '1', 10);
-
-    const resolved = await movieboxService.resolveByTitle(title, year, type, season, episode);
-    if (!resolved || !resolved.sources || !resolved.sources.length) {
-      return res.json({ subject: resolved?.subject || null, sources: [], dubs: [] });
-    }
+    const imdbId = (req.query.imdbId as string || '').trim() || undefined;
+    const tmdbIdParam = req.query.tmdbId ? String(req.query.tmdbId).trim() : undefined;
 
     const host = req.get('host') || 'localhost:5000';
     const protocol = (req.headers['x-forwarded-proto'] as string) || req.protocol || 'http';
     const baseUrl = `${protocol}://${host}`;
 
-    const formattedSources = formatStreamingSources(resolved.sources, baseUrl);
+    const resolved = await movieboxService.resolveByTitle(title, year, type, season, episode);
+    const movieboxSources: any[] = resolved?.sources || [];
+
+    if (movieboxSources.length === 0) {
+      // MovieBox has stopped serving real video for most titles. Fall back to
+      // on-demand embed providers (no storage, your player keeps full control).
+      const embedSources = await resolveEmbedViaFallback({
+        title,
+        year,
+        type,
+        season,
+        episode,
+        imdbId,
+        tmdbId: tmdbIdParam,
+      });
+      if (embedSources.length > 0) {
+        return res.json({
+          subject: resolved?.subject || null,
+          sources: formatEmbedSources(embedSources, baseUrl),
+          dubs: [],
+          provider: 'embed',
+        });
+      }
+      return res.json({ subject: resolved?.subject || null, sources: [], dubs: [] });
+    }
+
+    const formattedSources = formatStreamingSources(movieboxSources, baseUrl);
 
     // Concurrently fetch subtitles for resolved content
     let subtitles: any[] = [];
@@ -418,9 +540,9 @@ export const resolveStreamingSources = async (req: Request, res: Response) => {
     }
 
     return res.json({
-      subject: resolved.subject,
+      subject: resolved?.subject || null,
       sources: formattedSources,
-      dubs: resolved.dubs || [],
+      dubs: resolved?.dubs || [],
       subtitles,
     });
   } catch (error: any) {
@@ -639,6 +761,113 @@ export const proxyVideoStream = async (req: Request, res: Response) => {
     if (!res.headersSent) {
       res.status(502).json({ error: 'Failed to fetch upstream video chunk.' });
     }
+  }
+};
+
+/**
+ * GET /api/streaming/embed-proxy?url=...&r=<referer>&ext=<marker>
+ * On-the-fly byte-range proxy for validated embed-provider streams. Re-fetches
+ * the hotlink-protected CDN with the correct Referer/Origin. Guarded against
+ * SSRF (public http(s) only). The `ext` marker is ignored here but lets the
+ * client detect the stream type from the URL.
+ */
+export const proxyEmbedStream = async (req: Request, res: Response) => {
+  const targetUrl = (req.query.url as string) || '';
+  const referer = (req.query.r as string) || undefined;
+  if (!targetUrl || !isSafeExternalUrl(targetUrl)) {
+    return res.status(400).json({ error: 'Invalid or disallowed video URL.' });
+  }
+
+  const range = req.headers.range;
+  const requestHeaders: Record<string, string> = {
+    'User-Agent':
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+  };
+  if (referer) {
+    requestHeaders['Referer'] = referer;
+    try {
+      requestHeaders['Origin'] = new URL(referer).origin;
+    } catch {
+      /* ignore */
+    }
+  }
+  if (range) requestHeaders['Range'] = range;
+
+  try {
+    const upstreamRes = await streamClient.get(targetUrl, {
+      headers: requestHeaders,
+      responseType: 'stream',
+      validateStatus: () => true,
+      timeout: 30000,
+      maxRedirects: 5,
+    });
+
+    res.status(upstreamRes.status);
+    res.setHeader('Content-Type', String(upstreamRes.headers['content-type'] || 'video/mp4'));
+    res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', '*');
+    res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=3600');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Accel-Buffering', 'no');
+    if (upstreamRes.headers['content-range']) {
+      res.setHeader('Content-Range', String(upstreamRes.headers['content-range']));
+    }
+    if (upstreamRes.headers['content-length']) {
+      res.setHeader('Content-Length', String(upstreamRes.headers['content-length']));
+    }
+
+    res.flushHeaders();
+    upstreamRes.data.pipe(res);
+
+    req.on('close', () => {
+      if (upstreamRes.data && typeof upstreamRes.data.destroy === 'function') {
+        upstreamRes.data.destroy();
+      }
+    });
+  } catch (error: any) {
+    console.error('proxyEmbedStream error:', error.message);
+    if (!res.headersSent) {
+      res.status(502).json({ error: 'Failed to fetch upstream embed chunk.' });
+    }
+  }
+};
+
+/**
+ * GET /api/streaming/providers/diagnose?title=&year=&type=&imdbId=&tmdbId=&season=&episode=
+ * Runs every embed provider independently and reports which returned real,
+ * validated streams. Use this from the production network (Render) to see which
+ * providers are live there.
+ */
+export const diagnoseEmbedProviders = async (req: Request, res: Response) => {
+  try {
+    const title = (req.query.title as string || 'Interstellar').trim();
+    const year = req.query.year ? parseInt(req.query.year as string, 10) : undefined;
+    const type = (req.query.type as string || 'movie') === 'series' ? 'series' : 'movie';
+    const season = parseInt(req.query.season as string || '1', 10);
+    const episode = parseInt(req.query.episode as string || '1', 10);
+    const imdbId = (req.query.imdbId as string || '').trim() || undefined;
+    let tmdbId = req.query.tmdbId ? String(req.query.tmdbId).trim() : undefined;
+
+    let resolvedImdb = imdbId;
+    if (!resolvedImdb && !tmdbId) {
+      try {
+        const meta: any = await tmdbService.fetchMetadata(title, year, type);
+        resolvedImdb = meta?.imdbId;
+        tmdbId = meta?.tmdbId ? String(meta.tmdbId) : undefined;
+      } catch { /* ignore */ }
+    }
+
+    const perProvider = await diagnoseProviders({ title, year, type, season, episode, imdbId: resolvedImdb, tmdbId });
+    return res.json({
+      query: { title, year, type, season, episode, imdbId: resolvedImdb, tmdbId },
+      providers: perProvider,
+    });
+  } catch (error: any) {
+    console.error('diagnoseEmbedProviders error:', error.message);
+    return res.status(500).json({ error: 'Diagnose failed.', details: error.message });
   }
 };
 

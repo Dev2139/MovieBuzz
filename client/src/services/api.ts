@@ -441,7 +441,8 @@ export const resolveStreamingSourcesByTitle = async (
   year?: number,
   type: 'movie' | 'series' = 'movie',
   season: number = 1,
-  episode: number = 1
+  episode: number = 1,
+  ids?: { imdbId?: string; tmdbId?: number | string }
 ) => {
   const res = await api.get<{
     subject: any;
@@ -449,7 +450,15 @@ export const resolveStreamingSourcesByTitle = async (
     dubs?: Array<{ subjectId: string; name: string; code: string; original?: boolean }>;
     subtitles?: SubtitleTrack[];
   }>('/streaming/resolve', {
-    params: { title, year, type, season, episode },
+    params: {
+      title,
+      year,
+      type,
+      season,
+      episode,
+      ...(ids?.imdbId ? { imdbId: ids.imdbId } : {}),
+      ...(ids?.tmdbId ? { tmdbId: ids.tmdbId } : {}),
+    },
   });
   return res.data;
 };
