@@ -207,6 +207,41 @@ const PROVIDERS: Record<string, ProviderFn> = {
       return [];
     }
   },
+
+  // Headless extractor worker — the ONLY provider that can pass Cloudflare JS
+  // challenges. Delegates to a separate Chromium service (STREAM_EXTRACTOR_URL)
+  // which loads the gated embed page in a real browser and captures the actual
+  // playable .m3u8/.mp4 request. Returns it so your own player streams it.
+  'headless': async (ctx) => {
+    const base = (process.env.STREAM_EXTRACTOR_URL || '').trim();
+    if (!base) return [];
+    const id = ctx.imdbId || ctx.tmdbId;
+    if (!id) return [];
+    const params = new URLSearchParams({
+      type: ctx.type,
+      season: String(ctx.season || 1),
+      episode: String(ctx.episode || 1),
+    });
+    if (ctx.imdbId) params.set('imdbId', ctx.imdbId);
+    if (ctx.tmdbId) params.set('tmdbId', String(ctx.tmdbId));
+    try {
+      const res = await axios.get(`${base.replace(/\/+$/, '')}/extract?${params.toString()}`, {
+        timeout: 45000,
+        validateStatus: () => true,
+      });
+      const data = res.data;
+      if (!data || typeof data.url !== 'string') return [];
+      return [
+        {
+          url: data.url,
+          referer: data.referer || `${base}`,
+          provider: data.provider || 'headless',
+        },
+      ];
+    } catch {
+      return [];
+    }
+  },
 };
 
 // ---------------------------------------------------------------------------
