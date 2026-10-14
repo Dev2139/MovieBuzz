@@ -159,11 +159,30 @@ function cacheSet(key, val) {
 // Core: open one embed page and capture the first real media request.
 // ---------------------------------------------------------------------------
 async function extractFromTarget(target) {
-  const browser = await getBrowser();
-  const page = await browser.newPage();
-  await page.setUserAgent(UA);
+  const diag = { provider: target.provider, page: target.page };
+  const t0 = Date.now();
+
+  let browser;
+  try {
+    browser = await getBrowser();
+  } catch (e) {
+    diag.browserError = (e && e.message) || String(e);
+    diag.ms = Date.now() - t0;
+    return { ok: false, diag };
+  }
+
+  let page;
+  try {
+    page = await browser.newPage();
+    await page.setUserAgent(UA);
+  } catch (e) {
+    diag.newPageError = (e && e.message) || String(e);
+    diag.ms = Date.now() - t0;
+    return { ok: false, diag };
+  }
 
   let captured = null;
+  let mainStatus = null;
   const consider = (u) => {
     if (!captured && MEDIA_RE.test(u) && !AD_RE.test(u)) captured = u;
   };
@@ -171,7 +190,11 @@ async function extractFromTarget(target) {
   page.on('request', (req) => consider(req.url()));
 
   try {
-    await page.goto(target.page, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT });
+    const resp = await page.goto(target.page, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT });
+    if (resp) {
+      mainStatus = resp.status();
+      diag.finalUrl = resp.url();
+    }
     // Give the player time to resolve CF + fetch the manifest/file.
     const start = Date.now();
     while (!captured && Date.now() - start < WAIT_FOR_MEDIA) {
@@ -179,25 +202,31 @@ async function extractFromTarget(target) {
     }
   } catch (e) {
     // navigation errors are common with these providers; keep whatever we captured
+    diag.navError = (e && e.message) || String(e);
   } finally {
     await page.close().catch(() => {});
   }
 
-  if (!captured) return null;
-  return { url: captured, referer: target.referer, provider: target.provider, kind: classifyKind(captured) };
+  diag.ms = Date.now() - t0;
+  diag.mainStatus = mainStatus;
+  diag.captured = captured;
+  if (!captured) return { ok: false, diag };
+  return {
+    ok: true,
+    diag,
+    result: { url: captured, referer: target.referer, provider: target.provider, kind: classifyKind(captured) },
+  };
 }
 
 async function extract(ctx) {
   const targets = buildEmbedTargets(ctx);
+  const diags = [];
   for (const t of targets) {
-    try {
-      const result = await extractFromTarget(t);
-      if (result && result.url) return result;
-    } catch (e) {
-      // try next provider
-    }
+    const out = await extractFromTarget(t);
+    diags.push(out.diag);
+    if (out.ok) return { result: out.result, diags };
   }
-  return null;
+  return { result: null, diags };
 }
 
 // ---------------------------------------------------------------------------
@@ -225,11 +254,11 @@ async function handleExtract(ctx, res) {
     const cached = cacheGet(key);
     if (cached) return res.json({ ...cached, cached: true });
 
-    const result = await extract(ctx);
-    if (!result) return res.status(404).json({ error: 'No playable stream found from any provider.' });
+    const { result, diags } = await extract(ctx);
+    if (!result) return res.status(404).json({ error: 'No playable stream found from any provider.', debug: diags });
 
     cacheSet(key, result);
-    return res.json(result);
+    return res.json({ ...result, debug: diags });
   } catch (err) {
     console.error('extract error:', err && err.message);
     return res.status(500).json({ error: 'Extraction failed.', details: err && err.message });
@@ -237,6 +266,22 @@ async function handleExtract(ctx, res) {
 }
 
 app.get('/health', (_req, res) => res.json({ status: 'ok', service: 'stream-extractor-worker' }));
+
+// Browser self-test: proves whether Chromium can actually launch on this host.
+app.get('/browser-test', async (_req, res) => {
+  const t0 = Date.now();
+  try {
+    const browser = await getBrowser();
+    const page = await browser.newPage();
+    await page.setContent('<h1 id="x">chromium-ok</h1>');
+    const text = await page.evaluate(() => document.getElementById('x').innerText);
+    await page.close();
+    return res.json({ ok: true, chromePath: CHROME_PATH, ms: Date.now() - t0, sample: text });
+  } catch (e) {
+    return res.status(500).json({ ok: false, chromePath: CHROME_PATH, ms: Date.now() - t0, error: (e && e.message) || String(e) });
+  }
+});
+
 app.get('/extract', (req, res) => handleExtract(readCtx(req.query), res));
 app.post('/extract', (req, res) => handleExtract(readCtx(req.body || {}), res));
 
