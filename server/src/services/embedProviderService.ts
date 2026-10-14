@@ -372,3 +372,48 @@ export async function diagnoseProviders(
   );
   return out;
 }
+
+/**
+ * Probe the headless extractor worker directly and report WHY it may be failing:
+ * whether STREAM_EXTRACTOR_URL is configured, whether /health is reachable, and
+ * the exact status + body returned by /extract. This turns the silent `headless:
+ * found 0` into an actionable signal.
+ */
+export async function diagnoseExtractor(ctx: EmbedResolveContext): Promise<Record<string, any>> {
+  const base = (process.env.STREAM_EXTRACTOR_URL || '').trim();
+  const info: Record<string, any> = { configured: !!base, base: base || null };
+  if (!base) return info;
+  const clean = base.replace(/\/+$/, '');
+
+  try {
+    const h = await axios.get(`${clean}/health`, { timeout: 15000, validateStatus: () => true });
+    info.healthStatus = h.status;
+    info.healthBody = JSON.stringify(h.data ?? '').slice(0, 200);
+  } catch (e: any) {
+    info.healthError = (e && e.message) || String(e);
+  }
+
+  const id = ctx.imdbId || ctx.tmdbId;
+  if (id) {
+    const params = new URLSearchParams({
+      type: ctx.type,
+      season: String(ctx.season || 1),
+      episode: String(ctx.episode || 1),
+    });
+    if (ctx.imdbId) params.set('imdbId', ctx.imdbId);
+    if (ctx.tmdbId) params.set('tmdbId', String(ctx.tmdbId));
+    try {
+      const t0 = Date.now();
+      const e = await axios.get(`${clean}/extract?${params.toString()}`, {
+        timeout: 60000,
+        validateStatus: () => true,
+      });
+      info.extractStatus = e.status;
+      info.extractMs = Date.now() - t0;
+      info.extractBody = JSON.stringify(e.data ?? '').slice(0, 400);
+    } catch (e: any) {
+      info.extractError = (e && e.message) || String(e);
+    }
+  }
+  return info;
+}

@@ -5,7 +5,7 @@ import axios from 'axios';
 import { movieboxService } from '../services/movieboxService';
 import { tmdbService, cleanMovieTitle } from '../services/tmdb/tmdbService';
 import { subtitleService, srtToVtt } from '../services/subtitleService';
-import { resolveEmbedSources, diagnoseProviders, ValidatedEmbedSource, EmbedResolveContext } from '../services/embedProviderService';
+import { resolveEmbedSources, diagnoseProviders, diagnoseExtractor, ValidatedEmbedSource, EmbedResolveContext } from '../services/embedProviderService';
 
 // Persistent HTTP/HTTPS connection pooling to prevent TLS handshake overhead on every DASH segment
 // Raised to 100 sockets to handle concurrent mobile viewers without queuing
@@ -955,8 +955,14 @@ export const diagnoseEmbedProviders = async (req: Request, res: Response) => {
     }
 
     const perProvider = await diagnoseProviders({ title, year, type, season, episode, imdbId: resolvedImdb, tmdbId });
+    const extractor = await diagnoseExtractor({ title, year, type, season, episode, imdbId: resolvedImdb, tmdbId });
     return res.json({
       query: { title, year, type, season, episode, imdbId: resolvedImdb, tmdbId },
+      config: {
+        streamExtractorUrl: (process.env.STREAM_EXTRACTOR_URL || '').trim() || null,
+        cloudflareProxyUrl: (process.env.CLOUDFLARE_STREAM_PROXY_URL || '').trim() || null,
+      },
+      extractor,
       providers: perProvider,
     });
   } catch (error: any) {
