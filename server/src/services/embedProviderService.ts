@@ -226,7 +226,9 @@ const PROVIDERS: Record<string, ProviderFn> = {
     if (ctx.tmdbId) params.set('tmdbId', String(ctx.tmdbId));
     try {
       const res = await axios.get(`${base.replace(/\/+$/, '')}/extract?${params.toString()}`, {
-        timeout: 45000,
+        // A cold extraction walks every embed provider (each up to ~25s of
+        // real-browser load time), so this must far exceed normal HTTP budgets.
+        timeout: 150000,
         validateStatus: () => true,
       });
       const data = res.data;

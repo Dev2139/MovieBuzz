@@ -77,6 +77,100 @@ function looksLikeM3u8(u: string): boolean {
   return /\.m3u8(\?|$)/i.test(u);
 }
 
+function looksLikeMpd(u: string): boolean {
+  return /\.mpd(\?|$)/i.test(u);
+}
+
+// ---------------------------------------------------------------------------
+// DASH relay (/es/<token>/<upstream-host>/<upstream-path>?<orig-query>)
+// SegmentTemplate values keep their literal $RepresentationID$ / $Number%05d$
+// tokens so dash.js still substitutes them; everything before the tokens is
+// rewritten to route through this worker with the hotlink headers injected.
+// ---------------------------------------------------------------------------
+
+interface DashTokenPayload {
+  r?: string; // referer to inject
+}
+
+function encodeDashToken(payload: DashTokenPayload): string {
+  const b64 = btoa(JSON.stringify(payload))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+  return b64;
+}
+
+function decodeDashToken(token: string): DashTokenPayload | null {
+  try {
+    let b64 = token.replace(/-/g, '+').replace(/_/g, '/');
+    while (b64.length % 4) b64 += '=';
+    return JSON.parse(atob(b64));
+  } catch {
+    return null;
+  }
+}
+
+const SEGMENT_EXT_RE = /\.(m4s|mp4|ts|webm|aac|m4v|mka)(\?|$)/i;
+
+// Build the /es proxy path for one upstream URL, preserving the raw (XML-
+// escaped) query text exactly as it appeared in the manifest.
+function esProxyPath(absUrl: string, token: string): string | null {
+  try {
+    // Split off the query before parsing: it may contain XML entities (&amp;)
+    // that are not valid URL characters but must survive verbatim.
+    const qIdx = absUrl.indexOf('?');
+    const pathPart = qIdx === -1 ? absUrl : absUrl.slice(0, qIdx);
+    const rawQuery = qIdx === -1 ? '' : absUrl.slice(qIdx); // includes '?'
+    let hostPath = pathPart;
+    if (/^https?:\/\//i.test(hostPath)) {
+      const u = new URL(hostPath);
+      hostPath = `${u.host}${u.pathname}`;
+    } else if (hostPath.startsWith('/')) {
+      hostPath = hostPath.slice(1);
+    } else {
+      const u = new URL(hostPath, 'https://placeholder.invalid/');
+      hostPath = `${u.host}${u.pathname}`;
+    }
+    return `/es/${token}/${hostPath}${rawQuery}`;
+  } catch {
+    return null;
+  }
+}
+
+// Rewrite an MPEG-DASH manifest: every SegmentTemplate / SegmentBase /
+// SegmentURL / BaseURL reference is routed back through /es/<token>/.
+function rewriteDashManifest(
+  text: string,
+  manifestUrl: string,
+  referer: string,
+  token: string
+): string {
+  const resolveAbs = (u: string): string => {
+    try {
+      if (/^https?:\/\//i.test(u)) return u;
+      return new URL(u, manifestUrl).toString();
+    } catch {
+      return u;
+    }
+  };
+
+  // 1. <BaseURL> elements (templates resolve against them if present).
+  let out = text.replace(/<BaseURL>([^<]+)<\/BaseURL>/g, (m, raw) => {
+    const abs = resolveAbs(raw.trim());
+    const p = esProxyPath(abs, token);
+    return p ? `<BaseURL>${new URL(manifestUrl).protocol}//${new URL(manifestUrl).host}${p}</BaseURL>` : m;
+  });
+
+  // 2. Quoted template attributes: initialization=, media=, index=, sourceURL=.
+  out = out.replace(/\b(initialization|media|index|sourceURL)="([^"]+)"/g, (m, attr, val) => {
+    if (!SEGMENT_EXT_RE.test(val)) return m; // not a media reference
+    const p = esProxyPath(resolveAbs(val), token);
+    return p ? `${attr}="${p}"` : m;
+  });
+
+  return out;
+}
+
 // Rewrite an HLS playlist so every child URI (segments, variant playlists,
 // EXT-X-KEY / EXT-X-MAP URIs) resolves back through this /embed endpoint.
 function rewriteHlsManifest(text: string, manifestUrl: string, referer: string, proxyBase: string): string {
@@ -276,6 +370,23 @@ export default {
       const range = request.headers.get('range');
       if (range) upstreamHeaders.set('Range', range);
 
+      // MPEG-DASH manifests are fetched as text and rewritten so all segment
+      // references resolve back through /es/<token> here (hotlink headers are
+      // then re-added on every segment request).
+      if (looksLikeMpd(targetUrl) || ext === '.mpd') {
+        const res = await fetch(targetUrl, { headers: upstreamHeaders, redirect: 'follow' });
+        const finalUrl = res.url || targetUrl;
+        const text = await res.text();
+        const h = corsHeaders();
+        h.set('Content-Type', 'application/dash+xml');
+        h.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+        if (res.status !== 200 || !/<MPD/i.test(text)) {
+          return new Response('Failed to fetch DASH manifest', { status: res.status || 502, headers: h });
+        }
+        const token = encodeDashToken({ r: referer });
+        return new Response(rewriteDashManifest(text, finalUrl, referer, token), { status: 200, headers: h });
+      }
+
       // HLS manifests are fetched as text and rewritten (recursively).
       if (looksLikeM3u8(targetUrl) || ext === '.m3u8') {
         const res = await fetch(targetUrl, { headers: upstreamHeaders, redirect: 'follow' });
@@ -308,6 +419,55 @@ export default {
       if (isSegment) respHeaders.set('Cache-Control', 'public, max-age=86400');
 
       return new Response(upstreamRes.body, { status: upstreamRes.status, headers: respHeaders });
+    }
+
+    // 6. DASH segment relay: /es/<token>/<upstream-host>/<path>?<query>
+    //    Rewritten manifests point every init/media segment here so the CDN's
+    //    hotlink Referer is present on each byte-range request and CORS is fine.
+    if (url.pathname.startsWith('/es/')) {
+      const rest = url.pathname.slice('/es/'.length);
+      const slashIdx = rest.indexOf('/');
+      const token = slashIdx === -1 ? '' : rest.slice(0, slashIdx);
+      const hostPath = slashIdx === -1 ? '' : rest.slice(slashIdx + 1);
+      if (!token || !hostPath) {
+        return new Response('Missing segment reference', { status: 400 });
+      }
+      const payload = decodeDashToken(token) || {};
+      const targetUrl = `https://${hostPath}${url.search}`;
+      if (!isSafeExternalUrl(targetUrl)) {
+        return new Response('Disallowed segment host', { status: 403 });
+      }
+
+      const segHeaders = new Headers();
+      segHeaders.set(
+        'User-Agent',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+      );
+      if (payload.r) {
+        segHeaders.set('Referer', payload.r);
+        try {
+          segHeaders.set('Origin', new URL(payload.r).origin);
+        } catch {
+          /* ignore */
+        }
+      }
+      const range = request.headers.get('range');
+      if (range) segHeaders.set('Range', range);
+
+      const segFetchOptions: any = {
+        headers: segHeaders,
+        redirect: 'follow',
+        cf: { cacheEverything: true, cacheTtl: 86400 },
+      };
+      const res = await fetch(targetUrl, segFetchOptions);
+
+      const respHeaders = new Headers(res.headers);
+      respHeaders.set('Access-Control-Allow-Origin', '*');
+      respHeaders.set('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+      respHeaders.set('Access-Control-Allow-Headers', '*');
+      respHeaders.set('Accept-Ranges', 'bytes');
+      respHeaders.set('Cache-Control', 'public, max-age=86400');
+      return new Response(res.body, { status: res.status, headers: respHeaders });
     }
 
     return new Response('Not Found', { status: 404 });

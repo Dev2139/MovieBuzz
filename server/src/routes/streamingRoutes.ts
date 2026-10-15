@@ -8,6 +8,7 @@ import {
   resolveStreamingSources,
   proxyVideoStream,
   proxyEmbedStream,
+  proxyEmbedSegment,
   diagnoseEmbedProviders,
   proxyDashStream,
   proxySubtitle,
@@ -30,6 +31,7 @@ router.get('/providers/diagnose', diagnoseEmbedProviders);
 router.get('/dash/:token/*', proxyDashStream);
 router.get('/proxy', proxyVideoStream);
 router.get('/embed-proxy', proxyEmbedStream);
+router.get('/es/:token/*', proxyEmbedSegment);
 router.get('/subtitle', proxySubtitle);
 router.get('/subtitles', getSubtitles);
 router.get('/subtitles/file', getSubtitleFile);
