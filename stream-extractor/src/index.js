@@ -25,11 +25,14 @@ const puppeteer = require('puppeteer-core');
 const PORT = process.env.PORT || 8080;
 const CHROME_PATH = process.env.CHROME_PATH || '/usr/bin/chromium';
 const NAV_TIMEOUT = parseInt(process.env.NAV_TIMEOUT || '25000', 10);
-const WAIT_FOR_MEDIA = parseInt(process.env.WAIT_FOR_MEDIA || '14000', 10);
+const WAIT_FOR_MEDIA = parseInt(process.env.WAIT_FOR_MEDIA || '20000', 10);
 const CACHE_TTL_MS = parseInt(process.env.CACHE_TTL_MS || String(20 * 60 * 1000), 10);
 
-const UA =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+// NOTE: no User-Agent override anywhere in this service. Embed providers
+// (vidlink.pro at least) detect stale/spoofed UAs and silently never start
+// the player; the real Chromium UA works. The relay worker injects its own
+// browser UA when fetching the CDN, which the CDN accepts.
+const UA = null;
 
 // A real media asset URL.
 const MEDIA_RE = /\.(m3u8|mp4|mpd)(\?|$)/i;
@@ -46,37 +49,46 @@ function buildEmbedTargets(ctx) {
   if (!id) return [];
   const targets = [];
 
-  // vidlink.pro — browser passes CF, then its jwplayer fetches the real file.
+  // vidlink.pro — browser passes CF, then its player fetches the real DASH/HLS.
+  // Series path is /tv/{tmdb}/{s}/{e} (old /tv-series/ now 404s).
   if (tmdbId) {
     targets.push({
       provider: 'vidlink',
       page:
         type === 'movie'
           ? `https://vidlink.pro/movie/${tmdbId}`
-          : `https://vidlink.pro/tv-series/${tmdbId}/${season}/${episode}`,
+          : `https://vidlink.pro/tv/${tmdbId}/${season}/${episode}`,
       referer: 'https://vidlink.pro/',
     });
   }
 
-  // vidsrc.xyz
+  // vidsrc family — vidsrc.xyz DNS is dead; use live successors.
   targets.push({
     provider: 'vidsrc',
     page:
       type === 'movie'
-        ? `https://vidsrc.xyz/embed/movie/${id}`
-        : `https://vidsrc.xyz/embed/tv/${id}/${season}/${episode}`,
-    referer: 'https://vidsrc.xyz/',
+        ? `https://vidsrc.ink/embed/movie/${id}`
+        : `https://vidsrc.ink/embed/tv/${id}/${season}/${episode}`,
+    referer: 'https://vidsrc.ink/',
+  });
+  targets.push({
+    provider: 'vidfast',
+    page:
+      type === 'movie'
+        ? `https://vidfast.pro/movie/${id}`
+        : `https://vidfast.pro/tv/${id}/${season}/${episode}`,
+    referer: 'https://vidfast.pro/',
   });
 
-  // 2embed
+  // 2embed (www.2embed.cc now 301s to 2embed.skin — go direct)
   if (imdbId) {
     targets.push({
       provider: '2embed',
       page:
         type === 'movie'
-          ? `https://www.2embed.cc/embed/${imdbId}`
-          : `https://www.2embed.cc/embedtv/${imdbId}&s=${season}&e=${episode}`,
-      referer: 'https://www.2embed.cc/',
+          ? `https://2embed.skin/embed/${imdbId}`
+          : `https://2embed.skin/embedtv/${imdbId}&s=${season}&e=${episode}`,
+      referer: 'https://2embed.skin/',
     });
   }
 
@@ -107,15 +119,17 @@ async function getBrowser() {
           '--no-sandbox',
           '--disable-setuid-sandbox',
           '--disable-dev-shm-usage',
-          '--single-process',
-          '--no-zygote',
+          // Container-only memory trims: --single-process/--no-zygote are
+          // Linux-specific and break Chromium startup on Windows/macOS.
+          ...(process.platform === 'linux'
+            ? ['--single-process', '--no-zygote']
+            : []),
           '--disable-gpu',
           '--disable-extensions',
           '--disable-background-networking',
           '--mute-audio',
           '--autoplay-policy=no-user-gesture-required',
-          '--js-flags=--max-old-space-size=256',
-          `--user-agent=${UA}`,
+          '--window-size=1280,720',
         ],
       })
       .catch((err) => {
@@ -174,20 +188,37 @@ async function extractFromTarget(target) {
   let page;
   try {
     page = await browser.newPage();
-    await page.setUserAgent(UA);
+    await page.setViewport({ width: 1280, height: 720 });
   } catch (e) {
     diag.newPageError = (e && e.message) || String(e);
     diag.ms = Date.now() - t0;
     return { ok: false, diag };
   }
 
-  let captured = null;
-  let mainStatus = null;
-  const consider = (u) => {
-    if (!captured && MEDIA_RE.test(u) && !AD_RE.test(u)) captured = u;
+  // Only URLs whose RESPONSE actually returned <400 count as playable.
+  // Embed pages fire decoy media requests (e.g. a hotlinked mp4 that 403s
+  // everywhere) before the player's real .mpd/.m3u8 lands — a request-only
+  // match grabs the decoy and the stream dies in our relay.
+  const candidates = new Map(); // url -> status
+  const consider = (res) => {
+    const u = res.url();
+    if (MEDIA_RE.test(u) && !AD_RE.test(u) && res.status() < 400) {
+      if (!candidates.has(u)) candidates.set(u, res.status());
+    }
   };
-  page.on('response', (res) => consider(res.url()));
-  page.on('request', (req) => consider(req.url()));
+  page.on('response', consider);
+
+  let mainStatus = null;
+
+  // Rank: DASH/HLS manifests are the real adaptive streams; mp4 last.
+  const bestOf = (map) => {
+    let best = null;
+    for (const u of map.keys()) {
+      const score = /\.mpd(\?|$)/i.test(u) ? 3 : /\.m3u8(\?|$)/i.test(u) ? 2 : 1;
+      if (!best || score > best.score) best = { u, score };
+    }
+    return best && best.u;
+  };
 
   try {
     const resp = await page.goto(target.page, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT });
@@ -196,8 +227,23 @@ async function extractFromTarget(target) {
       diag.finalUrl = resp.url();
     }
     // Give the player time to resolve CF + fetch the manifest/file.
+    // Exit early once a real manifest (.mpd/.m3u8) has been served with 200.
+    // Many embed players stay idle until a gesture, so nudge once after ~6s.
     const start = Date.now();
-    while (!captured && Date.now() - start < WAIT_FOR_MEDIA) {
+    let nudged = false;
+    while (Date.now() - start < WAIT_FOR_MEDIA) {
+      const cur = bestOf(candidates);
+      if (cur && !/\.mp4(\?|$)/i.test(cur)) break; // manifest found — stop waiting
+      if (!nudged && Date.now() - start > 6000) {
+        nudged = true;
+        await page.evaluate(() => {
+          const v = document.querySelector('video');
+          if (v) { v.click(); v.play && v.play().catch(() => {}); }
+          const b = document.querySelector('[class*="play"]');
+          if (b) b.click();
+        }).catch(() => {});
+        diag.nudged = true;
+      }
       await new Promise((r) => setTimeout(r, 300));
     }
   } catch (e) {
@@ -207,6 +253,7 @@ async function extractFromTarget(target) {
     await page.close().catch(() => {});
   }
 
+  const captured = bestOf(candidates);
   diag.ms = Date.now() - t0;
   diag.mainStatus = mainStatus;
   diag.captured = captured;
@@ -220,6 +267,9 @@ async function extractFromTarget(target) {
 
 async function extract(ctx) {
   const targets = buildEmbedTargets(ctx);
+  // Embed pages are flaky (CDN challenges resolve only on some attempts), so
+  // give the highest-priority provider a second pass at the end.
+  if (targets.length > 0) targets.push({ ...targets[0], retry: true });
   const diags = [];
   for (const t of targets) {
     const out = await extractFromTarget(t);

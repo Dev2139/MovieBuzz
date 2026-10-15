@@ -162,6 +162,95 @@ function looksLikeHlsManifest(url: string): boolean {
   return /\.m3u8(\?|$)/i.test(url);
 }
 
+/** Detect a DASH manifest by URL extension. */
+function looksLikeDashManifest(url: string): boolean {
+  return /\.mpd(\?|$)/i.test(url);
+}
+
+// ---------------------------------------------------------------------------
+// DASH manifest rewriting for the embed proxy (mirrors the CF worker's /es
+// relay). SegmentTemplate values keep their literal $RepresentationID$ /
+// $Number%05d$ tokens so dash.js still substitutes them; only the base of the
+// URL is rewritten back through our own proxy, which injects the hotlink
+// Referer the CDN demands on every segment.
+// ---------------------------------------------------------------------------
+const EMBED_SEGMENT_EXT_RE = /\.(m4s|mp4|ts|webm|aac|m4v|mka)(\?|$)/i;
+
+function encodeEmbedDashToken(payload: { r?: string }): string {
+  return Buffer.from(JSON.stringify(payload)).toString('base64url');
+}
+
+function decodeEmbedDashToken(token: string): { r?: string } {
+  try {
+    return JSON.parse(Buffer.from(token, 'base64url').toString('utf-8'));
+  } catch {
+    return {};
+  }
+}
+
+function embedEsProxyPath(absUrl: string, token: string): string | null {
+  try {
+    const qIdx = absUrl.indexOf('?');
+    const pathPart = qIdx === -1 ? absUrl : absUrl.slice(0, qIdx);
+    const rawQuery = qIdx === -1 ? '' : absUrl.slice(qIdx);
+    let hostPath = pathPart;
+    if (/^https?:\/\//i.test(hostPath)) {
+      const u = new URL(hostPath);
+      hostPath = `${u.host}${u.pathname}`;
+    } else if (hostPath.startsWith('/')) {
+      hostPath = `${new URL(manifestHostOf(absUrl) || absUrl).host}${hostPath.slice(1)}`;
+    } else {
+      const u = new URL(hostPath, 'https://placeholder.invalid/');
+      hostPath = `${u.host}${u.pathname}`;
+    }
+    return `/es/${token}/${hostPath}${rawQuery}`;
+  } catch {
+    return null;
+  }
+}
+
+// Unused helper kept intentionally small: absolute-path templates resolve
+// against the manifest origin, so callers pass the already-joined absUrl.
+function manifestHostOf(_u: string): string | null {
+  return null;
+}
+
+function rewriteDashEmbedManifest(
+  text: string,
+  manifestUrl: string,
+  token: string,
+  proxyRoot: string
+): string {
+  const resolveAbs = (u: string): string => {
+    try {
+      if (/^https?:\/\//i.test(u)) return u;
+      return new URL(u, manifestUrl).toString();
+    } catch {
+      return u;
+    }
+  };
+  const toProxy = (abs: string): string | null => {
+    const p = embedEsProxyPath(abs, token);
+    return p ? `${proxyRoot}${p}` : null;
+  };
+
+  let out = text.replace(/<BaseURL>([^<]+)<\/BaseURL>/g, (m, raw) => {
+    const r = toProxy(resolveAbs(String(raw).trim()));
+    return r ? `<BaseURL>${r}</BaseURL>` : m;
+  });
+  out = out.replace(/\b(initialization|media|index|sourceURL)="([^"]+)"/g, (m, attr, val) => {
+    if (!EMBED_SEGMENT_EXT_RE.test(val)) return m;
+    // The attribute may contain XML-escaped entities in the query; resolve only
+    // the path portion and re-append the raw query verbatim after wrapping.
+    const abs = resolveAbs(val.includes('?') ? val.split('?')[0] : val);
+    const rawQuery = val.includes('?') ? val.slice(val.indexOf('?')) : '';
+    const p = embedEsProxyPath(abs, token);
+    if (!p) return m;
+    return `${attr}="${proxyRoot}${p}${rawQuery}"`;
+  });
+  return out;
+}
+
 /**
  * Rewrite an HLS (.m3u8) playlist so that EVERY child URI (segments, variant
  * playlists, EXT-X-KEY / EXT-X-MAP URIs) is routed back through the embed-proxy
@@ -847,6 +936,44 @@ export const proxyEmbedStream = async (req: Request, res: Response) => {
   // segment / key / child-playlist resolves back through this proxy (recursively).
   // Everything else (MP4 files, media segments) is byte-range streamed below.
   const wantsManifest = looksLikeHlsManifest(targetUrl) || req.query.ext === '.m3u8';
+  const wantsDash = looksLikeDashManifest(targetUrl) || req.query.ext === '.mpd';
+
+  if (wantsDash) {
+    try {
+      const manifestRes = await streamClient.get(targetUrl, {
+        headers: { ...requestHeaders, Accept: 'application/dash+xml, */*' },
+        responseType: 'text',
+        validateStatus: () => true,
+        timeout: 20000,
+        maxRedirects: 5,
+      });
+      const finalUrl: string =
+        (manifestRes as any).request?.res?.responseUrl ||
+        (manifestRes as any).request?.responseUrl ||
+        targetUrl;
+      const text = String(manifestRes.data || '');
+
+      const mHost = req.get('host') || 'localhost:5000';
+      const mProto = (req.headers['x-forwarded-proto'] as string) || req.protocol || 'http';
+      const proxyRoot = `${mProto}://${mHost}/api/streaming`;
+
+      res.setHeader('Content-Type', 'application/dash+xml');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+
+      if (manifestRes.status !== 200 || !/<MPD/i.test(text)) {
+        return res.status(manifestRes.status || 502).json({ error: 'Failed to fetch DASH manifest.' });
+      }
+      const token = encodeEmbedDashToken({ r: referer });
+      return res.status(200).send(rewriteDashEmbedManifest(text, finalUrl, token, proxyRoot));
+    } catch (error: any) {
+      console.error('proxyEmbedStream dash manifest error:', error.message);
+      if (!res.headersSent) return res.status(502).json({ error: 'Failed to fetch DASH manifest.' });
+      return;
+    }
+  }
+
   if (wantsManifest) {
     try {
       const manifestRes = await streamClient.get(targetUrl, {
@@ -926,6 +1053,68 @@ export const proxyEmbedStream = async (req: Request, res: Response) => {
     if (!res.headersSent) {
       res.status(502).json({ error: 'Failed to fetch upstream embed chunk.' });
     }
+  }
+};
+
+/**
+ * GET /api/streaming/es/:token/* — DASH segment relay for rewritten embed
+ * manifests (server-side counterpart of the CF worker's /es route). The token
+ * carries the hotlink referer; the wildcard path is <upstream-host>/<path>.
+ */
+export const proxyEmbedSegment = async (req: Request, res: Response) => {
+  const m = req.params as Record<string, string>;
+  const token = m.token || '';
+  const rest = m[0] || (m as any).path || '';
+  if (!token || !rest) {
+    return res.status(400).json({ error: 'Missing segment reference.' });
+  }
+  const payload = decodeEmbedDashToken(token);
+  const qs = req.originalUrl.indexOf('?');
+  const search = qs === -1 ? '' : req.originalUrl.slice(qs);
+  const targetUrl = `https://${rest}${search}`;
+  if (!isSafeExternalUrl(targetUrl)) {
+    return res.status(403).json({ error: 'Disallowed segment host.' });
+  }
+
+  const headers: Record<string, string> = {
+    'User-Agent':
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+  };
+  if (payload.r) {
+    headers['Referer'] = payload.r;
+    try {
+      headers['Origin'] = new URL(payload.r).origin;
+    } catch {
+      /* ignore */
+    }
+  }
+  if (req.headers.range) headers['Range'] = req.headers.range as string;
+
+  try {
+    const upstreamRes = await streamClient.get(targetUrl, {
+      headers,
+      responseType: 'stream',
+      validateStatus: () => true,
+      timeout: 30000,
+      maxRedirects: 5,
+    });
+    res.status(upstreamRes.status);
+    res.setHeader('Content-Type', String(upstreamRes.headers['content-type'] || 'application/octet-stream'));
+    res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Accel-Buffering', 'no');
+    if (upstreamRes.headers['content-range']) res.setHeader('Content-Range', String(upstreamRes.headers['content-range']));
+    if (upstreamRes.headers['content-length']) res.setHeader('Content-Length', String(upstreamRes.headers['content-length']));
+    res.flushHeaders();
+    upstreamRes.data.pipe(res);
+    req.on('close', () => {
+      if (upstreamRes.data && typeof upstreamRes.data.destroy === 'function') upstreamRes.data.destroy();
+    });
+  } catch (error: any) {
+    console.error('proxyEmbedSegment error:', error.message);
+    if (!res.headersSent) res.status(502).json({ error: 'Failed to fetch upstream segment.' });
   }
 };
 
