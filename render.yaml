@@ -23,10 +23,15 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
-      # Tunables (defaults are fine; raise WAIT_FOR_MEDIA if a provider is slow).
+      # Tunables — kept in sync with the code defaults in src/index.js so a
+      # title that is genuinely unavailable answers within the caller's
+      # timeout instead of hanging. EXTRACT_BUDGET_MS is the hard ceiling for
+      # ONE /extract call across all provider attempts.
       - key: NAV_TIMEOUT
-        value: "25000"
+        value: "20000"
       - key: WAIT_FOR_MEDIA
-        value: "16000"
+        value: "13000"
+      - key: EXTRACT_BUDGET_MS
+        value: "95000"
       - key: CACHE_TTL_MS
         value: "1200000"
