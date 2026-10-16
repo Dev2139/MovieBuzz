@@ -730,7 +730,32 @@ export const resolveStreamingSources = async (req: Request, res: Response) => {
 
     const formattedMoviebox = formatMovieBoxSources(movieboxSources, baseUrl);
     const formattedEmbed = formatEmbedSources(embedSources, baseUrl);
-    const combinedSources = [...formattedMoviebox, ...formattedEmbed];
+    let combinedSources = [...formattedMoviebox, ...formattedEmbed];
+
+    // If no stream sources resolved and title has a subtitle / chapter tag (e.g. "Drishyam: The Conclusion"),
+    // attempt resolution with the core title so unreleased franchise placeholders still resolve playable content.
+    if (combinedSources.length === 0 && (title.includes(':') || title.includes(' - '))) {
+      const coreTitle = title.split(/[:\-]/)[0].trim();
+      if (coreTitle && coreTitle.length >= 3 && coreTitle.toLowerCase() !== title.toLowerCase()) {
+        try {
+          const coreMeta: any = await tmdbService.fetchMetadata(coreTitle, undefined, type);
+          if (coreMeta) {
+            const fallbackSources = await resolveEmbedViaFallback({
+              title: coreTitle,
+              type,
+              season,
+              episode,
+              imdbId: coreMeta.imdbId,
+              tmdbId: coreMeta.tmdbId ? String(coreMeta.tmdbId) : undefined,
+            }).catch(() => []);
+            if (fallbackSources.length > 0) {
+              const formattedFallback = formatEmbedSources(fallbackSources, baseUrl);
+              combinedSources = [...combinedSources, ...formattedFallback];
+            }
+          }
+        } catch {}
+      }
+    }
 
     return res.json({
       subject: null,

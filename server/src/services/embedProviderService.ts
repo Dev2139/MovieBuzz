@@ -150,7 +150,7 @@ const PROVIDERS: Record<string, ProviderFn> = {
     // (worker restart, transient network/5xx), so that case is retried once.
     try {
       const res = await axios.get(`${clean}/extract?${params.toString()}`, {
-        timeout: 35000,
+        timeout: 85000,
         validateStatus: () => true,
       });
       const data = res.data;

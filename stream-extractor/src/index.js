@@ -121,6 +121,10 @@ function buildEmbedTargets(ctx) {
   // is the most reliable and often the ONLY source (The Dark Knight); extract()
   // still prefers vidsrc.pm's HLS when both answer, since vidlink's usual asset
   // is HEVC DASH, which the player can only decode through the WASM transcoder.
+  // Put vidsrc.pm targets FIRST because it yields immediate, clean HLS streams in <15 seconds
+  targets.push(pmTarget);
+  if (pmTargetAlt) targets.push(pmTargetAlt);
+
   const vidlinkPage = (id) =>
     type === 'movie'
       ? `https://vidlink.pro/movie/${id}`
@@ -132,8 +136,6 @@ function buildEmbedTargets(ctx) {
       referer: 'https://vidlink.pro/',
     });
   }
-  targets.push(pmTarget);
-  if (pmTargetAlt) targets.push(pmTargetAlt);
   if (tmdbId && tmdbId !== imdbId) {
     targets.push({
       provider: 'vidlink',
