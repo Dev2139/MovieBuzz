@@ -182,34 +182,78 @@ function buildEmbedTargets(ctx) {
 // ---------------------------------------------------------------------------
 // Browser lifecycle (single reused instance)
 // ---------------------------------------------------------------------------
+// Flags every container needs. Deliberately WITHOUT --single-process /
+// --no-zygote: those are memory trims, but Debian Chromium crashes on startup
+// with them in a Render container (process exits in ~1s, no reason printed),
+// which took the whole service down. They survive only as a fallback config.
+const BASE_ARGS = [
+  '--no-sandbox',
+  '--disable-setuid-sandbox',
+  '--disable-dev-shm-usage',
+  '--disable-gpu',
+  '--disable-software-rasterizer',
+  '--disable-extensions',
+  '--disable-background-networking',
+  '--mute-audio',
+  '--autoplay-policy=no-user-gesture-required',
+  '--window-size=1280,720',
+  '--no-first-run',
+  '--no-default-browser-check',
+  '--disable-crash-reporter',
+  '--disable-breakpad',
+];
+
+// Tried top-down until one actually launches; the winner is remembered so a
+// restart doesn't re-probe, and the failures are kept for /health.
+const LAUNCH_CANDIDATES = [
+  { name: 'container-default', args: BASE_ARGS },
+  {
+    name: 'low-memory',
+    args: [...BASE_ARGS, ...(process.platform === 'linux' ? ['--single-process', '--no-zygote'] : [])],
+  },
+  { name: 'minimal', args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'] },
+];
+
+let launchReport = { launchedWith: null, attempted: [] };
 let browserPromise = null;
+let cachedBrowser = null;
+
 async function getBrowser() {
   if (!browserPromise) {
-    browserPromise = puppeteer
-      .launch({
-        executablePath: CHROME_PATH,
-        headless: 'new',
-        args: [
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-          // Container-only memory trims: --single-process/--no-zygote are
-          // Linux-specific and break Chromium startup on Windows/macOS.
-          ...(process.platform === 'linux'
-            ? ['--single-process', '--no-zygote']
-            : []),
-          '--disable-gpu',
-          '--disable-extensions',
-          '--disable-background-networking',
-          '--mute-audio',
-          '--autoplay-policy=no-user-gesture-required',
-          '--window-size=1280,720',
-        ],
-      })
-      .catch((err) => {
-        browserPromise = null;
-        throw err;
-      });
+    browserPromise = (async () => {
+      const attempted = [];
+      for (const cand of LAUNCH_CANDIDATES) {
+        try {
+          const browser = await puppeteer.launch({
+            executablePath: CHROME_PATH,
+            headless: 'new',
+            args: cand.args,
+          });
+          // If the browser dies mid-life (OOM, crash), drop the cached instance
+          // so the next request relaunches instead of reusing a dead handle.
+          browser.once('disconnected', () => {
+            if (browserPromise && cachedBrowser === browser) browserPromise = null;
+          });
+          cachedBrowser = browser;
+          launchReport = { launchedWith: cand.name, attempted };
+          return browser;
+        } catch (e) {
+          attempted.push({
+            config: cand.name,
+            error: (((e && e.message) || String(e)) + '').replace(/\s+/g, ' ').slice(0, 300),
+          });
+        }
+      }
+      launchReport = { launchedWith: null, attempted };
+      throw new Error(
+        `Chromium failed to launch with every configuration (chrome=${CHROME_PATH}): ` +
+          attempted.map((a) => `[${a.config}] ${a.error}`).join(' | ')
+      );
+    })().catch((err) => {
+      browserPromise = null;
+      cachedBrowser = null;
+      throw err;
+    });
   }
   return browserPromise;
 }
@@ -448,7 +492,14 @@ async function handleExtract(ctx, res) {
   }
 }
 
-app.get('/health', (_req, res) => res.json({ status: 'ok', service: 'stream-extractor-worker' }));
+app.get('/health', (_req, res) =>
+  res.json({
+    status: 'ok',
+    service: 'stream-extractor-worker',
+    chromePath: CHROME_PATH,
+    browser: launchReport,
+  })
+);
 
 // Browser self-test: proves whether Chromium can actually launch on this host.
 app.get('/browser-test', async (_req, res) => {
@@ -459,9 +510,11 @@ app.get('/browser-test', async (_req, res) => {
     await page.setContent('<h1 id="x">chromium-ok</h1>');
     const text = await page.evaluate(() => document.getElementById('x').innerText);
     await page.close();
-    return res.json({ ok: true, chromePath: CHROME_PATH, ms: Date.now() - t0, sample: text });
+    return res.json({ ok: true, chromePath: CHROME_PATH, ms: Date.now() - t0, sample: text, browser: launchReport });
   } catch (e) {
-    return res.status(500).json({ ok: false, chromePath: CHROME_PATH, ms: Date.now() - t0, error: (e && e.message) || String(e) });
+    return res
+      .status(500)
+      .json({ ok: false, chromePath: CHROME_PATH, ms: Date.now() - t0, error: (e && e.message) || String(e), browser: launchReport });
   }
 });
 
