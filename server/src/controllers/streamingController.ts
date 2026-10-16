@@ -685,15 +685,7 @@ export const resolveStreamingSources = async (req: Request, res: Response) => {
       imdbId = await tmdbService.fetchImdbId(tmdbId, type).catch(() => undefined);
     }
 
-    // 2. Build universal player fallback URL so client always has an instant option
-    const mediaId = imdbId || tmdbId;
-    const embedFallback = mediaId
-      ? type === 'movie'
-        ? `https://vidsrc.pm/embed/movie/${mediaId}`
-        : `https://vidsrc.pm/embed/tv/${mediaId}/${season}/${episode}`
-      : undefined;
-
-    // 3. Concurrently query:
+    // 2. Concurrently query:
     //    a) Native MovieBox Provider (from mesamirh/MovieBox-TUI: DASH manifest & resources)
     //    b) Validated Embed Fallback (vidsrc.pm, mov2day, vidlink)
     //    c) Multi-language Subtitles
@@ -737,7 +729,6 @@ export const resolveStreamingSources = async (req: Request, res: Response) => {
     return res.json({
       subject: null,
       sources: combinedSources,
-      embedFallback,
       dubs: [],
       subtitles: subtitles || [],
       provider: combinedSources.length > 0 ? (formattedMoviebox.length > 0 ? 'moviebox' : 'embed') : 'none',

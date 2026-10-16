@@ -245,9 +245,17 @@ export class NativeMovieBoxService {
         const b64Token = prefixPart.split(':')[0].trim();
         const normalized = b64Token.replace(/-/g, '+').replace(/_/g, '/');
         const decoded = decodeB64Padded(normalized);
-        if (decoded && decoded.includes('/dash/')) {
+        if (decoded) {
           const base = decoded.replace(/\*+$/, '').replace(/\/+$/, '');
-          return `${base}/index.mpd`;
+          if (decoded.includes('/dash/')) {
+            return `${base}/index.mpd`;
+          }
+          if (decoded.includes('/hls/')) {
+            return `${base}/index.m3u8`;
+          }
+          if (base.startsWith('http://') || base.startsWith('https://')) {
+            return `${base}/index.mpd`;
+          }
         }
       }
       if (trimmed.startsWith('CloudFront-Policy=')) {
@@ -258,8 +266,14 @@ export class NativeMovieBoxService {
           try {
             const js = JSON.parse(decoded);
             const res = js.Statement?.[0]?.Resource || '';
+            const base = res.replace(/\*+$/, '').replace(/\/+$/, '');
             if (res.includes('/dash/')) {
-              const base = res.replace(/\*+$/, '').replace(/\/+$/, '');
+              return `${base}/index.mpd`;
+            }
+            if (res.includes('/hls/')) {
+              return `${base}/index.m3u8`;
+            }
+            if (base.startsWith('http://') || base.startsWith('https://')) {
               return `${base}/index.mpd`;
             }
           } catch {}
@@ -272,18 +286,58 @@ export class NativeMovieBoxService {
   /**
    * Search MovieBox catalog by title/keyword
    */
-  public async search(title: string): Promise<any[]> {
+  public async search(title: string, type: 'movie' | 'series' | 'all' = 'all'): Promise<any[]> {
+    const sType = type === 'series' ? 2 : type === 'movie' ? 1 : 0;
     try {
       const res = await this.request('POST', '/wefeed-mobile-bff/subject-api/search/v2', {
         keyword: title,
         page: 1,
         perPage: 15,
-        subjectType: 0,
+        subjectType: sType,
       });
       return res?.data?.results?.[0]?.subjects || res?.data?.list || [];
     } catch {
       return [];
     }
+  }
+
+  /**
+   * Get subject details
+   */
+  public async getItem(subjectId: string): Promise<any> {
+    try {
+      const res = await this.request('GET', `/wefeed-mobile-bff/subject-api/get?subjectId=${subjectId}`);
+      return res?.data?.subject || res?.data || null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Get season info for series
+   */
+  public async getSeasons(subjectId: string): Promise<any> {
+    try {
+      const res = await this.request('GET', `/wefeed-mobile-bff/subject-api/season-info?subjectId=${subjectId}`);
+      return res?.data || res || { seasons: [] };
+    } catch {
+      return { seasons: [] };
+    }
+  }
+
+  /**
+   * Get movie or series sources directly by subjectId
+   */
+  public async getSources(subjectId: string, season?: number, episode?: number): Promise<{ sources: any[]; dubs: any[] }> {
+    const isSeries = Boolean(season && season > 0);
+    const sources = await this.resolveStreams({
+      title: '',
+      subjectId,
+      season: season || 1,
+      episode: episode || 1,
+      type: isSeries ? 'series' : 'movie',
+    });
+    return { sources, dubs: [] };
   }
 
   /**

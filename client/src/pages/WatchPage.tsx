@@ -144,15 +144,7 @@ export const WatchPage: React.FC = () => {
     imdbId = seriesObj?.imdbId;
   }
 
-  const [useEmbedPlayer, setUseEmbedPlayer] = useState(false);
-  const activeMediaId = imdbId || (tmdbId ? String(tmdbId) : undefined);
-  const activeEmbedFallback =
-    movieboxData?.embedFallback ||
-    (activeMediaId
-      ? isMovie
-        ? `https://vidsrc.pm/embed/movie/${activeMediaId}`
-        : `https://vidsrc.pm/embed/tv/${activeMediaId}/${currentSeasonNum}/${currentEpNum}`
-      : undefined);
+
 
   // Multi-season catalog according to MovieBox
   const effectivePlaylistSeasons = React.useMemo(() => {
@@ -300,22 +292,9 @@ export const WatchPage: React.FC = () => {
 
           {/* CineStream HD Stream Indicator & Player Mode Switcher */}
           <div className="flex items-center gap-2">
-            {activeEmbedFallback && effectiveMediaList.length > 0 && (
-              <button
-                onClick={() => setUseEmbedPlayer((prev) => !prev)}
-                className="text-[10px] font-semibold text-gray-300 hover:text-white bg-dark-card border border-dark-border px-2 py-1 rounded-md transition-colors active:scale-95"
-              >
-                {useEmbedPlayer ? 'Switch to CineStream HD' : 'Switch to Web Player'}
-              </button>
-            )}
-
-            <span className={`flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-md border ${
-              useEmbedPlayer || effectiveMediaList.length === 0
-                ? 'text-cyan-400 bg-cyan-500/10 border-cyan-500/30'
-                : 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30'
-            }`}>
+            <span className="flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-md border text-emerald-400 bg-emerald-500/10 border-emerald-500/30">
               <Sparkles className="w-3 h-3" />
-              <span>{useEmbedPlayer || effectiveMediaList.length === 0 ? 'Universal Web Player' : 'CineStream HD Direct'}</span>
+              <span>CineStream HD Direct</span>
             </span>
 
             <div className="flex items-center space-x-2 font-medium">
@@ -326,8 +305,8 @@ export const WatchPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Reusable Video Player / Universal Embed Player */}
-        {isMovieboxLoading && !activeEmbedFallback ? (
+        {/* Reusable Video Player with Native CineStream Controls */}
+        {isMovieboxLoading && effectiveMediaList.length === 0 ? (
           <div className="w-full aspect-video bg-dark-card border border-dark-border rounded-xl flex flex-col items-center justify-center space-y-3 p-6 text-center">
             <Sparkles className="w-8 h-8 text-brand-500 animate-spin" />
             <p className="text-sm font-semibold text-white">Resolving High-Speed Stream...</p>
@@ -335,7 +314,7 @@ export const WatchPage: React.FC = () => {
               Connecting to secure media stream for "{contentTitle}". This usually takes a few seconds.
             </p>
           </div>
-        ) : effectiveMediaList.length > 0 && !useEmbedPlayer ? (
+        ) : effectiveMediaList.length > 0 ? (
           <VideoPlayer
             mediaList={effectiveMediaList}
             contentId={contentId}
@@ -357,16 +336,6 @@ export const WatchPage: React.FC = () => {
               }
             }}
           />
-        ) : activeEmbedFallback ? (
-          <div className="w-full aspect-video bg-black rounded-xl overflow-hidden border border-dark-border shadow-2xl relative">
-            <iframe
-              src={activeEmbedFallback}
-              title={contentTitle}
-              className="w-full h-full border-0"
-              allowFullScreen
-              allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
-            />
-          </div>
         ) : (
           <div className="w-full aspect-video bg-dark-card border border-dark-border rounded-xl flex flex-col items-center justify-center space-y-3 p-6 text-center">
             <Film className="w-10 h-10 text-gray-500" />

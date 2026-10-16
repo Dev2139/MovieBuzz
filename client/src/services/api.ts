@@ -447,7 +447,6 @@ export const resolveStreamingSourcesByTitle = async (
   const res = await api.get<{
     subject: any;
     sources: any[];
-    embedFallback?: string;
     dubs?: Array<{ subjectId: string; name: string; code: string; original?: boolean }>;
     subtitles?: SubtitleTrack[];
   }>('/streaming/resolve', {
