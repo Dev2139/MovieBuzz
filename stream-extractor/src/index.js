@@ -55,7 +55,10 @@ function detectChromePath() {
 }
 const CHROME_PATH = detectChromePath();
 const NAV_TIMEOUT = parseInt(process.env.NAV_TIMEOUT || '20000', 10);
-const WAIT_FOR_MEDIA = parseInt(process.env.WAIT_FOR_MEDIA || '13000', 10);
+// vidlink's player needs ~14s after DOM before it requests the .mpd (measured:
+// 22.9s total for The Dark Knight), so a 13s window silently loses its only
+// source. 18s covers it with margin.
+const WAIT_FOR_MEDIA = parseInt(process.env.WAIT_FOR_MEDIA || '18000', 10);
 // Hard ceiling for one /extract call across ALL provider attempts. Without
 // it a title missing everywhere walks 6 targets x (nav+wait) ≈ 4.5min, the
 // caller's own timeout fires, and the caller retries the whole marathon.
@@ -89,13 +92,15 @@ function buildEmbedTargets(ctx) {
   const targets = [];
 
   // vidsrc.pm — live successor of the vidsrc family (vidsrc.ink DNS is dead).
-  // Independent catalogue from vidlink/MovieBox and answers in seconds, so it
-  // sits right after vidlink's primary id form: titles the sacdn pool lacks
-  // (Interstellar is one) resolve here via its mov2day HLS proxy.
+  // Independent catalogue from vidlink/MovieBox. What it serves is usually HLS
+  // via the mov2day proxy (natively decodable), but sometimes a
+  // …/resource/h265/<hash>.mp4, which scores lowest and only wins if nothing
+  // better exists.
   const pmTarget = {
     provider: 'vidsrc.pm',
     page: vidlinkLikePage('https://vidsrc.pm/embed', imdbId || tmdbId),
     referer: 'https://vidsrc.pm/',
+    hlsCapable: true,
   };
   // Its catalogue is IMDb-keyed, so a row that only reached it by TMDB id
   // (Harry Potter 1) still needs the tt form tried.
@@ -105,14 +110,17 @@ function buildEmbedTargets(ctx) {
           provider: 'vidsrc.pm',
           page: vidlinkLikePage('https://vidsrc.pm/embed', tmdbId),
           referer: 'https://vidsrc.pm/',
+          hlsCapable: true,
         }
       : null;
 
   // vidlink.pro — browser passes CF, then its player fetches the real DASH/HLS.
-  // The same /movie/{id} path accepts BOTH IMDb (tt..) and TMDB ids, and their
-  // catalogue is keyed primarily by IMDb: some canonical TMDB entries (e.g.
-  // Interstellar 157336) have no asset under the numeric id but do under the
-  // tt id, so try the IMDb form first and keep the TMDB form as a fallback.
+  // The same /movie/{id} path accepts BOTH IMDb (tt..) and TMDB ids, and its
+  // catalogue is keyed primarily by IMDb: some canonical TMDB entries have no
+  // asset under the numeric id but do under the tt id. It goes first because it
+  // is the most reliable and often the ONLY source (The Dark Knight); extract()
+  // still prefers vidsrc.pm's HLS when both answer, since vidlink's usual asset
+  // is HEVC DASH, which the player can only decode through the WASM transcoder.
   const vidlinkPage = (id) =>
     type === 'movie'
       ? `https://vidlink.pro/movie/${id}`
@@ -124,9 +132,6 @@ function buildEmbedTargets(ctx) {
       referer: 'https://vidlink.pro/',
     });
   }
-  // Quality-first for vidlink (1080p HEVC DASH), but its alternate-catalogue
-  // peer is tried before vidlink's second id form so unavailable titles fail
-  // fast instead of burning two more slow pages.
   targets.push(pmTarget);
   if (pmTargetAlt) targets.push(pmTargetAlt);
   if (tmdbId && tmdbId !== imdbId) {
@@ -284,6 +289,24 @@ function decodeInnerUrl(url) {
   return url;
 }
 
+// How useful this candidate is to the END PLAYER, which is the only thing that
+// decides whether the user sees a smooth picture:
+//   5 HLS            - natively decodable everywhere, our best answer
+//   4 DASH (h264)    - natively decodable
+//   2 DASH (HEVC)    - only playable through the client's WASM transcoder,
+//                      which stalls and downshifts on real connections
+//   1 anything else  - unrecognised shape; treat as last resort
+const NATIVE_SCORE = 4;
+function scoreOf(u, info) {
+  const ct = (info && info.contentType) || '';
+  const inner = decodeInnerUrl(u);
+  const isHls = /mpegurl/i.test(ct) || /\.m3u8(\?|$)/i.test(inner) || /\/hls\//i.test(inner);
+  const isDash = /dash\+xml/i.test(ct) || /\.mpd(\?|$)/i.test(inner);
+  if (isHls) return 5;
+  if (isDash) return /h265|hevc/i.test(u) ? 2 : 4;
+  return 1;
+}
+
 // ---------------------------------------------------------------------------
 // Tiny result cache so repeat plays don't launch the browser again.
 // ---------------------------------------------------------------------------
@@ -351,16 +374,8 @@ async function extractFromTarget(target) {
 
   let mainStatus = null;
 
-  // Rank: DASH/HLS manifests are the real adaptive streams; mp4 last.
-  const scoreOf = (u, info) => {
-    const ct = (info && info.contentType) || '';
-    if (/mpegurl/i.test(ct)) return 4;
-    const inner = decodeInnerUrl(u);
-    if (/\.mpd(\?|$)/i.test(inner)) return 3;
-    if (/\.m3u8(\?|$)/i.test(inner) || /\/hls\//i.test(inner)) return 2;
-    if (/dash\+xml/i.test(ct)) return 3;
-    return 1;
-  };
+  // Rank by what the browser can actually decode without a transcoder.
+  // (scoreOf lives at module scope so extract() can compare ACROSS targets.)
   const bestOf = (map) => {
     let best = null;
     for (const [u, info] of map.entries()) {
@@ -383,8 +398,11 @@ async function extractFromTarget(target) {
     let nudged = false;
     while (Date.now() - start < WAIT_FOR_MEDIA) {
       const cur = bestOf(candidates);
-      // score >= 2 means an adaptive manifest (DASH/HLS) landed — that's the
-      // best answer this page will give, stop waiting.
+      // Any adaptive manifest (score >= 2) is a real answer from this page.
+      // Waiting longer for a "better" one was tried and cost coverage: on
+      // vidlink-only titles the sole asset IS HEVC DASH (score 2), so holding
+      // out for score >= 4 just burned the per-call budget and returned nothing.
+      // Preference between co-captured candidates is handled by scoreOf.
       if (cur && cur.score >= 2) break;
       // Dead/geo-blocked hosts answer >=400 immediately and NEVER stream media
       // afterwards — don't burn the full wait window on them.
@@ -412,6 +430,7 @@ async function extractFromTarget(target) {
   diag.ms = Date.now() - t0;
   diag.mainStatus = mainStatus;
   diag.captured = best && best.u;
+  diag.score = best ? best.score : 0;
   if (!best) return { ok: false, diag };
   return {
     ok: true,
@@ -421,6 +440,10 @@ async function extractFromTarget(target) {
       referer: target.referer,
       provider: target.provider,
       kind: classifyKind(best.u, best.info && best.info.contentType),
+      // Not part of the API contract; lets extract() decide whether to keep
+      // looking at further providers for something the player can decode
+      // natively. Stripped before the response is sent.
+      score: best.score,
     },
   };
 }
@@ -438,22 +461,49 @@ async function extract(ctx) {
     !!diag.navError || !!diag.browserError || !!diag.newPageError ||
     diag.mainStatus === null || diag.mainStatus >= 400;
 
+  // Returning the FIRST provider that answered was wrong: vidsrc.pm can hand
+  // back an unrecognised mp4-shaped asset while vidlink has a playable DASH
+  // manifest for the same title, and vice versa. So collect the best candidate
+  // across providers and stop early only once something the player can decode
+  // natively (score >= NATIVE_SCORE) is in hand.
+  // One page costs at most NAV_TIMEOUT + WAIT_FOR_MEDIA, so starting one with
+  // barely any budget left lets the call overrun the caller's own timeout and
+  // lose an answer we already have.
+  const NEXT_PAGE_COST_MS = NAV_TIMEOUT + WAIT_FOR_MEDIA + 5000;
+
+  let best = null;
+  let pagesUsed = 0;
   for (const t of targets) {
+    // Once a playable-but-transcoded answer (HEVC DASH) is in hand, keep
+    // looking ONLY at providers that can serve native HLS — chasing a dead
+    // vidfast/multiembed page can't improve the answer, and doing so pushed a
+    // real title to 111s, past the caller's 115s timeout.
+    if (best && !t.hlsCapable) {
+      diags.push({ provider: t.provider, skipped: 'have-playable-answer' });
+      continue;
+    }
     for (let attempt = 0; attempt < 2; attempt++) {
-      if (Date.now() - budgetStart > TOTAL_BUDGET_MS) {
+      const elapsed = Date.now() - budgetStart;
+      // Always allow the first page; after that require a full page of budget.
+      if (pagesUsed > 0 && elapsed + NEXT_PAGE_COST_MS > TOTAL_BUDGET_MS) {
         diags.push({ provider: t.provider, skipped: 'budget-exceeded' });
         break;
       }
       const target = attempt === 0 ? t : { ...t, retry: true };
+      pagesUsed++;
       const out = await extractFromTarget(target);
       diags.push(out.diag);
-      if (out.ok) return { result: out.result, diags };
+      if (out.ok) {
+        if (!best || out.result.score > best.score) best = out.result;
+        break; // this page gave its answer; a second visit won't change it
+      }
       if (attempt === 0 && !retryWorthwhile(out.diag)) break;
       // Dead hosts answer in <1s; don't pay that twice.
       if (attempt === 0 && out.diag.ms < 3000) break;
     }
+    if (best && best.score >= NATIVE_SCORE) break;
   }
-  return { result: null, diags };
+  return { result: best, diags };
 }
 
 // ---------------------------------------------------------------------------
@@ -484,8 +534,10 @@ async function handleExtract(ctx, res) {
     const { result, diags } = await extract(ctx);
     if (!result) return res.status(404).json({ error: 'No playable stream found from any provider.', debug: diags });
 
-    cacheSet(key, result);
-    return res.json({ ...result, debug: diags });
+    // `score` is internal ranking metadata, not part of the response contract.
+    const publicResult = { url: result.url, referer: result.referer, provider: result.provider, kind: result.kind };
+    cacheSet(key, publicResult);
+    return res.json({ ...publicResult, debug: diags });
   } catch (err) {
     console.error('extract error:', err && err.message);
     return res.status(500).json({ error: 'Extraction failed.', details: err && err.message });

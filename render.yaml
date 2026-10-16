@@ -30,7 +30,7 @@ services:
       - key: NAV_TIMEOUT
         value: "20000"
       - key: WAIT_FOR_MEDIA
-        value: "13000"
+        value: "18000"
       - key: EXTRACT_BUDGET_MS
         value: "95000"
       - key: CACHE_TTL_MS
