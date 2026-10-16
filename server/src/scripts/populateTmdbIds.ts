@@ -39,11 +39,22 @@ async function run() {
         results = res?.data?.results || [];
       }
       if (results.length > 0) {
-        results.sort((a: any, b: any) => (b.popularity || 0) - (a.popularity || 0));
-        const top = results[0];
-        await Content.findByIdAndUpdate(item._id, { tmdbId: top.id });
-        updated++;
-        console.log(`[${i + 1}/${items.length}] ${item.title} -> tmdbId: ${top.id}`);
+        // Only accept a result whose cleaned title MATCHES — accepting the
+        // top-popularity hit blindly assigned wrong tmdbIds ("I Am Nobody" ->
+        // "Who Am I?"), which made the player stream a completely different
+        // movie. No match => leave the record without an id.
+        const want = cTitle.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const exact = results.find((x: any) => {
+          const t = String(x.title || x.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+          return t === want || (t.length >= 6 && (t.startsWith(want) || want.startsWith(t)));
+        });
+        if (exact) {
+          await Content.findByIdAndUpdate(item._id, { tmdbId: exact.id });
+          updated++;
+          console.log(`[${i + 1}/${items.length}] ${item.title} -> tmdbId: ${exact.id}`);
+        } else {
+          console.log(`[${i + 1}/${items.length}] ${item.title} -> no exact TMDB title match, skipped`);
+        }
       }
     } catch {}
 

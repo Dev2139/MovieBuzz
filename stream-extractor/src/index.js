@@ -23,9 +23,43 @@ const express = require('express');
 const puppeteer = require('puppeteer-core');
 
 const PORT = process.env.PORT || 8080;
-const CHROME_PATH = process.env.CHROME_PATH || '/usr/bin/chromium';
-const NAV_TIMEOUT = parseInt(process.env.NAV_TIMEOUT || '25000', 10);
-const WAIT_FOR_MEDIA = parseInt(process.env.WAIT_FOR_MEDIA || '20000', 10);
+
+// Locate a Chromium-family browser. In Render/Docker the env var (or the
+// /usr/bin/chromium default) is authoritative; on developer machines fall
+// back to auto-detecting the locally installed Chrome/Edge so the service
+// "just runs" without env setup.
+function detectChromePath() {
+  if (process.env.CHROME_PATH) return process.env.CHROME_PATH;
+  const fs = require('fs');
+  const path = require('path');
+  const candidates =
+    process.platform === 'win32'
+      ? [
+          path.join(process.env['ProgramFiles'] || 'C:\\Program Files', 'Google', 'Chrome', 'Application', 'chrome.exe'),
+          path.join(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'Google', 'Chrome', 'Application', 'chrome.exe'),
+          path.join(process.env.LOCALAPPDATA || '', 'Google', 'Chrome', 'Application', 'chrome.exe'),
+          path.join(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+        ]
+      : process.platform === 'darwin'
+        ? [
+            '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+            '/Applications/Chromium.app/Contents/MacOS/Chromium',
+          ]
+        : ['/usr/bin/chromium', '/usr/bin/chromium-browser', '/usr/bin/google-chrome'];
+  for (const p of candidates) {
+    try { if (p && fs.existsSync(p)) return p; } catch (_) { /* ignore */ }
+  }
+  return process.platform === 'win32'
+    ? path.join(process.env['ProgramFiles'] || 'C:\\Program Files', 'Google', 'Chrome', 'Application', 'chrome.exe')
+    : '/usr/bin/chromium';
+}
+const CHROME_PATH = detectChromePath();
+const NAV_TIMEOUT = parseInt(process.env.NAV_TIMEOUT || '20000', 10);
+const WAIT_FOR_MEDIA = parseInt(process.env.WAIT_FOR_MEDIA || '13000', 10);
+// Hard ceiling for one /extract call across ALL provider attempts. Without
+// it a title missing everywhere walks 6 targets x (nav+wait) ≈ 4.5min, the
+// caller's own timeout fires, and the caller retries the whole marathon.
+const TOTAL_BUDGET_MS = parseInt(process.env.EXTRACT_BUDGET_MS || String(95 * 1000), 10);
 const CACHE_TTL_MS = parseInt(process.env.CACHE_TTL_MS || String(20 * 60 * 1000), 10);
 
 // NOTE: no User-Agent override anywhere in this service. Embed providers
@@ -36,6 +70,8 @@ const UA = null;
 
 // A real media asset URL.
 const MEDIA_RE = /\.(m3u8|mp4|mpd)(\?|$)/i;
+// Extensionless media paths used by proxy players (…/hls/<hash>, …/dash/<id>).
+const MEDIA_PATH_RE = /\/(hls|dash|manifest|playlist)(\/|\?|$)/i;
 // Obvious ad / analytics / tracking noise to ignore.
 const AD_RE =
   /(doubleclick|googlesyndication|adservice|adsterra|adscale|popads|exoclick|propeller|juicyads|bidgear|mgid|taboola|outbrain|facebook|connect\.facebook|analytics|hotjar|clarity|yandex|mc\.yandex|gtag|gtm|googletagmanager|sb\.adscale|\/ads?\?|\/advert|spotx|pubmatic|adnxs|criteo|amazon-adsystem|\/pixel|beacon|telemetry|w\.gif|1x1)/i;
@@ -47,21 +83,59 @@ function buildEmbedTargets(ctx) {
   const { type, imdbId, tmdbId, season = 1, episode = 1 } = ctx;
   const id = imdbId || tmdbId;
   if (!id) return [];
+  const vidlinkLikePage = (base, id) =>
+    type === 'movie' ? `${base}/movie/${id}` : `${base}/tv/${id}/${season}/${episode}`;
+
   const targets = [];
 
+  // vidsrc.pm — live successor of the vidsrc family (vidsrc.ink DNS is dead).
+  // Independent catalogue from vidlink/MovieBox and answers in seconds, so it
+  // sits right after vidlink's primary id form: titles the sacdn pool lacks
+  // (Interstellar is one) resolve here via its mov2day HLS proxy.
+  const pmTarget = {
+    provider: 'vidsrc.pm',
+    page: vidlinkLikePage('https://vidsrc.pm/embed', imdbId || tmdbId),
+    referer: 'https://vidsrc.pm/',
+  };
+  // Its catalogue is IMDb-keyed, so a row that only reached it by TMDB id
+  // (Harry Potter 1) still needs the tt form tried.
+  const pmTargetAlt =
+    imdbId && tmdbId
+      ? {
+          provider: 'vidsrc.pm',
+          page: vidlinkLikePage('https://vidsrc.pm/embed', tmdbId),
+          referer: 'https://vidsrc.pm/',
+        }
+      : null;
+
   // vidlink.pro — browser passes CF, then its player fetches the real DASH/HLS.
-  // Series path is /tv/{tmdb}/{s}/{e} (old /tv-series/ now 404s).
-  if (tmdbId) {
+  // The same /movie/{id} path accepts BOTH IMDb (tt..) and TMDB ids, and their
+  // catalogue is keyed primarily by IMDb: some canonical TMDB entries (e.g.
+  // Interstellar 157336) have no asset under the numeric id but do under the
+  // tt id, so try the IMDb form first and keep the TMDB form as a fallback.
+  const vidlinkPage = (id) =>
+    type === 'movie'
+      ? `https://vidlink.pro/movie/${id}`
+      : `https://vidlink.pro/tv/${id}/${season}/${episode}`;
+  if (imdbId) {
     targets.push({
       provider: 'vidlink',
-      page:
-        type === 'movie'
-          ? `https://vidlink.pro/movie/${tmdbId}`
-          : `https://vidlink.pro/tv/${tmdbId}/${season}/${episode}`,
+      page: vidlinkPage(imdbId),
       referer: 'https://vidlink.pro/',
     });
   }
-
+  // Quality-first for vidlink (1080p HEVC DASH), but its alternate-catalogue
+  // peer is tried before vidlink's second id form so unavailable titles fail
+  // fast instead of burning two more slow pages.
+  targets.push(pmTarget);
+  if (pmTargetAlt) targets.push(pmTargetAlt);
+  if (tmdbId && tmdbId !== imdbId) {
+    targets.push({
+      provider: 'vidlink',
+      page: vidlinkPage(tmdbId),
+      referer: 'https://vidlink.pro/',
+    });
+  }
   // vidsrc family — vidsrc.xyz DNS is dead; use live successors.
   targets.push({
     provider: 'vidsrc',
@@ -140,11 +214,30 @@ async function getBrowser() {
   return browserPromise;
 }
 
-function classifyKind(url) {
-  const clean = url.split('?')[0].toLowerCase();
-  if (clean.endsWith('.m3u8')) return 'hls';
+function classifyKind(url, contentType) {
+  const ct = String(contentType || '').toLowerCase();
+  // The server's own answer beats the URL shape: several providers serve HLS
+  // through extensionless proxies (e.g. /proxy?url=https://host/hls/<hash>).
+  if (ct.includes('mpegurl') || ct.includes('x-mpegurl')) return 'hls';
+  if (ct.includes('dash+xml')) return 'dash';
+  const inner = decodeInnerUrl(url);
+  const clean = inner.split('?')[0].toLowerCase();
+  if (clean.endsWith('.m3u8') || /\/hls\//.test(inner)) return 'hls';
   if (clean.endsWith('.mpd')) return 'dash';
   return 'mp4';
+}
+
+// Some providers wrap the real asset in a proxy URL's `url=` parameter; that
+// inner value is what tells us the stream type.
+function decodeInnerUrl(url) {
+  try {
+    const u = new URL(url);
+    for (const key of ['url', 'src', 'file', 'u']) {
+      const v = u.searchParams.get(key);
+      if (v && /^https?:\/\//i.test(v)) return v;
+    }
+  } catch { /* not parseable; use the raw url */ }
+  return url;
 }
 
 // ---------------------------------------------------------------------------
@@ -199,11 +292,15 @@ async function extractFromTarget(target) {
   // Embed pages fire decoy media requests (e.g. a hotlinked mp4 that 403s
   // everywhere) before the player's real .mpd/.m3u8 lands — a request-only
   // match grabs the decoy and the stream dies in our relay.
-  const candidates = new Map(); // url -> status
+  const candidates = new Map(); // url -> { status, contentType }
   const consider = (res) => {
     const u = res.url();
-    if (MEDIA_RE.test(u) && !AD_RE.test(u) && res.status() < 400) {
-      if (!candidates.has(u)) candidates.set(u, res.status());
+    if (AD_RE.test(u) || res.status() >= 400) return;
+    const ct = String(res.headers()['content-type'] || '').toLowerCase();
+    const byUrl = MEDIA_RE.test(u) || MEDIA_PATH_RE.test(u);
+    const byCt = /mpegurl|dash\+xml|video\//i.test(ct);
+    if (byUrl || byCt) {
+      if (!candidates.has(u)) candidates.set(u, { status: res.status(), contentType: ct });
     }
   };
   page.on('response', consider);
@@ -211,13 +308,22 @@ async function extractFromTarget(target) {
   let mainStatus = null;
 
   // Rank: DASH/HLS manifests are the real adaptive streams; mp4 last.
+  const scoreOf = (u, info) => {
+    const ct = (info && info.contentType) || '';
+    if (/mpegurl/i.test(ct)) return 4;
+    const inner = decodeInnerUrl(u);
+    if (/\.mpd(\?|$)/i.test(inner)) return 3;
+    if (/\.m3u8(\?|$)/i.test(inner) || /\/hls\//i.test(inner)) return 2;
+    if (/dash\+xml/i.test(ct)) return 3;
+    return 1;
+  };
   const bestOf = (map) => {
     let best = null;
-    for (const u of map.keys()) {
-      const score = /\.mpd(\?|$)/i.test(u) ? 3 : /\.m3u8(\?|$)/i.test(u) ? 2 : 1;
-      if (!best || score > best.score) best = { u, score };
+    for (const [u, info] of map.entries()) {
+      const score = scoreOf(u, info);
+      if (!best || score > best.score) best = { u, score, info };
     }
-    return best && best.u;
+    return best;
   };
 
   try {
@@ -233,7 +339,12 @@ async function extractFromTarget(target) {
     let nudged = false;
     while (Date.now() - start < WAIT_FOR_MEDIA) {
       const cur = bestOf(candidates);
-      if (cur && !/\.mp4(\?|$)/i.test(cur)) break; // manifest found — stop waiting
+      // score >= 2 means an adaptive manifest (DASH/HLS) landed — that's the
+      // best answer this page will give, stop waiting.
+      if (cur && cur.score >= 2) break;
+      // Dead/geo-blocked hosts answer >=400 immediately and NEVER stream media
+      // afterwards — don't burn the full wait window on them.
+      if (mainStatus >= 400 && candidates.size === 0 && Date.now() - start > 2500) break;
       if (!nudged && Date.now() - start > 6000) {
         nudged = true;
         await page.evaluate(() => {
@@ -253,28 +364,50 @@ async function extractFromTarget(target) {
     await page.close().catch(() => {});
   }
 
-  const captured = bestOf(candidates);
+  const best = bestOf(candidates);
   diag.ms = Date.now() - t0;
   diag.mainStatus = mainStatus;
-  diag.captured = captured;
-  if (!captured) return { ok: false, diag };
+  diag.captured = best && best.u;
+  if (!best) return { ok: false, diag };
   return {
     ok: true,
     diag,
-    result: { url: captured, referer: target.referer, provider: target.provider, kind: classifyKind(captured) },
+    result: {
+      url: best.u,
+      referer: target.referer,
+      provider: target.provider,
+      kind: classifyKind(best.u, best.info && best.info.contentType),
+    },
   };
 }
 
 async function extract(ctx) {
   const targets = buildEmbedTargets(ctx);
-  // Embed pages are flaky (CDN challenges resolve only on some attempts), so
-  // give the highest-priority provider a second pass at the end.
-  if (targets.length > 0) targets.push({ ...targets[0], retry: true });
   const diags = [];
+  const budgetStart = Date.now();
+
+  // Was this failure worth drawing again? A page that loaded fine (200) and
+  // simply streamed nothing is a "not in this catalogue" answer — retrying it
+  // burns 20s for the same result. Navigation/DNS/5xx/403 failures ARE worth a
+  // second draw because those providers gate on transient CDN challenges.
+  const retryWorthwhile = (diag) =>
+    !!diag.navError || !!diag.browserError || !!diag.newPageError ||
+    diag.mainStatus === null || diag.mainStatus >= 400;
+
   for (const t of targets) {
-    const out = await extractFromTarget(t);
-    diags.push(out.diag);
-    if (out.ok) return { result: out.result, diags };
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (Date.now() - budgetStart > TOTAL_BUDGET_MS) {
+        diags.push({ provider: t.provider, skipped: 'budget-exceeded' });
+        break;
+      }
+      const target = attempt === 0 ? t : { ...t, retry: true };
+      const out = await extractFromTarget(target);
+      diags.push(out.diag);
+      if (out.ok) return { result: out.result, diags };
+      if (attempt === 0 && !retryWorthwhile(out.diag)) break;
+      // Dead hosts answer in <1s; don't pay that twice.
+      if (attempt === 0 && out.diag.ms < 3000) break;
+    }
   }
   return { result: null, diags };
 }

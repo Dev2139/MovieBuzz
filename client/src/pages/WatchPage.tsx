@@ -92,6 +92,9 @@ export const WatchPage: React.FC = () => {
     enabled: Boolean(rawTitle),
     refetchOnWindowFocus: false,
     staleTime: Infinity,
+    // A resolve call already spends minutes extracting; retrying it on failure
+    // would make the user wait twice before seeing the honest error state.
+    retry: false,
   });
 
   // Fetch Full MovieBox Series Seasons & Episodes Catalog

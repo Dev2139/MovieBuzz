@@ -53,8 +53,20 @@ const REQUEST_TIMEOUT = 12000;
 // ---------------------------------------------------------------------------
 
 function guessKind(url: string): StreamKind {
-  const clean = url.split('?')[0].toLowerCase();
-  if (clean.endsWith('.m3u8')) return 'hls';
+  // Several providers hand back an extensionless proxy URL whose REAL asset is
+  // inside the query string (…/proxy?url=https://host/hls/<hash>). Look there
+  // first, otherwise a genuine HLS stream would be treated as a plain mp4 and
+  // the player would never parse the playlist.
+  let inner = url;
+  try {
+    const u = new URL(url);
+    for (const key of ['url', 'src', 'file', 'u']) {
+      const v = u.searchParams.get(key);
+      if (v && /^https?:\/\//i.test(v)) { inner = v; break; }
+    }
+  } catch { /* relative/odd url: use it as-is */ }
+  const clean = inner.split('?')[0].toLowerCase();
+  if (clean.endsWith('.m3u8') || /\/hls\//.test(clean)) return 'hls';
   if (clean.endsWith('.mpd')) return 'dash';
   return 'mp4';
 }
@@ -101,113 +113,17 @@ function firstStringField(obj: any, keys: string[]): string | undefined {
 }
 
 // ---------------------------------------------------------------------------
-// Providers — each returns candidate raw URLs. Add / edit freely.
+// Providers
 // ---------------------------------------------------------------------------
-
+// NOTE: the old raw-HTTP providers (vidlink POST, vidsrc.xyz, 2embed, multiembed)
+// were removed. Their pages either no longer resolve (dead domains) or expose
+// only decoy/promo media — and an mp4 decoy that slipped past validation used
+// to be RANKED FIRST (mp4 > dash), which is what played "a random video" for
+// some titles. The headless extractor is the only provider proven to capture
+// the real, correct stream (keyed by our own TMDB/IMDb ids).
 type ProviderFn = (ctx: EmbedResolveContext) => Promise<RawEmbedSource[]>;
 
 const PROVIDERS: Record<string, ProviderFn> = {
-  // VidLink — POST a base64("tmdbx<id>") payload and receive { video: "..." }.
-  'vidlink': async (ctx) => {
-    if (!ctx.tmdbId) return [];
-    const results: RawEmbedSource[] = [];
-    const referer = 'https://vidlink.pro/';
-    try {
-      if (ctx.type === 'movie') {
-        const url = `https://vidlink.pro/movie/${ctx.tmdbId}`;
-        const body = { b64: b64(`tmdbx${ctx.tmdbId}`) };
-        const res = await axios.post(url, body, {
-          headers: { 'User-Agent': BROWSER_UA, Referer: referer, Origin: 'https://vidlink.pro' },
-          timeout: REQUEST_TIMEOUT,
-        });
-        const v = firstStringField(res.data, ['video', 'url', 'file']);
-        if (v) results.push({ url: v, referer, provider: 'vidlink' });
-      } else {
-        const url = `https://vidlink.pro/tv-series/${ctx.tmdbId}/${ctx.season || 1}/${ctx.episode || 1}`;
-        const body = { b64: b64(`tmdbsx${ctx.tmdbId}`) };
-        const res = await axios.post(url, body, {
-          headers: { 'User-Agent': BROWSER_UA, Referer: referer, Origin: 'https://vidlink.pro' },
-          timeout: REQUEST_TIMEOUT,
-        });
-        const v = firstStringField(res.data, ['video', 'url', 'file']);
-        if (v) results.push({ url: v, referer, provider: 'vidlink' });
-      }
-    } catch {
-      /* provider unavailable */
-    }
-    return results;
-  },
-
-  // VidSrc.xyz — fetch the embed page and scrape any media URL it exposes.
-  'vidsrc': async (ctx) => {
-    const referer = 'https://vidsrc.xyz/';
-    let embed = '';
-    if (ctx.type === 'movie') {
-      const id = ctx.imdbId || ctx.tmdbId;
-      if (!id) return [];
-      embed = `https://vidsrc.xyz/embed/movie/${id}`;
-    } else {
-      const id = ctx.imdbId || ctx.tmdbId;
-      if (!id) return [];
-      embed = `https://vidsrc.xyz/embed/tv/${id}/${ctx.season || 1}/${ctx.episode || 1}`;
-    }
-    try {
-      const res = await axios.get(embed, {
-        headers: { 'User-Agent': BROWSER_UA, Referer: referer },
-        timeout: REQUEST_TIMEOUT,
-        maxRedirects: 5,
-      });
-      return extractMediaUrls(String(res.data || ''))
-        .slice(0, 6)
-        .map((url) => ({ url, referer, provider: 'vidsrc' }));
-    } catch {
-      return [];
-    }
-  },
-
-  // 2embed — embed page + media extraction.
-  '2embed': async (ctx) => {
-    if (!ctx.imdbId) return [];
-    const referer = 'https://www.2embed.cc/';
-    const embed =
-      ctx.type === 'movie'
-        ? `https://www.2embed.cc/embed/${ctx.imdbId}`
-        : `https://www.2embed.cc/embedtv/${ctx.imdbId}&s=${ctx.season || 1}&e=${ctx.episode || 1}`;
-    try {
-      const res = await axios.get(embed, {
-        headers: { 'User-Agent': BROWSER_UA, Referer: referer },
-        timeout: REQUEST_TIMEOUT,
-      });
-      return extractMediaUrls(String(res.data || ''))
-        .slice(0, 6)
-        .map((url) => ({ url, referer, provider: '2embed' }));
-    } catch {
-      return [];
-    }
-  },
-
-  // SuperEmbed — page scrape.
-  'superembed': async (ctx) => {
-    const id = ctx.imdbId || ctx.tmdbId;
-    if (!id) return [];
-    const referer = 'https://multiembed.mov/';
-    const base =
-      ctx.type === 'movie'
-        ? `https://multiembed.mov/?video_id=${id}&tmdb=1`
-        : `https://multiembed.mov/?video_id=${id}&tmdb=1&s=${ctx.season || 1}&e=${ctx.episode || 1}`;
-    try {
-      const res = await axios.get(base, {
-        headers: { 'User-Agent': BROWSER_UA, Referer: referer },
-        timeout: REQUEST_TIMEOUT,
-      });
-      return extractMediaUrls(String(res.data || ''))
-        .slice(0, 6)
-        .map((url) => ({ url, referer, provider: 'multiembed' }));
-    } catch {
-      return [];
-    }
-  },
-
   // Headless extractor worker — the ONLY provider that can pass Cloudflare JS
   // challenges. Delegates to a separate Chromium service (STREAM_EXTRACTOR_URL)
   // which loads the gated embed page in a real browser and captures the actual
@@ -224,25 +140,45 @@ const PROVIDERS: Record<string, ProviderFn> = {
     });
     if (ctx.imdbId) params.set('imdbId', ctx.imdbId);
     if (ctx.tmdbId) params.set('tmdbId', String(ctx.tmdbId));
-    try {
-      const res = await axios.get(`${base.replace(/\/+$/, '')}/extract?${params.toString()}`, {
-        // A cold extraction walks every embed provider (each up to ~25s of
-        // real-browser load time), so this must far exceed normal HTTP budgets.
-        timeout: 150000,
-        validateStatus: () => true,
-      });
-      const data = res.data;
-      if (!data || typeof data.url !== 'string') return [];
-      return [
-        {
-          url: data.url,
-          referer: data.referer || `${base}`,
-          provider: data.provider || 'headless',
-        },
-      ];
-    } catch {
-      return [];
+    const clean = base.replace(/\/+$/, '');
+
+    // Embed sites are intermittently flaky per title (their CDN challenge only
+    // resolves on some attempts) — the worker itself re-draws each provider.
+    // The extractor already retries each provider/id-form internally, so a
+    // definitive 404 ("no media anywhere") is honest and re-running it would
+    // just double the wait. A retry only helps when the CALL itself failed
+    // (worker restart, transient network/5xx), so that case is retried once.
+    let transportError = false;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (attempt > 0) {
+        if (!transportError) break;
+        await new Promise((r) => setTimeout(r, 3000));
+      }
+      try {
+        const res = await axios.get(`${clean}/extract?${params.toString()}`, {
+          // The extractor enforces its own ~95s total budget across all
+          // providers; 115s guarantees a definitive answer (url or 404)
+          // instead of a client-side timeout that re-runs the whole search.
+          timeout: 115000,
+          validateStatus: () => true,
+        });
+        const data = res.data;
+        if (data && typeof data.url === 'string') {
+          return [
+            {
+              url: data.url,
+              referer: data.referer || `${base}`,
+              provider: data.provider || 'headless',
+            },
+          ];
+        }
+        if (res.status === 404) return []; // definitively unavailable
+        transportError = res.status >= 500 || res.status === 429;
+      } catch {
+        transportError = true; // timeout / network — worth one fresh attempt
+      }
     }
+    return [];
   },
 };
 

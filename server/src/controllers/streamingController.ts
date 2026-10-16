@@ -355,6 +355,11 @@ async function resolveEmbedViaFallback(
       /* ignore metadata lookup failures */
     }
   }
+  // Providers key their catalogue by IMDb id first, so a row that only carries
+  // a TMDB id (common for imported content) must be mapped before extraction.
+  if (!imdbId && tmdbId) {
+    imdbId = await tmdbService.fetchImdbId(tmdbId, ctx.type).catch(() => undefined);
+  }
   try {
     const sources = await resolveEmbedSources({ ...ctx, imdbId, tmdbId });
     return sources;
@@ -638,35 +643,23 @@ export const resolveStreamingSources = async (req: Request, res: Response) => {
     const protocol = (req.headers['x-forwarded-proto'] as string) || req.protocol || 'http';
     const baseUrl = `${protocol}://${host}`;
 
-    const resolved = await movieboxService.resolveByTitle(title, year, type, season, episode);
-    const movieboxSources: any[] = resolved?.sources || [];
+    // Playback NEVER comes from MovieBox anymore: its play-info API (v1 and v2,
+    // verified live across many titles) serves only a 23-second "upgrade notice"
+    // placeholder, and its leftover community /resource uploads are frequently
+    // mislabeled — playing them is what surfaced as "a random video". MovieBox
+    // remains for metadata endpoints only. Streams here are resolved on demand
+    // from embed providers keyed by OUR verified TMDB/IMDb ids, so the content
+    // always matches the title the user clicked.
+    const embedSources = await resolveEmbedViaFallback({
+      title,
+      year,
+      type,
+      season,
+      episode,
+      imdbId,
+      tmdbId: tmdbIdParam,
+    });
 
-    if (movieboxSources.length === 0) {
-      // MovieBox has stopped serving real video for most titles. Fall back to
-      // on-demand embed providers (no storage, your player keeps full control).
-      const embedSources = await resolveEmbedViaFallback({
-        title,
-        year,
-        type,
-        season,
-        episode,
-        imdbId,
-        tmdbId: tmdbIdParam,
-      });
-      if (embedSources.length > 0) {
-        return res.json({
-          subject: resolved?.subject || null,
-          sources: formatEmbedSources(embedSources, baseUrl),
-          dubs: [],
-          provider: 'embed',
-        });
-      }
-      return res.json({ subject: resolved?.subject || null, sources: [], dubs: [] });
-    }
-
-    const formattedSources = formatStreamingSources(movieboxSources, baseUrl);
-
-    // Concurrently fetch subtitles for resolved content
     let subtitles: any[] = [];
     try {
       subtitles = await subtitleService.getSubtitles({
@@ -680,12 +673,16 @@ export const resolveStreamingSources = async (req: Request, res: Response) => {
       console.warn('resolveStreamingSources subtitles notice:', subErr.message);
     }
 
-    return res.json({
-      subject: resolved?.subject || null,
-      sources: formattedSources,
-      dubs: resolved?.dubs || [],
-      subtitles,
-    });
+    if (embedSources.length > 0) {
+      return res.json({
+        subject: null,
+        sources: formatEmbedSources(embedSources, baseUrl),
+        dubs: [],
+        subtitles,
+        provider: 'embed',
+      });
+    }
+    return res.json({ subject: null, sources: [], dubs: [], subtitles });
   } catch (error: any) {
     console.warn('resolveStreamingSources notice:', error.message);
     return res.json({ subject: null, sources: [], dubs: [], subtitles: [] });

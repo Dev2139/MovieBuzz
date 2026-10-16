@@ -450,6 +450,10 @@ export const resolveStreamingSourcesByTitle = async (
     dubs?: Array<{ subjectId: string; name: string; code: string; original?: boolean }>;
     subtitles?: SubtitleTrack[];
   }>('/streaming/resolve', {
+    // Cold headless extraction is slow but now bounded server-side (~3.5min
+    // worst case). A finite timeout surfaces "no sources" to the user instead
+    // of an indefinitely pending request.
+    timeout: 240000,
     params: {
       title,
       year,

@@ -140,8 +140,20 @@ class TMDBService {
       }
 
       if (searchResults.length > 0) {
-        // Sort candidate matches: prioritize matching release year, then by popularity (vote count / index)
+        // Sort candidate matches: title similarity FIRST (popularity-only picks
+        // made TMDB return unrelated titles, which then played the wrong video),
+        // then matching release year, then popularity (vote count / index).
+        const reqNorm = cleanTitle.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const titleScore = (r: any): number => {
+          const t = String(r.title || r.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+          if (!reqNorm || !t) return 0;
+          if (t === reqNorm) return 3;
+          if (t.startsWith(reqNorm) || reqNorm.startsWith(t)) return 2;
+          return t.includes(reqNorm) || reqNorm.includes(t) ? 1 : 0;
+        };
         searchResults.sort((a: any, b: any) => {
+          const ts = titleScore(b) - titleScore(a);
+          if (ts !== 0) return ts;
           const aYear = parseInt((a.release_date || a.first_air_date || '').slice(0, 4), 10);
           const bYear = parseInt((b.release_date || b.first_air_date || '').slice(0, 4), 10);
           if (year && aYear === year && bYear !== year) return -1;
@@ -251,6 +263,30 @@ class TMDBService {
     }
 
     return null;
+  }
+
+  /**
+   * Map a TMDB id to its IMDb id in one lightweight details call. Embed
+   * providers key their catalogue primarily by IMDb id, so resolving streams
+   * without it loses titles whose TMDB-numbered page is empty.
+   */
+  async fetchImdbId(tmdbId: number | string, type: 'movie' | 'series' = 'movie'): Promise<string | undefined> {
+    try {
+      const url = `https://api.themoviedb.org/3/${type === 'series' ? 'tv' : 'movie'}/${tmdbId}?api_key=${this.apiKey}`;
+      const res = await axios.get(url, { timeout: 6000 }).catch(() => null);
+      const imdb = res?.data?.imdb_id;
+      if (typeof imdb === 'string' && imdb.startsWith('tt')) return imdb;
+      if (type === 'movie') {
+        // DB "type" is unreliable for imported rows; a tv id queried on the
+        // movie endpoint returns 404, so try the other family once.
+        const alt = await axios.get(`https://api.themoviedb.org/3/tv/${tmdbId}?api_key=${this.apiKey}`, { timeout: 6000 }).catch(() => null);
+        const altImdb = alt?.data?.imdb_id;
+        if (typeof altImdb === 'string' && altImdb.startsWith('tt')) return altImdb;
+      }
+      return undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   /**
