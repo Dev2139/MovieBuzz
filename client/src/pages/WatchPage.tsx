@@ -12,7 +12,7 @@ import {
   fetchSubtitles,
 } from '../services/api';
 import { VideoPlayer } from '../components/VideoPlayer';
-import { ChevronLeft, ChevronRight, List, Film, Tv, Play, Sparkles, Layers } from 'lucide-react';
+import { ChevronLeft, ChevronRight, List, Film, Tv, Play, Sparkles, Layers, RotateCcw } from 'lucide-react';
 import { getLocalPlaybackItem } from '../utils/localStorage';
 import { resolveMediaUrl, getDownloadUrl } from '../utils/url';
 import { useAuth } from '../context/AuthContext';
@@ -74,7 +74,7 @@ export const WatchPage: React.FC = () => {
 
   // Fallback title / year parsed from slug if content record is still loading or slug was unhyphenated
   const fallbackMovieTitle = slug
-    ? decodeURIComponent(slug).replace(/-\d{4}$/, '').replace(/-/g, ' ').trim()
+    ? decodeURIComponent(slug).replace(/(?:-|\s)\d{4}$/, '').replace(/-/g, ' ').trim()
     : undefined;
   const fallbackYearMatch = slug ? slug.match(/(?:^|-|\s)(\d{4})$/) : null;
   const fallbackYear = fallbackYearMatch ? parseInt(fallbackYearMatch[1], 10) : undefined;
@@ -85,7 +85,12 @@ export const WatchPage: React.FC = () => {
   const rawImdbId = isMovie ? movieData?.content?.imdbId : seriesData?.series?.imdbId;
   const rawTmdbId = isMovie ? movieData?.content?.tmdbId : seriesData?.series?.tmdbId;
 
-  const { data: movieboxData, isLoading: isMovieboxLoading } = useQuery({
+  const {
+    data: movieboxData,
+    isLoading: isMovieboxLoading,
+    isFetching: isMovieboxFetching,
+    refetch: refetchMoviebox,
+  } = useQuery({
     queryKey: ['moviebox-sources', rawTitle, rawYear, isMovie ? 'movie' : 'series', currentSeasonNum, currentEpNum, rawImdbId, rawTmdbId],
     queryFn: () =>
       resolveStreamingSourcesByTitle(
@@ -98,10 +103,8 @@ export const WatchPage: React.FC = () => {
       ),
     enabled: Boolean(rawTitle),
     refetchOnWindowFocus: false,
-    staleTime: Infinity,
-    // A resolve call already spends minutes extracting; retrying it on failure
-    // would make the user wait twice before seeing the honest error state.
-    retry: false,
+    staleTime: 5 * 60 * 1000,
+    retry: 1,
   });
 
   // Fetch Full MovieBox Series Seasons & Episodes Catalog
@@ -343,6 +346,14 @@ export const WatchPage: React.FC = () => {
             <p className="text-xs text-gray-500 max-w-md">
               We couldn't resolve a stream for "{contentTitle}". Please check back soon or try another title.
             </p>
+            <button
+              onClick={() => refetchMoviebox()}
+              disabled={isMovieboxFetching}
+              className="mt-3 inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-brand-500 hover:bg-brand-600 active:scale-95 rounded-lg shadow-md transition-all disabled:opacity-50 cursor-pointer"
+            >
+              <RotateCcw className={`w-3.5 h-3.5 ${isMovieboxFetching ? 'animate-spin' : ''}`} />
+              <span>{isMovieboxFetching ? 'Resolving Stream...' : 'Retry Stream Resolution'}</span>
+            </button>
           </div>
         )}
 

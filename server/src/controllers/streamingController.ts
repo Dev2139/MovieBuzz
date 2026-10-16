@@ -655,12 +655,18 @@ export const getEpisodeSources = async (req: Request, res: Response) => {
  */
 export const resolveStreamingSources = async (req: Request, res: Response) => {
   try {
-    const title = (req.query.title as string || '').trim();
-    if (!title) {
+    let rawTitle = (req.query.title as string || '').trim();
+    if (!rawTitle) {
       return res.status(400).json({ error: 'Title parameter is required.' });
     }
 
-    const year = req.query.year ? parseInt(req.query.year as string, 10) : undefined;
+    let year = req.query.year ? parseInt(req.query.year as string, 10) : undefined;
+    const yearMatch = rawTitle.match(/(?:-|\s)(\d{4})$/);
+    if (yearMatch) {
+      if (!year) year = parseInt(yearMatch[1], 10);
+      rawTitle = rawTitle.replace(/(?:-|\s)\d{4}$/, '').trim();
+    }
+    const title = rawTitle;
     const type = (req.query.type as string || 'movie') === 'series' ? 'series' : 'movie';
     const season = parseInt(req.query.season as string || '1', 10);
     const episode = parseInt(req.query.episode as string || '1', 10);
