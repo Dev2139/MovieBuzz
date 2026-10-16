@@ -913,11 +913,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     if (dashRef.current) {
       try { (dashRef.current as any).play?.(); } catch {}
     }
-    // Clear background buffer keeper since playback is resuming
-    if (bgBufferIntervalRef.current) {
-      clearInterval(bgBufferIntervalRef.current);
-      bgBufferIntervalRef.current = null;
-    }
+    // Keep background buffer keeper active so chunks keep downloading continuously ahead during playback and future pauses
 
     setTimeout(() => {
       if (videoRef.current) {
@@ -1013,26 +1009,21 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   }, [isPlayingAd, isAdFreeUser, handleAdFinished]);
 
   // While the ad is on screen, force the real stream to stay paused & silent at the user's resume position.
-  // This prevents the movie playhead from drifting forward during the ad (no skipped content) and stops any
-  // audio leaking from behind the overlay, while MSE/HLS/DASH keep loading chunks ahead in the background.
+  // This prevents the movie playhead from drifting forward during the ad and prevents audio leaking,
+  // while MSE/HLS/DASH continuously download and buffer chunks ahead in the background.
   useEffect(() => {
     if (!isPlayingAd || isAdFreeUser || !videoRef.current) return;
     const v = videoRef.current;
     v.muted = true;
     const resumePos = playbackPositionRef.current > 0 ? playbackPositionRef.current : initialPosition;
-    const keepPinned = () => {
-      if (!v.paused) {
-        try {
-          v.pause();
-        } catch {}
-      }
-      if (resumePos > 0 && Math.abs(v.currentTime - resumePos) > 0.5) {
-        v.currentTime = resumePos;
-      }
-    };
-    keepPinned();
-    const pin = setInterval(keepPinned, 500);
-    return () => clearInterval(pin);
+    if (resumePos > 0 && Math.abs(v.currentTime - resumePos) > 1.5) {
+      v.currentTime = resumePos;
+    }
+    if (!v.paused) {
+      try {
+        v.pause();
+      } catch {}
+    }
   }, [isPlayingAd, isAdFreeUser, initialPosition]);
 
   const controlsTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -2270,7 +2261,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           },
         });
 
-        player.initialize(videoRef.current, effectiveUrl, true);
+        const shouldAutoPlay = adCompletedRef.current || isAdFreeUser;
+        player.initialize(videoRef.current, effectiveUrl, shouldAutoPlay);
         dashRef.current = player;
         try {
           player.preload();
@@ -2426,41 +2418,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         hls.startLoad(startPos);
       });
 
-      // ---- Ultra-fast continuous buffer keeper (500ms heartbeat) ----
-      // Guarantees HLS/DASH keep loading chunks:
-      //  - while the user is paused (loads forward until maxBufferLength horizon is hit)
-      //  - while playing but forward buffer is thin (<60s)
-      //  - while the pre-roll ad is showing on top of the paused stream
-      if (bgBufferIntervalRef.current) clearInterval(bgBufferIntervalRef.current);
-      bgBufferIntervalRef.current = setInterval(() => {
-        const vid = videoRef.current;
-        if (!vid) return;
-        const isPaused = vid.paused || vid.ended;
-
-        // Compute seconds of buffered content ahead of the playhead
-        let forwardBufferSec = 0;
-        if (vid.buffered && vid.buffered.length > 0) {
-          for (let i = 0; i < vid.buffered.length; i++) {
-            const s = vid.buffered.start(i);
-            const e = vid.buffered.end(i);
-            if (vid.currentTime >= s && vid.currentTime <= e) {
-              forwardBufferSec = e - vid.currentTime;
-              break;
-            }
-          }
-        }
-
-        // Nudge HLS loader to keep going if paused or if forward buffer is thin
-        // (DASH is handled natively by dash.js scheduleWhilePaused=true + aggressive bufferTimeDefault)
-        if (hlsRef.current && (isPaused || forwardBufferSec < 60)) {
-          try {
-            hlsRef.current.startLoad(-1);
-          } catch {}
-        }
-
-        updateBuffered();
-      }, 500);
-
       hls.on(Hls.Events.FRAG_BUFFERED, () => {
         updateBuffered();
       });
@@ -2530,6 +2487,51 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         videoRef.current.load();
       }
     }
+
+    // =========================================================================
+    // Universal Continuous Chunk Buffering Engine (300ms Heartbeat)
+    // =========================================================================
+    // 1. While the pre-roll ad is showing: downloads and fills chunk buffer in background
+    // 2. When ad finishes: playback starts INSTANTLY with zero buffer spinner
+    // 3. While playing: continuously downloads ahead up to 15-30 minute forward horizon
+    // 4. While user pauses: aggressively buffers all remaining chunks ahead
+    if (bgBufferIntervalRef.current) clearInterval(bgBufferIntervalRef.current);
+    bgBufferIntervalRef.current = setInterval(() => {
+      const vid = videoRef.current;
+      if (!vid) return;
+
+      // Compute seconds of buffered content ahead of the current playhead
+      let forwardBufferSec = 0;
+      if (vid.buffered && vid.buffered.length > 0) {
+        for (let i = 0; i < vid.buffered.length; i++) {
+          const s = vid.buffered.start(i);
+          const e = vid.buffered.end(i);
+          if (vid.currentTime >= s && vid.currentTime <= e) {
+            forwardBufferSec = e - vid.currentTime;
+            break;
+          }
+        }
+      }
+
+      // Forward buffering horizon: 5 minutes on mobile, 15 minutes on desktop
+      const targetForwardHorizon = isMobileDevice ? 300 : 900;
+
+      // HLS chunk loading engine: keep scheduling fragments ahead until horizon is full
+      if (hlsRef.current && forwardBufferSec < targetForwardHorizon) {
+        try {
+          hlsRef.current.startLoad(-1);
+        } catch {}
+      }
+
+      // DASH chunk loading engine: keep pulling representations and segments ahead
+      if (dashRef.current && forwardBufferSec < targetForwardHorizon) {
+        try {
+          (dashRef.current as any).preload?.();
+        } catch {}
+      }
+
+      updateBuffered();
+    }, 300);
 
     return () => {
       isCancelled = true;
@@ -2629,10 +2631,15 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         }}
         onPause={() => {
           setIsPlaying(false);
-          // Keep HLS pumping fragments while paused
+          // Keep pumping chunks ahead at maximum speed while paused
           if (hlsRef.current) {
             try {
               hlsRef.current.startLoad(-1);
+            } catch {}
+          }
+          if (dashRef.current) {
+            try {
+              (dashRef.current as any).preload?.();
             } catch {}
           }
         }}
