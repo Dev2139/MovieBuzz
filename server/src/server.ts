@@ -43,14 +43,23 @@ const allowedOrigins = [
   'http://localhost:3000',
 ].filter(Boolean) as string[];
 
+const isAllowedOrigin = (origin: string) =>
+  allowedOrigins.includes(origin) ||
+  origin.endsWith('.netlify.app') ||
+  origin.endsWith('.vercel.app');
+
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (!origin || allowedOrigins.includes(origin) || origin.endsWith('.netlify.app') || origin.endsWith('.vercel.app')) {
-        callback(null, true);
-      } else {
-        callback(null, true); // Allow cross-origin requests for media streaming
-      }
+      // No Origin header = not a browser cross-origin call (curl, server-to-
+      // server, same-origin). Always fine.
+      if (!origin || isAllowedOrigin(origin)) return callback(null, true);
+      // Previously this branch ALSO returned true, which made the allowlist
+      // meaningless: with credentials:true every site on the internet could
+      // send the visitor's auth cookie and read back their profile, history
+      // and coins. Emitting no ACAO header lets the browser block the read
+      // without breaking our own frontends or media streaming.
+      return callback(null, false);
     },
     credentials: true,
   })
