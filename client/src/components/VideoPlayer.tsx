@@ -2209,19 +2209,24 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           streaming: {
             scheduling: {
               scheduleWhilePaused: true,     // KEEP FETCHING SEGMENTS WHILE USER PAUSES
-              // Milliseconds to wait before the next scheduling tick
-              // (dashjs: getScheduleTimeout()). The old value of 60 was almost
-              // certainly meant 60 seconds, but the unit is ms -- it fired ticks
-              // 8x more often than dashjs' 500 ms default, so a slow relay got
-              // hit with far more concurrent segment requests and answered with
-              // HTTP 503. Restore the library default.
+              // Milliseconds before the next scheduling tick (dashjs:
+              // getScheduleTimeout()). The old value of 60 was almost certainly
+              // meant as 60 seconds, but the unit is ms, so it fired ticks 8x
+              // faster than dashjs' 500 ms default and issued segment requests
+              // essentially back-to-back. On a rate-limited relay that is more
+              // likely to hit 503s, not less (unproven as the sole cause -- the
+              // free relay is overloaded on its own). Only affects the DASH
+              // path; the extractor now hands us HLS, which goes through hls.js.
               defaultTimeout: 500,
             },
             buffer: {
               initialBufferLevel: streamingProfile.dashInitialBufferLevel,
-              // bufferTimeDefault IS dashjs v5's stable buffer target; the old
-              // `stableBufferTime` key was removed in v5 and made this call a
-              // silent no-op ("streaming.buffer.stableBufferTime is not supported").
+              // bufferTimeDefault IS dashjs v5's stable buffer target. The old
+              // `stableBufferTime` key was removed in v5; dashjs logs
+              // "Settings parameter streaming.buffer.stableBufferTime is not
+              // supported" and ignores only that key, so dropping it here is
+              // hygiene with no change in behaviour (this key was already being
+              // applied).
               bufferTimeDefault: streamingProfile.dashBufferTimeDefault,
               bufferTimeAtTopQuality: streamingProfile.dashBufferTimeAtTopQuality,
               bufferTimeAtTopQualityLongForm: streamingProfile.dashBufferTimeAtTopQualityLongForm,
@@ -2230,8 +2235,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               avoidCurrentTimeRangePruning: true,
               enableSeekDecorrelationFix: true,
               fastSwitchEnabled: true,
-              // `enableBufferFastAbsent` never existed in dashjs; seek-into-
-              // unbuffered behaviour is covered by streaming.gaps below.
+              // `enableBufferFastAbsent` never existed in dashjs, so it was
+              // ignored (same per-key "not supported" log). Seek-into-unbuffered
+              // behaviour is handled by streaming.gaps below.
               reuseExistingSourceBuffers: true,
             },
             gaps: {
