@@ -6,6 +6,7 @@ import { movieboxService } from '../services/movieboxService';
 import { tmdbService, cleanMovieTitle } from '../services/tmdb/tmdbService';
 import { subtitleService, srtToVtt } from '../services/subtitleService';
 import { resolveEmbedSources, diagnoseProviders, diagnoseExtractor, ValidatedEmbedSource, EmbedResolveContext } from '../services/embedProviderService';
+import { nativeMovieBoxService, MovieBoxStreamSource, STREAM_REFERER } from '../services/nativeMovieboxService';
 
 // Persistent HTTP/HTTPS connection pooling to prevent TLS handshake overhead on every DASH segment
 // Raised to 100 sockets to handle concurrent mobile viewers without queuing
@@ -336,6 +337,33 @@ function formatEmbedSources(sources: ValidatedEmbedSource[], baseUrl: string) {
   });
 }
 
+function formatMovieBoxSources(sources: MovieBoxStreamSource[], baseUrl: string) {
+  const cfRoot = (process.env.CLOUDFLARE_STREAM_PROXY_URL || '').trim().replace(/\/+$/, '');
+  const proxyEndpoint = cfRoot ? `${cfRoot}/embed` : `${baseUrl}/api/streaming/embed-proxy`;
+  return sources.map((s, idx) => {
+    const marker = s.format === 'HLS' ? '.m3u8' : s.format === 'DASH' ? '.mpd' : '.mp4';
+    const params = new URLSearchParams({ url: s.url });
+    if (s.referer) params.set('r', s.referer);
+    if (s.signCookie) params.set('c', s.signCookie);
+    const streamUrl = `${proxyEndpoint}?${params.toString()}&ext=${marker}`;
+    return {
+      resourceId: s.resourceId || `moviebox-${idx}`,
+      quality: s.quality,
+      resolution: s.resolution || 'Auto',
+      codecName: s.codecName || 'h264',
+      fileSize: s.fileSize || 'Standard',
+      streamUrl,
+      rawStreamUrl: s.url,
+      format: s.format,
+      mimeType: s.mimeType,
+      provider: 'cinestream-moviebox',
+      audioLang: 'en',
+      audioName: 'Original Audio',
+      isOriginal: true,
+    };
+  });
+}
+
 /**
  * Resolve embed sources, filling in any missing imdb/tmdb ids via TMDB so the
  * providers get accurate identifiers even when the client only sent a title.
@@ -636,53 +664,84 @@ export const resolveStreamingSources = async (req: Request, res: Response) => {
     const type = (req.query.type as string || 'movie') === 'series' ? 'series' : 'movie';
     const season = parseInt(req.query.season as string || '1', 10);
     const episode = parseInt(req.query.episode as string || '1', 10);
-    const imdbId = (req.query.imdbId as string || '').trim() || undefined;
-    const tmdbIdParam = req.query.tmdbId ? String(req.query.tmdbId).trim() : undefined;
+    let imdbId = (req.query.imdbId as string || '').trim() || undefined;
+    let tmdbId = req.query.tmdbId ? String(req.query.tmdbId).trim() : undefined;
 
     const host = req.get('host') || 'localhost:5000';
     const protocol = (req.headers['x-forwarded-proto'] as string) || req.protocol || 'http';
     const baseUrl = `${protocol}://${host}`;
 
-    // Playback NEVER comes from MovieBox anymore: its play-info API (v1 and v2,
-    // verified live across many titles) serves only a 23-second "upgrade notice"
-    // placeholder, and its leftover community /resource uploads are frequently
-    // mislabeled — playing them is what surfaced as "a random video". MovieBox
-    // remains for metadata endpoints only. Streams here are resolved on demand
-    // from embed providers keyed by OUR verified TMDB/IMDb ids, so the content
-    // always matches the title the user clicked.
-    const embedSources = await resolveEmbedViaFallback({
-      title,
-      year,
-      type,
-      season,
-      episode,
-      imdbId,
-      tmdbId: tmdbIdParam,
-    });
+    // 1. Enrich identifiers (IMDb / TMDB) from query or TMDB metadata lookup
+    if (!imdbId && !tmdbId) {
+      try {
+        const meta: any = await tmdbService.fetchMetadata(title, year, type);
+        if (meta) {
+          imdbId = imdbId || meta.imdbId;
+          tmdbId = tmdbId || (meta.tmdbId ? String(meta.tmdbId) : undefined);
+        }
+      } catch {}
+    }
+    if (!imdbId && tmdbId) {
+      imdbId = await tmdbService.fetchImdbId(tmdbId, type).catch(() => undefined);
+    }
 
-    let subtitles: any[] = [];
-    try {
-      subtitles = await subtitleService.getSubtitles({
+    // 2. Build universal player fallback URL so client always has an instant option
+    const mediaId = imdbId || tmdbId;
+    const embedFallback = mediaId
+      ? type === 'movie'
+        ? `https://vidsrc.pm/embed/movie/${mediaId}`
+        : `https://vidsrc.pm/embed/tv/${mediaId}/${season}/${episode}`
+      : undefined;
+
+    // 3. Concurrently query:
+    //    a) Native MovieBox Provider (from mesamirh/MovieBox-TUI: DASH manifest & resources)
+    //    b) Validated Embed Fallback (vidsrc.pm, mov2day, vidlink)
+    //    c) Multi-language Subtitles
+    const [movieboxSources, embedSources, subtitles] = await Promise.all([
+      nativeMovieBoxService
+        .resolveStreams({
+          title,
+          year,
+          type,
+          season,
+          episode,
+          subjectId: req.query.subjectId as string,
+        })
+        .catch(() => []),
+
+      resolveEmbedViaFallback({
         title,
+        year,
         type,
         season,
         episode,
-        baseUrl,
-      });
-    } catch (subErr: any) {
-      console.warn('resolveStreamingSources subtitles notice:', subErr.message);
-    }
+        imdbId,
+        tmdbId,
+      }).catch(() => []),
 
-    if (embedSources.length > 0) {
-      return res.json({
-        subject: null,
-        sources: formatEmbedSources(embedSources, baseUrl),
-        dubs: [],
-        subtitles,
-        provider: 'embed',
-      });
-    }
-    return res.json({ subject: null, sources: [], dubs: [], subtitles });
+      subtitleService
+        .getSubtitles({
+          title,
+          type,
+          season,
+          episode,
+          baseUrl,
+        })
+        .catch(() => []),
+    ]);
+
+    const formattedMoviebox = formatMovieBoxSources(movieboxSources, baseUrl);
+    const formattedEmbed = formatEmbedSources(embedSources, baseUrl);
+    const combinedSources = [...formattedMoviebox, ...formattedEmbed];
+
+    return res.json({
+      subject: null,
+      sources: combinedSources,
+      embedFallback,
+      dubs: [],
+      subtitles: subtitles || [],
+      provider: combinedSources.length > 0 ? (formattedMoviebox.length > 0 ? 'moviebox' : 'embed') : 'none',
+    });
   } catch (error: any) {
     console.warn('resolveStreamingSources notice:', error.message);
     return res.json({ subject: null, sources: [], dubs: [], subtitles: [] });

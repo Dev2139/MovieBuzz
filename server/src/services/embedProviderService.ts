@@ -148,35 +148,24 @@ const PROVIDERS: Record<string, ProviderFn> = {
     // definitive 404 ("no media anywhere") is honest and re-running it would
     // just double the wait. A retry only helps when the CALL itself failed
     // (worker restart, transient network/5xx), so that case is retried once.
-    let transportError = false;
-    for (let attempt = 0; attempt < 2; attempt++) {
-      if (attempt > 0) {
-        if (!transportError) break;
-        await new Promise((r) => setTimeout(r, 3000));
+    try {
+      const res = await axios.get(`${clean}/extract?${params.toString()}`, {
+        timeout: 35000,
+        validateStatus: () => true,
+      });
+      const data = res.data;
+      if (data && typeof data.url === 'string') {
+        return [
+          {
+            url: data.url,
+            referer: data.referer || `${base}`,
+            provider: data.provider || 'headless',
+          },
+        ];
       }
-      try {
-        const res = await axios.get(`${clean}/extract?${params.toString()}`, {
-          // The extractor enforces its own ~95s total budget across all
-          // providers; 115s guarantees a definitive answer (url or 404)
-          // instead of a client-side timeout that re-runs the whole search.
-          timeout: 115000,
-          validateStatus: () => true,
-        });
-        const data = res.data;
-        if (data && typeof data.url === 'string') {
-          return [
-            {
-              url: data.url,
-              referer: data.referer || `${base}`,
-              provider: data.provider || 'headless',
-            },
-          ];
-        }
-        if (res.status === 404) return []; // definitively unavailable
-        transportError = res.status >= 500 || res.status === 429;
-      } catch {
-        transportError = true; // timeout / network — worth one fresh attempt
-      }
+      if (res.status === 404) return [];
+    } catch {
+      return [];
     }
     return [];
   },
