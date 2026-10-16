@@ -36,17 +36,44 @@ app.use(async (req, res, next) => {
   next();
 });
 
-// Dynamic CORS configuration for local, Netlify & Vercel frontends
-const allowedOrigins = [
+// Dynamic CORS configuration for local, Netlify, Vercel & custom frontends
+const rawClientUrls = [
   process.env.CLIENT_URL,
+  'https://cinestream.devdhar.in',
   'http://localhost:5173',
   'http://localhost:3000',
+  'http://localhost:5000',
 ].filter(Boolean) as string[];
 
-const isAllowedOrigin = (origin: string) =>
-  allowedOrigins.includes(origin) ||
-  origin.endsWith('.netlify.app') ||
-  origin.endsWith('.vercel.app');
+const allowedOrigins = new Set(
+  rawClientUrls.flatMap((u) => {
+    try {
+      const parsed = new URL(u);
+      return [parsed.origin.toLowerCase(), u.replace(/\/+$/, '').toLowerCase()];
+    } catch {
+      return [u.replace(/\/+$/, '').toLowerCase()];
+    }
+  })
+);
+
+const isAllowedOrigin = (origin: string): boolean => {
+  if (!origin) return true;
+  const clean = origin.replace(/\/+$/, '').toLowerCase();
+  if (allowedOrigins.has(clean)) return true;
+  try {
+    const host = new URL(origin).hostname.toLowerCase();
+    return (
+      host.endsWith('.netlify.app') ||
+      host.endsWith('.vercel.app') ||
+      host.endsWith('.devdhar.in') ||
+      host === 'devdhar.in' ||
+      host === 'localhost' ||
+      host === '127.0.0.1'
+    );
+  } catch {
+    return false;
+  }
+};
 
 app.use(
   cors({
@@ -54,11 +81,6 @@ app.use(
       // No Origin header = not a browser cross-origin call (curl, server-to-
       // server, same-origin). Always fine.
       if (!origin || isAllowedOrigin(origin)) return callback(null, true);
-      // Previously this branch ALSO returned true, which made the allowlist
-      // meaningless: with credentials:true every site on the internet could
-      // send the visitor's auth cookie and read back their profile, history
-      // and coins. Emitting no ACAO header lets the browser block the read
-      // without breaking our own frontends or media streaming.
       return callback(null, false);
     },
     credentials: true,

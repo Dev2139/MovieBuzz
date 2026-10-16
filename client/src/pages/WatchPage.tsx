@@ -72,9 +72,16 @@ export const WatchPage: React.FC = () => {
     staleTime: 5 * 60 * 1000,
   });
 
+  // Fallback title / year parsed from slug if content record is still loading or slug was unhyphenated
+  const fallbackMovieTitle = slug
+    ? decodeURIComponent(slug).replace(/-\d{4}$/, '').replace(/-/g, ' ').trim()
+    : undefined;
+  const fallbackYearMatch = slug ? slug.match(/(?:^|-|\s)(\d{4})$/) : null;
+  const fallbackYear = fallbackYearMatch ? parseInt(fallbackYearMatch[1], 10) : undefined;
+
   // MovieBox Dynamic Playback Source Resolution
-  const rawTitle = isMovie ? movieData?.content?.title : seriesData?.series?.title;
-  const rawYear = isMovie ? movieData?.content?.releaseYear : seriesData?.series?.releaseYear;
+  const rawTitle = (isMovie ? movieData?.content?.title : seriesData?.series?.title) || (isMovie ? fallbackMovieTitle : undefined);
+  const rawYear = (isMovie ? movieData?.content?.releaseYear : seriesData?.series?.releaseYear) || (isMovie ? fallbackYear : undefined);
   const rawImdbId = isMovie ? movieData?.content?.imdbId : seriesData?.series?.imdbId;
   const rawTmdbId = isMovie ? movieData?.content?.tmdbId : seriesData?.series?.tmdbId;
 
@@ -124,6 +131,8 @@ export const WatchPage: React.FC = () => {
     posterUrl = movieData.content.posterUrl;
     tmdbId = movieData.content.tmdbId;
     imdbId = movieData.content.imdbId;
+  } else if (isMovie && fallbackMovieTitle) {
+    contentTitle = fallbackMovieTitle;
   } else if (isSeries) {
     seriesObj = seriesData?.series;
     contentTitle = `${seriesObj?.title || seriesLookupTitle || 'Series'} - S${season} E${episode}: ${seriesData?.episode?.title || `Episode ${episode}`}`;
@@ -295,7 +304,15 @@ export const WatchPage: React.FC = () => {
         </div>
 
         {/* Reusable Video Player */}
-        {!isMovieboxLoading && effectiveMediaList.length === 0 ? (
+        {isMovieboxLoading ? (
+          <div className="w-full aspect-video bg-dark-card border border-dark-border rounded-xl flex flex-col items-center justify-center space-y-3 p-6 text-center">
+            <Sparkles className="w-8 h-8 text-brand-500 animate-spin" />
+            <p className="text-sm font-semibold text-white">Resolving High-Speed Stream...</p>
+            <p className="text-xs text-gray-400 max-w-md">
+              Connecting to secure media stream for "{contentTitle}". This usually takes a few seconds.
+            </p>
+          </div>
+        ) : effectiveMediaList.length === 0 ? (
           <div className="w-full aspect-video bg-dark-card border border-dark-border rounded-xl flex flex-col items-center justify-center space-y-3 p-6 text-center">
             <Film className="w-10 h-10 text-gray-500" />
             <p className="text-sm font-semibold text-gray-300">No Streaming Sources Found</p>

@@ -7,7 +7,7 @@ const getApiBase = (): string =>
   import.meta.env.VITE_API_URL ||
   (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
     ? 'http://localhost:5000/api'
-    : 'https://moviebuzz-99fb.onrender.com/api');
+    : 'https://moviebuzz-server.onrender.com/api');
 
 export const resolveMediaUrl = (rawUrl?: string): string => {
   if (!rawUrl) return '';

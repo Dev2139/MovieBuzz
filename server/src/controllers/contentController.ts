@@ -101,10 +101,36 @@ export const getContentList = async (req: Request, res: Response) => {
 
 export const getContentBySlug = async (req: Request, res: Response) => {
   try {
-    const { slug } = req.params;
-    let item = await Content.findOne({ slug, status: 'published' });
-    if (!item && mongoose.Types.ObjectId.isValid(slug)) {
-      item = await Content.findOne({ _id: slug, status: 'published' });
+    const rawSlug = (req.params.slug || '').trim();
+    const hyphenatedSlug = rawSlug.toLowerCase().replace(/\s+/g, '-');
+    const spaceSlug = rawSlug.replace(/-/g, ' ');
+    const escapedRaw = rawSlug.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
+    const escapedHyphen = hyphenatedSlug.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
+    const escapedSpace = spaceSlug.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
+
+    let item = await Content.findOne({
+      $or: [
+        { slug: rawSlug },
+        { slug: hyphenatedSlug },
+        { slug: spaceSlug },
+        { slug: new RegExp(`^${escapedRaw}$`, 'i') },
+        { slug: new RegExp(`^${escapedHyphen}$`, 'i') },
+        ...(mongoose.Types.ObjectId.isValid(rawSlug) ? [{ _id: rawSlug }] : [])
+      ],
+      status: 'published'
+    });
+
+    // Fallback: title lookup by slug or stripped year (e.g. "bethlehem kudumba unit")
+    if (!item) {
+      const cleanTitle = rawSlug.replace(/-\d{4}$/, '').replace(/-/g, ' ');
+      const escapedClean = cleanTitle.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
+      item = await Content.findOne({
+        $or: [
+          { title: new RegExp(`^${escapedClean}$`, 'i') },
+          { title: new RegExp(`^${escapedSpace}$`, 'i') },
+        ],
+        status: 'published'
+      });
     }
 
     if (!item) {
@@ -318,7 +344,7 @@ export const manualTelegramImport = async (req: Request, res: Response) => {
     }
 
     const botToken = process.env.TELEGRAM_BOT_TOKEN;
-    const backendUrl = process.env.BACKEND_URL || 'https://moviebuzz-99fb.onrender.com';
+    const backendUrl = process.env.BACKEND_URL || 'https://moviebuzz-server.onrender.com';
 
     const streamUrl = `${backendUrl}/api/media/proxy-file/${encodeURIComponent(fileId)}`;
     const downloadUrl = `${backendUrl}/api/media/download-file/${encodeURIComponent(fileId)}`;
