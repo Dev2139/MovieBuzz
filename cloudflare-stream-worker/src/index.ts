@@ -402,8 +402,11 @@ export default {
         return new Response(rewriteHlsManifest(text, finalUrl, referer, proxyBase), { status: 200, headers: h });
       }
 
-      // Everything else (MP4 files, media segments) is relayed + edge-cached.
-      const isSegment = /\.(m4s|mp4|ts|webm|aac|m4v|mka)(\?|$)/i.test(targetUrl);
+      // Everything else (MP4 files, media segments, Telegram file proxy) is relayed + edge-cached.
+      const isSegment =
+        ext === '.mp4' ||
+        /\.(m4s|mp4|ts|webm|aac|m4v|mka)(\?|$)/i.test(targetUrl) ||
+        targetUrl.includes('/proxy-file/');
       const relayOptions: any = {
         headers: upstreamHeaders,
         redirect: 'follow',
@@ -466,8 +469,51 @@ export default {
       respHeaders.set('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
       respHeaders.set('Access-Control-Allow-Headers', '*');
       respHeaders.set('Accept-Ranges', 'bytes');
-      respHeaders.set('Cache-Control', 'public, max-age=86400');
       return new Response(res.body, { status: res.status, headers: respHeaders });
+    }
+
+    // 7. Dedicated Telegram stream relay: /tg/:fileId or /telegram/:fileId
+    if (url.pathname.startsWith('/tg/') || url.pathname.startsWith('/telegram/')) {
+      const parts = url.pathname.replace(/^\/(tg|telegram)\//, '').split('/');
+      const fileId = decodeURIComponent(parts[0]);
+      if (!fileId) {
+        return new Response('Missing Telegram fileId', { status: 400 });
+      }
+
+      const backendOrigin = (env.ORIGIN_URL || 'https://moviebuzz-server.onrender.com').replace(/\/+$/, '');
+      const targetUrl = `${backendOrigin}/api/media/proxy-file/${encodeURIComponent(fileId)}`;
+
+      const upstreamHeaders = new Headers();
+      upstreamHeaders.set('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) CineStream/1.0');
+      const range = request.headers.get('range');
+      if (range) {
+        upstreamHeaders.set('Range', range);
+      }
+
+      const fetchOptions: any = {
+        headers: upstreamHeaders,
+        cf: {
+          cacheEverything: true,
+          cacheTtl: 86400,
+        },
+      };
+
+      const upstreamRes = await fetch(targetUrl, fetchOptions);
+
+      const respHeaders = new Headers(upstreamRes.headers);
+      respHeaders.set('Access-Control-Allow-Origin', '*');
+      respHeaders.set('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+      respHeaders.set('Access-Control-Allow-Headers', '*');
+      respHeaders.set('Accept-Ranges', 'bytes');
+      if (!respHeaders.get('Content-Type')) {
+        respHeaders.set('Content-Type', 'video/mp4');
+      }
+      respHeaders.set('Cache-Control', 'public, max-age=86400');
+
+      return new Response(upstreamRes.body, {
+        status: upstreamRes.status,
+        headers: respHeaders,
+      });
     }
 
     return new Response('Not Found', { status: 404 });

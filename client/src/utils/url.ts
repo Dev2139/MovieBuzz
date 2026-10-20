@@ -17,6 +17,27 @@ const getApiBase = (): string => {
   return clean;
 };
 
+export const getCloudflareProxyUrl = (): string =>
+  import.meta.env.VITE_CLOUDFLARE_STREAM_PROXY_URL ||
+  import.meta.env.VITE_CLOUDFLARE_PROXY_URL ||
+  'https://cinestream-proxy.dev-patel-codinggita.workers.dev';
+
+export const wrapStreamWithCloudflare = (rawUrl?: string): string => {
+  if (!rawUrl) return '';
+  const resolved = resolveMediaUrl(rawUrl);
+  const cfProxy = getCloudflareProxyUrl()?.trim().replace(/\/+$/, '');
+  if (!cfProxy) return resolved;
+
+  // If already routing through Cloudflare, don't double wrap
+  if (resolved.includes('workers.dev') || resolved.includes('cloudflare')) {
+    return resolved;
+  }
+
+  // If it's a telegram proxy-file endpoint, route through Cloudflare /embed with ext=.mp4
+  const marker = resolved.includes('.m3u8') ? '.m3u8' : resolved.includes('.mpd') ? '.mpd' : '.mp4';
+  return `${cfProxy}/embed?url=${encodeURIComponent(resolved)}&ext=${marker}`;
+};
+
 export const resolveMediaUrl = (rawUrl?: string): string => {
   if (!rawUrl) return '';
   const apiBase = getApiBase();
