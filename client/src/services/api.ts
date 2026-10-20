@@ -1,11 +1,20 @@
 import axios from 'axios';
 import { Content, Season, Episode, Media, User, WatchHistoryItem, AdminStats, TelegramImportItem, ContentRequest, AdminCatalogResponse, RecommendationFeed, UserTasteProfile, CoinTransactionItem, RedemptionItem, SubscriptionPlanItem, SubscriberItem, SubscriptionPurchaseItem, LeaderboardRequestItem, AppNotification } from '../types';
 
-const API_URL =
-  import.meta.env.VITE_API_URL ||
-  (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
-    ? 'http://localhost:5000/api'
-    : 'https://moviebuzz-server.onrender.com/api');
+const normalizeApiUrl = (raw?: string): string => {
+  if (!raw) {
+    return typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+      ? 'http://localhost:5000/api'
+      : 'https://moviebuzz-server.onrender.com/api';
+  }
+  let clean = raw.trim().replace(/\/+$/, '');
+  if (!clean.endsWith('/api')) {
+    clean += '/api';
+  }
+  return clean;
+};
+
+const API_URL = normalizeApiUrl(import.meta.env.VITE_API_URL);
 
 export const api = axios.create({
   baseURL: API_URL,

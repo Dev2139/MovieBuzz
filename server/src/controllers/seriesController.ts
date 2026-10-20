@@ -58,16 +58,26 @@ export const getEpisodeByNumber = async (req: Request, res: Response) => {
     const epNum = Number(episodeNumber) || 1;
 
     // 1. Intelligent Series Resolution by slug, id, or clean title regex
-    let series = await Content.findOne({ slug: seriesSlug });
-    if (!series && mongoose.Types.ObjectId.isValid(seriesSlug)) {
-      series = await Content.findById(seriesSlug);
-    }
-    if (!series) {
-      const cleanTitle = seriesSlug.replace(/-\d{4}$/, '').replace(/-/g, ' ');
-      series = await Content.findOne({
-        title: new RegExp(`^${cleanTitle.replace(/[^a-z0-9]/gi, '\\$&')}$`, 'i'),
-      });
-    }
+    const rawSlug = decodeURIComponent(seriesSlug || '').trim();
+    const hyphenatedSlug = rawSlug.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    const spaceSlug = rawSlug.replace(/-/g, ' ');
+    const cleanTitle = rawSlug.replace(/(?:-|\s)\d{4}$/, '').replace(/-/g, ' ').trim();
+    const escapedRaw = rawSlug.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
+    const escapedHyphen = hyphenatedSlug.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
+    const escapedClean = cleanTitle.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
+
+    let series = await Content.findOne({
+      $or: [
+        { slug: rawSlug },
+        { slug: hyphenatedSlug },
+        { slug: spaceSlug },
+        { slug: new RegExp(`^${escapedRaw}$`, 'i') },
+        { slug: new RegExp(`^${escapedHyphen}$`, 'i') },
+        { title: new RegExp(`^${escapedClean}$`, 'i') },
+        { title: new RegExp(`^${escapedRaw}$`, 'i') },
+        ...(mongoose.Types.ObjectId.isValid(rawSlug) ? [{ _id: rawSlug }] : []),
+      ],
+    });
 
     if (!series) {
       return res.status(404).json({ message: `Series "${seriesSlug}" not found` });

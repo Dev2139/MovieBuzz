@@ -91,6 +91,30 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
+// Fallback rewrite middleware: if a frontend client requests without `/api` prefix
+// (e.g. baseURL set without `/api`), automatically route it to the proper `/api` endpoint.
+app.use((req, res, next) => {
+  if (
+    !req.url.startsWith('/api') &&
+    (req.url.startsWith('/streaming') ||
+      req.url.startsWith('/content') ||
+      req.url.startsWith('/series') ||
+      req.url.startsWith('/movies') ||
+      req.url.startsWith('/media') ||
+      req.url.startsWith('/auth') ||
+      req.url.startsWith('/users') ||
+      req.url.startsWith('/requests') ||
+      req.url.startsWith('/notifications') ||
+      req.url.startsWith('/recommendations') ||
+      req.url.startsWith('/admin') ||
+      req.url.startsWith('/genres') ||
+      req.url.startsWith('/search'))
+  ) {
+    req.url = '/api' + req.url;
+  }
+  next();
+});
+
 // API Routes
 app.use('/api/auth', authRoutes);
 app.use('/api', contentRoutes);

@@ -79,9 +79,19 @@ export const WatchPage: React.FC = () => {
   const fallbackYearMatch = slug ? slug.match(/(?:^|-|\s)(\d{4})$/) : null;
   const fallbackYear = fallbackYearMatch ? parseInt(fallbackYearMatch[1], 10) : undefined;
 
+  const fallbackSeriesTitle = seriesSlug
+    ? decodeURIComponent(seriesSlug).replace(/(?:-|\s)\d{4}$/, '').replace(/-/g, ' ').trim()
+    : undefined;
+  const fallbackSeriesYearMatch = seriesSlug ? seriesSlug.match(/(?:^|-|\s)(\d{4})$/) : null;
+  const fallbackSeriesYear = fallbackSeriesYearMatch ? parseInt(fallbackSeriesYearMatch[1], 10) : undefined;
+
   // MovieBox Dynamic Playback Source Resolution
-  const rawTitle = (isMovie ? movieData?.content?.title : seriesData?.series?.title) || (isMovie ? fallbackMovieTitle : undefined);
-  const rawYear = (isMovie ? movieData?.content?.releaseYear : seriesData?.series?.releaseYear) || (isMovie ? fallbackYear : undefined);
+  const rawTitle =
+    (isMovie ? movieData?.content?.title : seriesData?.series?.title) ||
+    (isMovie ? fallbackMovieTitle : fallbackSeriesTitle);
+  const rawYear =
+    (isMovie ? movieData?.content?.releaseYear : seriesData?.series?.releaseYear) ||
+    (isMovie ? fallbackYear : fallbackSeriesYear);
   const rawImdbId = isMovie ? movieData?.content?.imdbId : seriesData?.series?.imdbId;
   const rawTmdbId = isMovie ? movieData?.content?.tmdbId : seriesData?.series?.tmdbId;
 
