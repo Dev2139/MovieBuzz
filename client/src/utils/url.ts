@@ -3,11 +3,19 @@
  * fixing legacy or seeded localhost URLs dynamically across development and production.
  */
 
-const getApiBase = (): string =>
-  import.meta.env.VITE_API_URL ||
-  (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
-    ? 'http://localhost:5000/api'
-    : 'https://moviebuzz-server.onrender.com/api');
+const getApiBase = (): string => {
+  const raw = import.meta.env.VITE_API_URL;
+  if (!raw) {
+    return typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+      ? 'http://localhost:5000/api'
+      : 'https://moviebuzz-server.onrender.com/api';
+  }
+  let clean = raw.trim().replace(/\/+$/, '');
+  if (!clean.endsWith('/api')) {
+    clean += '/api';
+  }
+  return clean;
+};
 
 export const resolveMediaUrl = (rawUrl?: string): string => {
   if (!rawUrl) return '';

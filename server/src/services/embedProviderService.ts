@@ -148,26 +148,39 @@ const PROVIDERS: Record<string, ProviderFn> = {
     // definitive 404 ("no media anywhere") is honest and re-running it would
     // just double the wait. A retry only helps when the CALL itself failed
     // (worker restart, transient network/5xx), so that case is retried once.
-    try {
-      const res = await axios.get(`${clean}/extract?${params.toString()}`, {
-        timeout: 85000,
-        validateStatus: () => true,
-      });
-      const data = res.data;
-      if (data && typeof data.url === 'string') {
-        return [
-          {
-            url: data.url,
-            referer: data.referer || `${base}`,
-            provider: data.provider || 'headless',
-          },
-        ];
+    const fetchExtract = async (attempt = 1): Promise<RawEmbedSource[]> => {
+      try {
+        const res = await axios.get(`${clean}/extract?${params.toString()}`, {
+          timeout: 90000,
+          validateStatus: () => true,
+        });
+        const data = res.data;
+        if (data && typeof data.url === 'string') {
+          return [
+            {
+              url: data.url,
+              referer: data.referer || `${base}`,
+              provider: data.provider || 'headless',
+            },
+          ];
+        }
+        // If Render returned 502/503 during cold-start, wait 4s and retry once
+        if ((res.status === 502 || res.status === 503) && attempt < 2) {
+          await new Promise((r) => setTimeout(r, 4000));
+          return fetchExtract(attempt + 1);
+        }
+        if (res.status === 404) return [];
+      } catch {
+        if (attempt < 2) {
+          await new Promise((r) => setTimeout(r, 3000));
+          return fetchExtract(attempt + 1);
+        }
+        return [];
       }
-      if (res.status === 404) return [];
-    } catch {
       return [];
-    }
-    return [];
+    };
+
+    return fetchExtract();
   },
 };
 
