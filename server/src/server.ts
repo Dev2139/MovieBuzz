@@ -150,9 +150,20 @@ if (!process.env.VERCEL) {
     const server = app.listen(PORT, async () => {
       console.log(`=======================================================`);
       console.log(` 🎬 CineStream Server running on http://localhost:${PORT}`);
-      console.log(` 🚀 Streaming Engine: CineStream Edge`);
+      console.log(` 🚀 Streaming Engine: CineStream Edge & Telegram Cloudflare`);
       console.log(` 🚀 Environment: ${process.env.NODE_ENV || 'development'}`);
       console.log(`=======================================================`);
+
+      // Periodic auto-sync for Telegram channel posts (runs every 60s)
+      setInterval(async () => {
+        try {
+          const { storageService } = await import('./services/telegram/telegramService');
+          const tgClient = storageService.getTelegramClient();
+          if (tgClient && tgClient.isConfigured()) {
+            await tgClient.syncChannelPosts().catch(() => {});
+          }
+        } catch {}
+      }, 60 * 1000);
     });
 
     server.on('error', (err: any) => {

@@ -14,7 +14,7 @@ import {
 import { VideoPlayer } from '../components/VideoPlayer';
 import { ChevronLeft, ChevronRight, List, Film, Tv, Play, Sparkles, Layers, RotateCcw } from 'lucide-react';
 import { getLocalPlaybackItem } from '../utils/localStorage';
-import { resolveMediaUrl, getDownloadUrl } from '../utils/url';
+import { resolveMediaUrl, getDownloadUrl, wrapStreamWithCloudflare } from '../utils/url';
 import { useAuth } from '../context/AuthContext';
 
 export const WatchPage: React.FC = () => {
@@ -194,8 +194,64 @@ export const WatchPage: React.FC = () => {
       ? { episodeNumber: currentEpNum + 1 }
       : playlist.find((e) => e.episodeNumber === currentEpNum + 1);
 
-  // High-Speed Direct Sources with stable memoization
+  // High-Speed Direct Sources with stable memoization (Telegram First, MovieBox Fallback)
   const effectiveMediaList: any[] = React.useMemo(() => {
+    // 1. TIER 1 (Primary): Stored Telegram Media from our database, routed via Cloudflare
+    const catalogMedia = isMovie ? movieData?.media : seriesData?.media;
+    if (catalogMedia && Array.isArray(catalogMedia) && catalogMedia.length > 0) {
+      const telegramMedia = catalogMedia.filter((m: any) => {
+        const url: string = m?.streamUrl || m?.downloadUrl || '';
+        return Boolean(url && (m?.provider === 'telegram' || url.includes('/proxy-file/') || m?.providerMediaId));
+      });
+
+      if (telegramMedia.length > 0) {
+        return telegramMedia.map((m: any, idx: number) => {
+          const directUrl = m.streamUrl || m.downloadUrl || '';
+          const streamUrl = wrapStreamWithCloudflare(directUrl);
+          const dlUrl = getDownloadUrl(m, contentTitle);
+          const qualityLabel = m.quality || '1080p';
+
+          return {
+            _id: m._id || `tg-${m.providerMediaId || idx}`,
+            quality: `${qualityLabel} • Telegram HD (Cloudflare Edge)`,
+            resolution: m.resolution || qualityLabel,
+            fileSize: m.fileSize || 'Standard',
+            codecName: 'h264',
+            mimeType: 'video/mp4',
+            format: 'MP4',
+            provider: 'telegram',
+            providerMediaId: m.providerMediaId,
+            streamUrl,
+            downloadUrl: dlUrl || streamUrl,
+            audioLang: 'en',
+            audioName: 'Original Audio',
+            isOriginal: true,
+          };
+        });
+      }
+
+      // Any other direct media in catalog
+      const otherDirect = catalogMedia.filter((m: any) => Boolean(m?.streamUrl || m?.downloadUrl));
+      if (otherDirect.length > 0) {
+        return otherDirect.map((m: any) => ({
+          _id: m._id,
+          quality: m.quality || 'HD',
+          resolution: m.resolution || 'Auto',
+          fileSize: m.fileSize || 'Standard',
+          codecName: 'auto',
+          mimeType: m.mimeType || 'video/mp4',
+          format: 'MP4',
+          provider: m.provider || 'direct',
+          streamUrl: wrapStreamWithCloudflare(m.streamUrl),
+          downloadUrl: m.downloadUrl || m.streamUrl,
+          audioLang: 'en',
+          audioName: 'Original Audio',
+          isOriginal: true,
+        }));
+      }
+    }
+
+    // 2. TIER 2 (Secondary Fallback): MovieBox / embed scrapers if title is not on Telegram
     if (movieboxData?.sources && movieboxData.sources.length > 0) {
       return movieboxData.sources.map((s: any) => ({
         _id: `src-${s.resourceId || s.quality}`,
@@ -215,22 +271,9 @@ export const WatchPage: React.FC = () => {
         isOriginal: s.isOriginal,
       }));
     }
-    // Fallback to catalog-stored media, but only sources that are NOT legacy Telegram
-    // proxy-file records (Telegram streaming is retired and those URLs return 503).
-    const directFallback = isMovie ? movieData?.media : seriesData?.media;
-    if (directFallback && Array.isArray(directFallback) && directFallback.length > 0) {
-      const usable = directFallback.filter((m: any) => {
-        const url: string = m?.streamUrl || m?.downloadUrl || '';
-        const isTelegramProxy =
-          m?.provider === 'telegram' ||
-          url.includes('/api/media/proxy-file/') ||
-          url.includes('/proxy-file/');
-        return !isTelegramProxy && Boolean(url);
-      });
-      if (usable.length > 0) return usable;
-    }
+
     return [];
-  }, [movieboxData?.sources, isMovie, movieData?.media, seriesData?.media]);
+  }, [movieData?.media, seriesData?.media, movieboxData?.sources, isMovie, contentTitle]);
 
   // Subtitles Query (resolves multi-language WebVTT tracks)
   const { data: subtitlesData } = useQuery({
@@ -307,7 +350,11 @@ export const WatchPage: React.FC = () => {
           <div className="flex items-center gap-2">
             <span className="flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-md border text-emerald-400 bg-emerald-500/10 border-emerald-500/30">
               <Sparkles className="w-3 h-3" />
-              <span>CineStream HD Direct</span>
+              <span>
+                {effectiveMediaList[0]?.provider === 'telegram'
+                  ? 'Telegram • Cloudflare Edge'
+                  : 'CineStream HD Direct'}
+              </span>
             </span>
 
             <div className="flex items-center space-x-2 font-medium">
