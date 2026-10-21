@@ -53,6 +53,9 @@ interface VideoPlayerProps {
   dubs?: Array<{ subjectId: string; name: string; code: string; original?: boolean }>;
 }
 
+export const DEFAULT_PRE_ROLL_AD_URL =
+  'https://res.cloudinary.com/urzka7oz/video/upload/v1791782822/gemini_generated_video_0ef26b51.mp4';
+
 export const QUALITY_TIERS = [
   { label: 'Auto (Adaptive)', value: 'auto', badge: 'Auto', height: 0, description: 'Best adaptive print for your speed' },
   { label: '420p (Standard)', value: '420p', badge: 'Fastest', height: 420, description: 'Zero buffering & instant rendering' },
@@ -179,6 +182,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const shouldAutoResumeAfterQualitySwitchRef = useRef<boolean>(false);
   // Background buffer keeper: keeps HLS/DASH loading chunks even while paused or during ads
   const bgBufferIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const isPlayingAdRef = useRef<boolean>(false);
+  const isPlayingRef = useRef<boolean>(false);
 
   // --- Device-adaptive streaming profile ---
   // Detect mobile / low-memory environments to tune buffer sizes and ABR aggressiveness.
@@ -199,39 +204,39 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const streamingProfile = React.useMemo(() => {
     if (isMobileDevice) {
       return {
-        // HLS: 8-minute forward horizon on mobile. Loads ~4 min of video while user is paused.
-        hlsMaxBufferLength: 300,             // 5 min buffer horizon ahead while playing
-        hlsMaxMaxBufferLength: 600,          // 10 min hard ceiling
-        hlsMaxBufferSize: 250 * 1000 * 1000, // 250 MB RAM ceiling
+        // High forward buffer horizon on mobile
+        hlsMaxBufferLength: 1800,            // 30 min buffer horizon ahead while playing
+        hlsMaxMaxBufferLength: 3600,         // 60 min hard ceiling
+        hlsMaxBufferSize: 600 * 1000 * 1000, // 600 MB RAM ceiling
         hlsBackBufferLength: 60,             // trim 60s behind playhead
         hlsStartLevel: -1,                   // ABR picks optimal quality
         hlsMaxFragLookUpTolerance: 0.25,
         hlsLowLatencyMode: false,
-        hlsScheduleWhilePaused: true,        // KEEP FETCHING SEGMENTS WHILE USER PAUSES
+        hlsScheduleWhilePaused: true,        // KEEP FETCHING SEGMENTS WHILE USER PAUSES OR DURING AD
         // DASH
         dashInitialBufferLevel: 0.5,         // Sub-second startup threshold → playback begins almost instantly
-        dashBufferTimeDefault: 240,          // 4 minutes of chunks ahead while playing
-        dashBufferTimeAtTopQuality: 360,     // 6 min at top quality
-        dashBufferTimeAtTopQualityLongForm: 480, // 8 min for long-form
+        dashBufferTimeDefault: 600,          // 10 minutes of chunks ahead while playing
+        dashBufferTimeAtTopQuality: 900,     // 15 min at top quality
+        dashBufferTimeAtTopQualityLongForm: 1200, // 20 min for long-form
         dashInitialBitrate: 800,             // Snappy startup bitrate for cellular
         dashBufferToKeep: 60,                // Safe mobile memory management
         dashBufferPruningInterval: 30,
       };
     }
-    // Desktop / high-memory profile — ultra-aggressive 15-minute forward buffering
+    // Desktop / high-memory profile — ultra-aggressive full movie forward chunk buffering
     return {
-      hlsMaxBufferLength: 900,             // 15 min buffer horizon while playing
-      hlsMaxMaxBufferLength: 1800,         // 30 min hard ceiling
-      hlsMaxBufferSize: 800 * 1000 * 1000, // 800 MB RAM ceiling
+      hlsMaxBufferLength: 7200,             // 120 min (2 hours!) forward chunk horizon
+      hlsMaxMaxBufferLength: 10800,         // 180 min (3 hours!) hard ceiling
+      hlsMaxBufferSize: 1500 * 1000 * 1000, // 1.5 GB RAM ceiling
       hlsBackBufferLength: 300,
       hlsStartLevel: -1,
       hlsMaxFragLookUpTolerance: 0.2,
       hlsLowLatencyMode: false,
-      hlsScheduleWhilePaused: true,        // KEEP FETCHING SEGMENTS WHILE USER PAUSES
+      hlsScheduleWhilePaused: true,         // KEEP FETCHING SEGMENTS WHILE USER PAUSES OR DURING AD
       dashInitialBufferLevel: 0.6,
-      dashBufferTimeDefault: 600,          // 10 minutes of chunks ahead while playing
-      dashBufferTimeAtTopQuality: 900,
-      dashBufferTimeAtTopQualityLongForm: 1200, // 20 minutes for feature-length
+      dashBufferTimeDefault: 1800,          // 30 minutes of chunks ahead
+      dashBufferTimeAtTopQuality: 2400,     // 40 minutes at top quality
+      dashBufferTimeAtTopQualityLongForm: 3600, // 60 minutes for feature-length
       dashInitialBitrate: 2500,
       dashBufferToKeep: 600,
       dashBufferPruningInterval: 60,
@@ -883,7 +888,13 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   // While the ad plays, the real movie/series stream keeps buffering chunks in the background
   // (HLS heartbeat at attach time + byte-range prefetcher + aggressive DASH/HLS buffer profiles),
   // so playback starts instantly the moment the ad ends - no black screen, no re-buffer.
-  const isAdFreeUser = Boolean(user?.isPremium || user?.role === 'admin');
+  const isAdFreeUser = Boolean(
+    user?.role === 'admin' ||
+    user?.isPremium ||
+    user?.subscriptionActive ||
+    user?.subscriptionPlan === 'premium' ||
+    user?.subscriptionPlan === 'pro'
+  );
   const adCompletedRef = useRef<boolean>(false);
   const [isPlayingAd, setIsPlayingAd] = useState<boolean>(false);
   const [adDuration, setAdDuration] = useState<number>(0);
@@ -891,6 +902,15 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [isAdMuted, setIsAdMuted] = useState<boolean>(true); // start muted so autoplay is never blocked (prevents black screen)
   const adVideoRef = useRef<HTMLVideoElement>(null);
   const adWatchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Sync state into refs for fast background buffer interval checks without recreating instances
+  useEffect(() => {
+    isPlayingAdRef.current = isPlayingAd;
+  }, [isPlayingAd]);
+
+  useEffect(() => {
+    isPlayingRef.current = isPlaying;
+  }, [isPlaying]);
 
   const handleAdFinished = useCallback(() => {
     adCompletedRef.current = true;
@@ -913,7 +933,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     if (dashRef.current) {
       try { (dashRef.current as any).play?.(); } catch {}
     }
-    // Keep background buffer keeper active so chunks keep downloading continuously ahead during playback and future pauses
 
     setTimeout(() => {
       if (videoRef.current) {
@@ -927,11 +946,12 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             dashRef.current.play();
           } catch {}
         }
+        videoRef.current.muted = isMuted;
+        videoRef.current.volume = volume;
         const p = videoRef.current.play();
         if (p !== undefined) {
           p.catch(() => {
-            // Autoplay with sound was blocked (no user gesture yet): start muted so the stream still
-            // rolls instantly with no black/frozen screen. The user can tap the player to unmute.
+            // Autoplay with sound was blocked: fallback to muted so playback starts instantly
             if (videoRef.current) {
               videoRef.current.muted = true;
               const mp = videoRef.current.play();
@@ -943,7 +963,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         setIsBuffering(false);
       }
     }, 100);
-  }, [initialPosition, ensureAudioContext]);
+  }, [initialPosition, ensureAudioContext, isMuted, volume]);
 
   // Free users see the pre-roll ad again whenever they switch stream quality or audio language.
   const triggerAdForSwitch = useCallback(() => {
@@ -970,7 +990,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   }, [isAdFreeUser, isPlayingAd]);
 
   // Decide whether to run the pre-roll once the auth tier is known (guests & free users only).
-  // Waiting for auth to resolve avoids briefly flashing an ad at premium/admin members.
+  // Free users must watch the entire ad before movie or series streaming starts.
+  // Premium users and admins do not have ads.
   useEffect(() => {
     if (isAuthLoading) return;
     if (isAdFreeUser) {
@@ -978,13 +999,21 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       setIsPlayingAd(false);
       return;
     }
-    if (!adCompletedRef.current) {
-      setIsPlayingAd(true);
+    // New movie or series streaming session -> free user must watch full ad
+    adCompletedRef.current = false;
+    setAdCurrentTime(0);
+    setAdDuration(0);
+    setIsPlayingAd(true);
+    if (videoRef.current) {
+      try {
+        videoRef.current.pause();
+      } catch {}
     }
-  }, [isAuthLoading, isAdFreeUser]);
+    setIsPlaying(false);
+  }, [isAuthLoading, isAdFreeUser, contentId, episodeId]);
 
   // Kickstart ad playback whenever it is active, plus an anti-blackout watchdog:
-  // if the ad stalls before rendering, auto-dismiss so the movie is never trapped behind a black screen.
+  // if the ad completely fails to load or stalls for >30s, auto-dismiss so the stream isn't blocked forever.
   useEffect(() => {
     if (!isPlayingAd || isAdFreeUser) return;
     const tryPlay = () => {
@@ -1002,7 +1031,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       if (!ad || ad.currentTime < 0.25) {
         handleAdFinished();
       }
-    }, 12000);
+    }, 30000);
     return () => {
       clearTimeout(startTimer);
     };
@@ -1562,10 +1591,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   }, [user, contentId, isPlayingAd, isAdFreeUser, patchUser]);
 
   // Background byte-range prefetcher for direct MP4 / proxy / Telegram streams:
-  // Runs continuously to keep prefetching forward bytes into the browser HTTP cache, both while
-  // paused AND while playing, so the native <video> element always finds the next bytes already
-  // downloaded. Uses 3 parallel connections to triple throughput, and a 60 MB lookahead horizon
-  // that protects memory while still giving instant seeks and no stalls.
+  // Runs continuously to keep prefetching forward bytes into the browser HTTP cache:
+  // 1. While the pre-roll ad is showing: downloads all possible chunks of the movie in background
+  // 2. While the movie is streaming: continuously downloads upcoming chunks ahead
+  // 3. When the user pauses: aggressively loads all possible chunks ahead
   useEffect(() => {
     const isDirectMp4 =
       streamUrl &&
@@ -1576,10 +1605,11 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
     let cancelled = false;
     let prefetchOffset = 0;
-    const CHUNK_SIZE = 3 * 1024 * 1024;                 // 3 MB per range request
-    const PARALLEL_CONNECTIONS = 3;                     // 3 concurrent range fetches
-    const PREFETCH_HORIZON_BYTES = 60 * 1024 * 1024;    // Keep 60 MB ahead in cache
-    const TICK_MS = 400;                                // Very frequent scheduling
+    const CHUNK_SIZE = 4 * 1024 * 1024;                 // 4 MB per range request
+    const PARALLEL_CONNECTIONS = 4;                     // 4 concurrent range fetches
+    // Full horizon: up to 1 GB or full file length so all possible chunks load during ad and pause!
+    const PREFETCH_HORIZON_BYTES = (isPlayingAd || !isPlaying) ? 1024 * 1024 * 1024 : 400 * 1024 * 1024;
+    const TICK_MS = 300;                                // Rapid scheduling
 
     const prefetchTick = async () => {
       if (cancelled || !videoRef.current) return;
@@ -1595,16 +1625,16 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           }
         }
         const totalDur = vid.duration || duration || 0;
-        if (totalDur > 0 && bufEnd >= totalDur - 2) return;
+        if (totalDur > 0 && bufEnd >= totalDur - 1) return;
 
-        const estByteRate = 400000; // ~3.2 Mbps average (higher for HD sources)
+        const estByteRate = 450000; // ~3.6 Mbps average (higher for HD sources)
         const currentTargetPos = bufEnd > 0 ? bufEnd : vid.currentTime;
         const targetByte = Math.floor(currentTargetPos * estByteRate);
         if (prefetchOffset < targetByte) {
           prefetchOffset = targetByte;
         }
 
-        // Stop if we've already cached far ahead of the playhead (protect memory)
+        // Full horizon during ad or pause loads ALL possible chunks
         if (prefetchOffset - targetByte > PREFETCH_HORIZON_BYTES) return;
 
         // Fire PARALLEL_CONNECTIONS simultaneous range fetches to saturate the network
@@ -1621,6 +1651,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         }
         prefetchOffset += CHUNK_SIZE * PARALLEL_CONNECTIONS;
         await Promise.all(jobs);
+        updateBuffered();
       } catch {}
     };
 
@@ -1631,7 +1662,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       cancelled = true;
       clearInterval(interval);
     };
-  }, [streamUrl, duration]);
+  }, [streamUrl, duration, isPlayingAd, isPlaying, updateBuffered]);
 
   const handleTimeUpdate = () => {
     if (videoRef.current) {
@@ -2465,6 +2496,23 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             default:
               console.error('Fatal HLS Error:', data);
               hls.destroy();
+              if (mediaList && mediaList.length > 1) {
+                const currentIdx = mediaList.findIndex((m) => {
+                  const resolved = resolveMediaUrl(m.streamUrl);
+                  return resolved === streamUrl || m.streamUrl === streamUrl;
+                });
+                if (currentIdx >= 0 && currentIdx < mediaList.length - 1) {
+                  const nextSource = mediaList[currentIdx + 1];
+                  const nextUrl = resolveMediaUrl(nextSource.streamUrl);
+                  if (nextUrl && nextUrl !== streamUrl) {
+                    showToast(`Switching to backup stream (${nextSource.quality || 'Alternative source'})...`);
+                    setStreamUrl(nextUrl);
+                    setSelectedQuality(nextSource.quality || 'Auto');
+                    setIsBuffering(true);
+                    return;
+                  }
+                }
+              }
               setStreamError('HLS stream encountered a playback error.');
               setIsBuffering(false);
               setIsPlaying(false);
@@ -2489,12 +2537,12 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }
 
     // =========================================================================
-    // Universal Continuous Chunk Buffering Engine (300ms Heartbeat)
+    // Universal Continuous Chunk Buffering Engine (250ms Heartbeat)
     // =========================================================================
-    // 1. While the pre-roll ad is showing: downloads and fills chunk buffer in background
+    // 1. While the pre-roll ad is showing: downloads and fills all possible chunks in background
     // 2. When ad finishes: playback starts INSTANTLY with zero buffer spinner
-    // 3. While playing: continuously downloads ahead up to 15-30 minute forward horizon
-    // 4. While user pauses: aggressively buffers all remaining chunks ahead
+    // 3. While playing: continuously downloads upcoming chunks ahead (2h desktop / 30m mobile)
+    // 4. While user pauses: aggressively loads all possible chunks ahead up to full duration
     if (bgBufferIntervalRef.current) clearInterval(bgBufferIntervalRef.current);
     bgBufferIntervalRef.current = setInterval(() => {
       const vid = videoRef.current;
@@ -2513,8 +2561,12 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         }
       }
 
-      // Forward buffering horizon: 5 minutes on mobile, 15 minutes on desktop
-      const targetForwardHorizon = isMobileDevice ? 300 : 900;
+      // If ad is showing or video is paused: buffer ALL possible chunks up to full duration!
+      // While streaming loaded chunks: continuously pull ahead up to 2 hours (desktop) / 30 min (mobile)
+      const totalDur = vid.duration && !isNaN(vid.duration) && vid.duration > 0 ? vid.duration : 10800;
+      const targetForwardHorizon = (isPlayingAdRef.current || !isPlayingRef.current)
+        ? totalDur
+        : (isMobileDevice ? 1800 : 7200);
 
       // HLS chunk loading engine: keep scheduling fragments ahead until horizon is full
       if (hlsRef.current && forwardBufferSec < targetForwardHorizon) {
@@ -2531,7 +2583,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       }
 
       updateBuffered();
-    }, 300);
+    }, 250);
 
     return () => {
       isCancelled = true;
@@ -2682,6 +2734,29 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               }
             }, 800);
             return;
+          }
+
+          // Seamless auto-failover to next candidate source in mediaList if available
+          if (mediaList && mediaList.length > 1) {
+            const currentIdx = mediaList.findIndex((m) => {
+              const resolved = resolveMediaUrl(m.streamUrl);
+              return resolved === streamUrl || m.streamUrl === streamUrl;
+            });
+            if (currentIdx >= 0 && currentIdx < mediaList.length - 1) {
+              const nextSource = mediaList[currentIdx + 1];
+              const nextUrl = resolveMediaUrl(nextSource.streamUrl);
+              if (nextUrl && nextUrl !== streamUrl) {
+                console.warn(`[VideoPlayer] Source ${currentIdx + 1}/${mediaList.length} failed. Auto-switching to next source...`);
+                autoRetryAttemptsRef.current = 0;
+                isRetryingRef.current = false;
+                setIsBuffering(true);
+                setStreamError(null);
+                setStreamUrl(nextUrl);
+                setSelectedQuality(nextSource.quality || 'Auto');
+                showToast(`Switching to backup stream (${nextSource.quality || 'Alternative source'})...`);
+                return;
+              }
+            }
           }
 
           const errCode = vid.error?.code;
@@ -3017,7 +3092,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           <div className="h-[3px] group-hover/scrub:h-[5px] transition-all bg-white/20 w-full relative flex items-center rounded-none overflow-visible">
             {/* Buffer Track */}
             <div
-              className="absolute left-0 top-0 h-full bg-white/40 transition-all duration-150"
+              className={`absolute left-0 top-0 h-full bg-white/40 transition-all duration-150 ${
+                !isPlaying ? 'bg-gradient-to-r from-white/30 via-white/50 to-amber-300/60 animate-pulse' : ''
+              }`}
               style={{ width: `${duration > 0 ? Math.min(100, (bufferedEnd / duration) * 100) : 0}%` }}
             />
 
@@ -3103,11 +3180,19 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               </div>
             </div>
 
-            {/* YouTube Timestamp */}
-            <div className="text-xs sm:text-[13px] text-white/90 font-sans tracking-tight ml-1.5 select-none whitespace-nowrap">
-              <span>{formatTime(currentTime)}</span>
-              <span className="mx-1 text-white/60">/</span>
-              <span>{formatTime(duration)}</span>
+            {/* YouTube Timestamp & Pre-buffering Indicator */}
+            <div className="flex items-center gap-2 text-xs sm:text-[13px] text-white/90 font-sans tracking-tight ml-1.5 select-none whitespace-nowrap">
+              <div>
+                <span>{formatTime(currentTime)}</span>
+                <span className="mx-1 text-white/60">/</span>
+                <span>{formatTime(duration)}</span>
+              </div>
+              {!isPlaying && !isBuffering && bufferedEnd > currentTime && (
+                <span className="hidden sm:inline-flex items-center gap-1 text-[11px] font-medium text-amber-400 bg-amber-400/10 px-2 py-0.5 rounded-full border border-amber-400/20">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                  Buffering ahead: {formatTime(bufferedEnd)}
+                </span>
+              )}
             </div>
           </div>
 
@@ -3704,7 +3789,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         <div className="absolute inset-0 z-50 bg-black flex items-center justify-center select-none no-player-click">
           <video
             ref={adVideoRef}
-            src="https://res.cloudinary.com/urzka7oz/video/upload/v1791782822/gemini_generated_video_0ef26b51.mp4"
+            src={DEFAULT_PRE_ROLL_AD_URL}
             autoPlay
             playsInline
             preload="auto"
@@ -3748,7 +3833,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             </button>
           )}
 
-          {/* Top Left: Ad Badge & Sponsor Countdown */}
+          {/* Top Left: Ad Badge & Sponsor Countdown & Buffering indicator */}
           <div className="absolute top-3 sm:top-4 left-3 sm:left-4 z-50 flex items-center gap-2 pointer-events-auto">
             <div className="bg-black/85 backdrop-blur-md px-3 py-1.5 rounded-lg text-[11px] font-semibold text-white/90 border border-white/15 flex items-center gap-2 shadow-xl">
               <span className="bg-[#FFCC00] text-black font-extrabold text-[9px] px-1.5 py-0.5 rounded uppercase tracking-wide">
@@ -3759,6 +3844,11 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 {adDuration > 0
                   ? `${Math.max(0, Math.ceil(adDuration - adCurrentTime))}s remaining`
                   : 'Playing ad...'}
+              </span>
+              <span className="text-white/30 hidden sm:inline">|</span>
+              <span className="text-emerald-400 font-medium text-[10px] hidden sm:inline-flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                Pre-buffering stream chunks in background
               </span>
             </div>
           </div>
@@ -3778,7 +3868,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           <div className="absolute bottom-5 right-3 sm:right-6 z-50 pointer-events-auto">
             <div className="bg-black/85 backdrop-blur-md text-white/90 text-xs font-semibold px-3.5 py-2 rounded-xl border border-white/15 shadow-2xl flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-[#FFCC00] animate-pulse" />
-              <span>Movie will play after this ad</span>
+              <span>{contentType === 'series' ? 'Episode' : 'Movie'} will play after this ad</span>
             </div>
           </div>
 
