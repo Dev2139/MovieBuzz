@@ -2535,6 +2535,51 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       }
     }
 
+    // Direct MP4 background byte pre-loader:
+    // Pre-fetches the initial 2MB chunk ahead into browser cache while ad plays or player initializes
+    if (!isDash && !isHls && effectiveUrl && effectiveUrl.startsWith('http')) {
+      fetch(effectiveUrl, {
+        headers: { Range: 'bytes=0-2097151' },
+      }).catch(() => {});
+    }
+
+    // Fast Startup Watchdog: if current stream fails to reach readyState >= 2 within 4.5s
+    // (stuck on HAVE_NOTHING / loading spinner) and other sources are available, auto-failover!
+    let singleSourceTimer: any = null;
+    const startupWatchdog = setTimeout(() => {
+      const vid = videoRef.current;
+      if (!vid) return;
+      if (vid.readyState >= 2 || vid.currentTime > 0.5) return;
+
+      if (mediaList && mediaList.length > 1) {
+        const currentIdx = mediaList.findIndex((m) => {
+          const resolved = resolveMediaUrl(m.streamUrl);
+          return resolved === streamUrl || m.streamUrl === streamUrl;
+        });
+        if (currentIdx >= 0 && currentIdx < mediaList.length - 1) {
+          const nextSource = mediaList[currentIdx + 1];
+          const nextUrl = resolveMediaUrl(nextSource.streamUrl);
+          if (nextUrl && nextUrl !== streamUrl) {
+            console.warn(`[VideoPlayer] Stream took >4.5s to buffer. Auto-failover to source ${currentIdx + 2}/${mediaList.length}:`, nextUrl);
+            showToast(`Switching to faster high-speed stream (${nextSource.quality || 'Alternative source'})...`);
+            setStreamUrl(nextUrl);
+            setSelectedQuality(nextSource.quality || 'Auto');
+            setIsBuffering(true);
+            return;
+          }
+        }
+      }
+
+      // If only one source or end of list, do not let spinner spin indefinitely
+      singleSourceTimer = setTimeout(() => {
+        const v = videoRef.current;
+        if (v && v.readyState < 2 && v.currentTime < 0.25) {
+          setStreamError('Stream is taking too long to load. The upstream source is busy or unavailable.');
+          setIsBuffering(false);
+        }
+      }, 3500);
+    }, 4500);
+
     // =========================================================================
     // Universal Continuous Buffer Tracker (500ms Interval)
     // =========================================================================
@@ -2550,6 +2595,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
     return () => {
       isCancelled = true;
+      clearTimeout(startupWatchdog);
+      if (singleSourceTimer) clearTimeout(singleSourceTimer);
       // Stop background buffer keeper
       if (bgBufferIntervalRef.current) {
         clearInterval(bgBufferIntervalRef.current);
@@ -2775,8 +2822,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       </video>
 
       {/* Stream Error Overlay */}
-      {streamError && !isBuffering && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/95 backdrop-blur-md z-20 pointer-events-auto animate-fade-in px-6 text-center">
+      {streamError && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/95 backdrop-blur-md z-40 pointer-events-auto animate-fade-in px-6 text-center">
           <div className="w-14 h-14 rounded-full bg-red-500/20 border border-red-500/40 flex items-center justify-center mb-3">
             <svg className="w-7 h-7 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.293 4.293a1 1 0 011.414 0L21 13.586V19a2 2 0 01-2 2H5a2 2 0 01-2-2v-5.414L10.293 4.293z" />
@@ -2840,7 +2887,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       )}
 
       {/* Cinema 35mm Film Reel & Projector Stream Loader Overlay */}
-      {isBuffering && (
+      {isBuffering && !streamError && (
 
         <div className="absolute inset-0 flex items-center justify-center bg-black/80 backdrop-blur-sm z-20 pointer-events-none animate-fade-in">
           <div className="relative flex items-center justify-center w-24 h-24">

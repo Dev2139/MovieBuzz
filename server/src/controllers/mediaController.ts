@@ -127,8 +127,15 @@ export const proxyTelegramFileStream = async (req: Request, res: Response) => {
 
     const storedStreamUrl: string | undefined = (mediaDoc as any)?.streamUrl;
 
+    // Helper to prevent MTProto calls from hanging proxy requests indefinitely
+    const withTimeout = <T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> =>
+      Promise.race([
+        promise,
+        new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms)),
+      ]);
+
     // --- TIER 1: MTProto chunk streaming ---
-    const totalSize = (await telegramStreamService.getFileSize(activeFileId, messageId)) || 1500000000;
+    const totalSize = (await withTimeout(telegramStreamService.getFileSize(activeFileId, messageId), 3500, null)) || 1500000000;
 
     let start = 0;
     let reqSize = 512 * 1024;
@@ -153,7 +160,11 @@ export const proxyTelegramFileStream = async (req: Request, res: Response) => {
     const chunkSize = 512 * 1024;
     const alignedOffset = Math.floor(start / chunkSize) * chunkSize;
 
-    const rawBuffer = await telegramStreamService.getChunk(activeFileId, alignedOffset, chunkSize, messageId);
+    const rawBuffer = await withTimeout(
+      telegramStreamService.getChunk(activeFileId, alignedOffset, chunkSize, messageId),
+      4500,
+      null
+    );
 
     if (rawBuffer && rawBuffer.length > 0) {
       const sliceStart = start - alignedOffset;
@@ -161,7 +172,11 @@ export const proxyTelegramFileStream = async (req: Request, res: Response) => {
 
       // If more data was requested than 1 chunk, stitch next chunk from RAM cache for max throughput
       if (buffer.length < reqSize && alignedOffset + chunkSize < totalSize) {
-        const nextBuf = await telegramStreamService.getChunk(activeFileId, alignedOffset + chunkSize, chunkSize, messageId);
+        const nextBuf = await withTimeout(
+          telegramStreamService.getChunk(activeFileId, alignedOffset + chunkSize, chunkSize, messageId),
+          3000,
+          null
+        );
         if (nextBuf && nextBuf.length > 0) {
           buffer = Buffer.concat([buffer, nextBuf]);
         }

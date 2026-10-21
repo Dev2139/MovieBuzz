@@ -194,12 +194,39 @@ export const WatchPage: React.FC = () => {
       ? { episodeNumber: currentEpNum + 1 }
       : playlist.find((e) => e.episodeNumber === currentEpNum + 1);
 
-  // High-Speed Direct Sources with stable memoization (Telegram First, MovieBox Fallback)
+  // High-Speed Direct Sources with stable memoization (Fast Edge CDN First, Catalog/Telegram Alternative)
   const effectiveMediaList: any[] = React.useMemo(() => {
     const list: any[] = [];
     const seenUrls = new Set<string>();
 
-    // 1. TIER 1 (Primary): Stored Telegram Media from our database, routed via Cloudflare
+    // 1. TIER 1 (Primary): Fast High-Speed Edge CDN Sources (MovieBox DASH / HLS / MP4)
+    if (movieboxData?.sources && movieboxData.sources.length > 0) {
+      movieboxData.sources.forEach((s: any) => {
+        const sUrl = s.streamUrl;
+        if (sUrl && !seenUrls.has(sUrl)) {
+          seenUrls.add(sUrl);
+          list.push({
+            _id: `src-${s.resourceId || s.quality}`,
+            quality: s.quality,
+            resolution: s.resolution,
+            fileSize: s.fileSize,
+            codecName: s.codecName,
+            mimeType: s.format === 'DASH' ? 'application/dash+xml' : (s.mimeType || 'video/mp4'),
+            format: s.format || 'MP4',
+            provider: 'cinestream',
+            providerMediaId: s.resourceId,
+            streamUrl: sUrl,
+            downloadUrl: sUrl,
+            audioLang: s.audioLang || 'en',
+            audioName: s.audioName || 'Original Audio',
+            dubSubjectId: s.dubSubjectId,
+            isOriginal: s.isOriginal,
+          });
+        }
+      });
+    }
+
+    // 2. TIER 2: Direct catalog / Telegram media from database
     const catalogMedia = isMovie ? movieData?.media : seriesData?.media;
     if (catalogMedia && Array.isArray(catalogMedia) && catalogMedia.length > 0) {
       const telegramMedia = catalogMedia.filter((m: any) => {
@@ -217,7 +244,7 @@ export const WatchPage: React.FC = () => {
           seenUrls.add(streamUrl);
           list.push({
             _id: m._id || `tg-${m.providerMediaId || idx}`,
-            quality: `${qualityLabel} • Telegram HD (Cloudflare Edge)`,
+            quality: `${qualityLabel} • Telegram Archive`,
             resolution: m.resolution || qualityLabel,
             fileSize: m.fileSize || 'Standard',
             codecName: 'h264',
@@ -257,33 +284,6 @@ export const WatchPage: React.FC = () => {
             audioLang: 'en',
             audioName: 'Original Audio',
             isOriginal: true,
-          });
-        }
-      });
-    }
-
-    // 2. TIER 2 (Secondary Fallback): MovieBox / embed scrapers (DASH / HLS / MP4)
-    if (movieboxData?.sources && movieboxData.sources.length > 0) {
-      movieboxData.sources.forEach((s: any) => {
-        const sUrl = s.streamUrl;
-        if (sUrl && !seenUrls.has(sUrl)) {
-          seenUrls.add(sUrl);
-          list.push({
-            _id: `src-${s.resourceId || s.quality}`,
-            quality: s.quality,
-            resolution: s.resolution,
-            fileSize: s.fileSize,
-            codecName: s.codecName,
-            mimeType: s.format === 'DASH' ? 'application/dash+xml' : (s.mimeType || 'video/mp4'),
-            format: s.format || 'MP4',
-            provider: 'cinestream',
-            providerMediaId: s.resourceId,
-            streamUrl: sUrl,
-            downloadUrl: sUrl,
-            audioLang: s.audioLang || 'en',
-            audioName: s.audioName || 'Original Audio',
-            dubSubjectId: s.dubSubjectId,
-            isOriginal: s.isOriginal,
           });
         }
       });

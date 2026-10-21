@@ -102,6 +102,8 @@ class TelegramStreamService {
         // Disable GramJS update loop polling to prevent background TIMEOUT exceptions
         (client as any)._updateLoop = () => Promise.resolve();
 
+        let activeClient: TelegramClient = client;
+
         if (savedSession && savedSession.length > 5) {
           try {
             await client.connect();
@@ -109,8 +111,18 @@ class TelegramStreamService {
           } catch (userErr: any) {
             console.warn('[TelegramStreamService] User session fallback notice:', userErr.message);
             if (this.botToken) {
-              await client.start({ botAuthToken: this.botToken });
+              try {
+                await client.disconnect();
+              } catch {}
+              const botClient = new TelegramClient(new StringSession(''), apiId, apiHash, {
+                connectionRetries: 5,
+                autoReconnect: true,
+                useWSS: true,
+              });
+              (botClient as any)._updateLoop = () => Promise.resolve();
+              await botClient.start({ botAuthToken: this.botToken });
               console.log('[TelegramStreamService] MTProto Bot Client connected successfully!');
+              activeClient = botClient;
             } else {
               throw userErr;
             }
@@ -123,8 +135,8 @@ class TelegramStreamService {
           return null;
         }
 
-        this.client = client;
-        return client;
+        this.client = activeClient;
+        return activeClient;
       } catch (err: any) {
         console.warn('[TelegramStreamService] MTProto note:', err.message);
         return null;
