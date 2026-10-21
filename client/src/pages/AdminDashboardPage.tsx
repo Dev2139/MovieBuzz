@@ -371,7 +371,7 @@ export const AdminDashboardPage: React.FC = () => {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-dark-border pb-6">
         <div>
           <h1 className="text-3xl font-extrabold tracking-tight">Admin Console</h1>
-          <p className="text-xs text-gray-400 mt-1">Platform management, content catalog, and Telegram channel imports</p>
+          <p className="text-xs text-gray-400 mt-1">Platform management, content catalog, and automated content ingestion</p>
         </div>
 
         <Link
@@ -379,7 +379,7 @@ export const AdminDashboardPage: React.FC = () => {
           className="flex items-center space-x-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white px-5 py-2.5 rounded-xl font-bold text-xs shadow-lg shadow-blue-500/25 transition-all"
         >
           <Send className="w-4 h-4" />
-          <span>Telegram Import Queue ({stats?.pendingImports || 0})</span>
+          <span>Ingestion Queue ({stats?.pendingImports || 0})</span>
         </Link>
       </div>
 
@@ -478,16 +478,16 @@ export const AdminDashboardPage: React.FC = () => {
 
           <div className="p-6 bg-dark-card border border-dark-border rounded-2xl flex items-center justify-between">
             <div className="space-y-1">
-              <h3 className="font-bold text-lg text-white">Telegram Channel Auto-Parser & Import Queue</h3>
+              <h3 className="font-bold text-lg text-white">Automated Content Ingestion & Queue</h3>
               <p className="text-xs text-gray-400">
-                Review detected media posts from your channel, correct parsed metadata, map to content/season/episodes, and publish to the live site.
+                Review inbound media posts, correct parsed metadata, map to content/season/episodes, and publish to the live site.
               </p>
             </div>
             <Link
               to="/admin/telegram"
               className="px-6 py-3 bg-brand-500 hover:bg-brand-600 text-white font-bold text-xs rounded-xl shadow"
             >
-              Open Telegram Dashboard
+              Open Ingestion Dashboard
             </Link>
           </div>
         </div>

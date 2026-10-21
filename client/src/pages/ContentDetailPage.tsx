@@ -471,7 +471,7 @@ export const ContentDetailPage: React.FC = () => {
               </div>
             </div>
             <p className="text-xs text-gray-300 leading-relaxed">
-              Your direct file download token has been generated through the platform backend server without exposing channel storage credentials.
+              Your secure high-speed download link is ready. Click below to download your movie directly to your device.
             </p>
             <a
               href={resolveMediaUrl(downloadLinkInfo.downloadUrl)}

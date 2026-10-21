@@ -125,8 +125,8 @@ export const AdminTelegramPage: React.FC = () => {
             <Send className="w-6 h-6" />
           </div>
           <div>
-            <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">Telegram Import Dashboard</h1>
-            <p className="text-xs text-gray-400 mt-1">Review channel posts, map single or bulk episodes, and publish to catalog</p>
+            <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">Content Ingestion Dashboard</h1>
+            <p className="text-xs text-gray-400 mt-1">Review inbound posts, map single or bulk episodes, and publish to catalog</p>
           </div>
         </div>
 
@@ -136,7 +136,7 @@ export const AdminTelegramPage: React.FC = () => {
           className="flex items-center space-x-2 bg-blue-600 hover:bg-blue-500 text-white px-5 py-2.5 rounded-xl font-bold text-xs shadow-lg shadow-blue-600/30 transition-all disabled:opacity-50"
         >
           <RefreshCw className={`w-4 h-4 ${syncMutation.isPending ? 'animate-spin' : ''}`} />
-          <span>Sync Channel Posts Now</span>
+          <span>Sync Inbound Feed</span>
         </button>
       </div>
 
@@ -196,7 +196,7 @@ export const AdminTelegramPage: React.FC = () => {
 
       {/* Import Queue Grid */}
       {isLoading ? (
-        <div className="py-12 text-center text-gray-400">Loading Telegram import queue...</div>
+        <div className="py-12 text-center text-gray-400">Loading import queue...</div>
       ) : importItems.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {importItems.map((doc) => (
@@ -251,7 +251,7 @@ export const AdminTelegramPage: React.FC = () => {
         </div>
       ) : (
         <div className="py-16 text-center text-gray-400 bg-dark-card border border-dark-border rounded-2xl">
-          No {selectedStatusFilter} Telegram channel posts in queue.
+          No {selectedStatusFilter} items in queue.
         </div>
       )}
 

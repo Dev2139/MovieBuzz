@@ -2581,7 +2581,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       singleSourceTimer = setTimeout(() => {
         const v = videoRef.current;
         if (v && v.readyState < 2 && v.currentTime < 0.25) {
-          setStreamError('Stream is taking too long to load. The upstream source is busy or unavailable.');
+          setStreamError('Stream is taking longer than expected. Please check your connection or tap Retry.');
           setIsBuffering(false);
         }
       }, 3500);
@@ -2781,8 +2781,13 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           let userMsg = 'Video failed to load.';
           if (errCode === 2) userMsg = 'Network error — stream could not be fetched.';
           else if (errCode === 3) userMsg = 'Decoding error — unsupported video format.';
-          else if (errCode === 4) userMsg = 'Source not supported — the stream format or codec is not supported by your browser.';
-          else if (errMsg) userMsg = errMsg;
+          else if (errMsg) {
+            const clean = errMsg
+              .replace(/https?:\/\/[^\s]+/gi, '')
+              .replace(/\b(render|onrender|telegram|cloudflare|workers\.dev|proxy|mtproto)\b/gi, '')
+              .trim();
+            userMsg = clean || 'Video failed to load.';
+          }
           setStreamError(userMsg);
           setIsBuffering(false);
           setIsPlaying(false);

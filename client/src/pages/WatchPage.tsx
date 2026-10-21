@@ -243,14 +243,14 @@ export const WatchPage: React.FC = () => {
         if (streamUrl && !seenUrls.has(streamUrl)) {
           seenUrls.add(streamUrl);
           list.push({
-            _id: m._id || `tg-${m.providerMediaId || idx}`,
-            quality: `${qualityLabel} • Telegram Archive`,
+            _id: m._id || `src-${m.providerMediaId || idx}`,
+            quality: `${qualityLabel} • High Speed`,
             resolution: m.resolution || qualityLabel,
             fileSize: m.fileSize || 'Standard',
             codecName: 'h264',
             mimeType: 'video/mp4',
             format: 'MP4',
-            provider: 'telegram',
+            provider: 'cinestream',
             providerMediaId: m.providerMediaId,
             streamUrl,
             downloadUrl: dlUrl || streamUrl,
@@ -375,8 +375,8 @@ export const WatchPage: React.FC = () => {
             <span className="flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-md border text-emerald-400 bg-emerald-500/10 border-emerald-500/30">
               <Sparkles className="w-3 h-3" />
               <span>
-                {effectiveMediaList[0]?.provider === 'telegram'
-                  ? 'Telegram • Cloudflare Edge'
+                {effectiveMediaList[0]?.format === 'DASH' || effectiveMediaList[0]?.format === 'HLS'
+                  ? 'CineStream Ultra HD'
                   : 'CineStream HD Direct'}
               </span>
             </span>
