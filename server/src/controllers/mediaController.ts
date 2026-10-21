@@ -188,8 +188,8 @@ export const proxyTelegramFileStream = async (req: Request, res: Response) => {
         contentType = 'video/mp4';
       }
 
-      res.writeHead(range ? 206 : 200, {
-        ...(range ? { 'Content-Range': `bytes ${start}-${end}/${totalSize}` } : {}),
+      res.writeHead(206, {
+        'Content-Range': `bytes ${start}-${end}/${totalSize}`,
         'Accept-Ranges': 'bytes',
         'Content-Length': buffer.length,
         'Content-Type': contentType,

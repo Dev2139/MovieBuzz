@@ -402,15 +402,13 @@ export default {
         return new Response(rewriteHlsManifest(text, finalUrl, referer, proxyBase), { status: 200, headers: h });
       }
 
-      // Everything else (MP4 files, media segments, Telegram file proxy) is relayed + edge-cached.
-      const isSegment =
-        ext === '.mp4' ||
-        /\.(m4s|mp4|ts|webm|aac|m4v|mka)(\?|$)/i.test(targetUrl) ||
-        targetUrl.includes('/proxy-file/');
+      // Only true discrete media segments (.m4s, .ts) are edge-cached.
+      // Continuous dynamic multi-gigabyte files (like Telegram proxy-file) must NEVER use cacheEverything
+      const isSegment = /\.(m4s|ts)(\?|$)/i.test(targetUrl);
       const relayOptions: any = {
         headers: upstreamHeaders,
         redirect: 'follow',
-        cf: { cacheEverything: true, cacheTtl: isSegment ? 86400 : 3600 },
+        ...(isSegment ? { cf: { cacheEverything: true, cacheTtl: 86400 } } : {}),
       };
       const upstreamRes = await fetch(targetUrl, relayOptions);
 

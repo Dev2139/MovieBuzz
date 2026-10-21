@@ -37,7 +37,14 @@ export const wrapStreamWithCloudflare = (rawUrl?: string): string => {
     return resolved;
   }
 
-  // If it's a telegram proxy-file endpoint, route through Cloudflare /embed with ext=.mp4
+  // Never route Telegram proxy-file or backend media endpoints through the Cloudflare worker
+  // (Telegram media files require continuous dynamic multi-gigabyte HTTP 206 byte-range streaming directly from the API backend;
+  // routing them through a basic edge worker breaks multi-range chunking and truncates the stream)
+  if (resolved.includes('/proxy-file/') || resolved.includes('/media/')) {
+    return resolved;
+  }
+
+  // If it's an external embed or CDN stream, route through Cloudflare /embed
   const marker = resolved.includes('.m3u8') ? '.m3u8' : resolved.includes('.mpd') ? '.mpd' : '.mp4';
   return `${cfProxy}/embed?url=${encodeURIComponent(resolved)}&ext=${marker}`;
 };

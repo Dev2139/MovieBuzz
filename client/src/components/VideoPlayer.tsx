@@ -2134,17 +2134,22 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   };
 
   const handleStall = useCallback(() => {
+    if (isPlayingAdRef.current) return;
     setIsBuffering(true);
     if (videoRef.current && isPlaying) {
       const curPos = videoRef.current.currentTime;
+      const totalDur = videoRef.current.duration || duration || 0;
+      if (totalDur > 10 && curPos >= totalDur - 2) return;
       setTimeout(() => {
-        if (videoRef.current && videoRef.current.paused) {
-          videoRef.current.currentTime = curPos;
+        if (videoRef.current && videoRef.current.paused && !isPlayingAdRef.current) {
+          if (curPos > 0 && Math.abs(videoRef.current.currentTime - curPos) > 1.5) {
+            videoRef.current.currentTime = curPos;
+          }
           videoRef.current.play().catch(() => {});
         }
       }, 1500);
     }
-  }, [isPlaying]);
+  }, [isPlaying, duration]);
 
   useEffect(() => {
     if (videoRef.current) {

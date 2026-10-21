@@ -329,8 +329,8 @@ export const WatchPage: React.FC = () => {
         (!episodeId || (h.episodeId && (h.episodeId._id === episodeId || h.episodeId === episodeId)))
     );
     if (match && match.progress > 0) {
-      // If user was within 20 seconds of the end or > 95% finished, start fresh from 0
-      const isNearEnd = match.duration > 0 && (match.progress >= match.duration - 20 || match.progress / match.duration > 0.95);
+      // If content was marked completed or progress is near the end, restart cleanly from 0
+      const isNearEnd = Boolean(match.completed) || (match.duration > 0 && (match.progress >= match.duration - 20 || match.progress / match.duration > 0.92));
       if (!isNearEnd) {
         initialPos = match.progress;
       }
@@ -340,7 +340,7 @@ export const WatchPage: React.FC = () => {
   if (!initialPos && contentId) {
     const localSavedItem = getLocalPlaybackItem(contentId, episodeId);
     if (localSavedItem && localSavedItem.position > 0) {
-      const isNearEnd = localSavedItem.duration > 0 && (localSavedItem.position >= localSavedItem.duration - 20 || localSavedItem.position / localSavedItem.duration > 0.95);
+      const isNearEnd = (localSavedItem.percentage && localSavedItem.percentage >= 92) || (localSavedItem.duration > 0 && (localSavedItem.position >= localSavedItem.duration - 20 || localSavedItem.position / localSavedItem.duration > 0.92));
       if (!isNearEnd) {
         initialPos = localSavedItem.position;
       }
