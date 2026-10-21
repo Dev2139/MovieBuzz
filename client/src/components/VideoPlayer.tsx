@@ -881,6 +881,11 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   // Double click skip feedback indicator
   const [skipFeedback, setSkipFeedback] = useState<{ side: 'left' | 'right'; text: string; id: number } | null>(null);
 
+  // Cumulative Continuous Seek state (+5s, +10s, +15s, -25s, etc.)
+  const [cumulativeSeek, setCumulativeSeek] = useState<{ delta: number; id: number } | null>(null);
+  const cumulativeSeekTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cumulativeDeltaRef = useRef<number>(0);
+
   // In-Player Pre-Roll Ad System
   // Premium members & admins are ad-free. Guests and free signed-in users must watch the pre-roll ad.
   // While the ad plays, the real movie/series stream keeps buffering chunks in the background
@@ -1522,6 +1527,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }
   }, []);
 
+
   // Poll buffer levels rapidly (every 500ms) even while paused so progress bar updates in real-time as chunks load
   useEffect(() => {
     const timer = setInterval(() => {
@@ -1947,6 +1953,51 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }, 5000);
   }, [isPlaying]);
 
+  // Continuous cumulative seek accumulator: +/-5s increments, sums continuously within 1000ms window
+  const triggerSeek = useCallback(
+    (step: number) => {
+      if (isPlayingAd && !isAdFreeUser) return;
+      const vid = videoRef.current;
+      if (!vid) return;
+
+      const cur = vid.currentTime || currentTime || 0;
+      const target = Math.max(0, Math.min(duration || 0, cur + step));
+      playbackPositionRef.current = target;
+      setCurrentTime(target);
+      if (!isAlreadyBuffered(target)) {
+        setIsBuffering(true);
+      }
+      vid.currentTime = target;
+
+      // Keep timeline & controls visible while seeking
+      setShowControls(true);
+      resetControlsTimeout();
+
+      // Accumulate continuous step within 1000ms window
+      const prev = cumulativeDeltaRef.current;
+      const nextSum = (Math.sign(prev) === Math.sign(step) || prev === 0) ? prev + step : step;
+      cumulativeDeltaRef.current = nextSum;
+
+      const signStr = nextSum > 0 ? `+${nextSum}s` : `${nextSum}s`;
+      setCumulativeSeek({ delta: nextSum, id: Date.now() });
+      setSkipFeedback({
+        side: step > 0 ? 'right' : 'left',
+        text: signStr,
+        id: Date.now(),
+      });
+
+      if (cumulativeSeekTimerRef.current) {
+        clearTimeout(cumulativeSeekTimerRef.current);
+      }
+      cumulativeSeekTimerRef.current = setTimeout(() => {
+        setCumulativeSeek(null);
+        setSkipFeedback(null);
+        cumulativeDeltaRef.current = 0;
+      }, 1000);
+    },
+    [isPlayingAd, isAdFreeUser, currentTime, duration, isAlreadyBuffered, resetControlsTimeout]
+  );
+
   // Screen Tap / Click Handler:
   // If controllers are hidden: show for 5 seconds and auto-hide.
   // If controllers are shown (within those 5 seconds or whenever shown): immediately turn them off ("oof it").
@@ -1964,37 +2015,15 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       const clickX = clientX - (rect?.left || 0);
       const width = rect?.width || 1;
 
-      // Double-tap skip within 300ms on outer edges (left 30% or right 30%)
+      // Double-tap skip within 300ms on outer edges (left 30% or right 30%) with +5/-5 continuous sum
       if (now - lastClickRef.current.time < 300) {
         if (clickX < width * 0.3) {
-          // Left side double-click: Rewind 10s
-          if (videoRef.current) {
-            const target = Math.max(0, videoRef.current.currentTime - 10);
-            playbackPositionRef.current = target;
-            setCurrentTime(target);
-            if (!isAlreadyBuffered(target)) {
-              setIsBuffering(true);
-            }
-            videoRef.current.currentTime = target;
-          }
-          setSkipFeedback({ side: 'left', text: '10 seconds', id: Date.now() });
-          setTimeout(() => setSkipFeedback(null), 800);
+          triggerSeek(-5);
           lastClickRef.current = { time: 0, x: 0 };
           resetControlsTimeout();
           return;
         } else if (clickX > width * 0.7) {
-          // Right side double-click: Fast-forward 10s
-          if (videoRef.current) {
-            const target = Math.min(duration, videoRef.current.currentTime + 10);
-            playbackPositionRef.current = target;
-            setCurrentTime(target);
-            if (!isAlreadyBuffered(target)) {
-              setIsBuffering(true);
-            }
-            videoRef.current.currentTime = target;
-          }
-          setSkipFeedback({ side: 'right', text: '10 seconds', id: Date.now() });
-          setTimeout(() => setSkipFeedback(null), 800);
+          triggerSeek(5);
           lastClickRef.current = { time: 0, x: 0 };
           resetControlsTimeout();
           return;
@@ -2077,32 +2106,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         toggleCaptions();
       } else if (e.key === 'j' || e.key === 'J' || e.key === 'ArrowLeft') {
         e.preventDefault();
-        const step = e.key === 'ArrowLeft' ? 5 : 10;
-        if (videoRef.current) {
-          const target = Math.max(0, videoRef.current.currentTime - step);
-          playbackPositionRef.current = target;
-          setCurrentTime(target);
-          if (!isAlreadyBuffered(target)) {
-            setIsBuffering(true);
-          }
-          videoRef.current.currentTime = target;
-        }
-        setSkipFeedback({ side: 'left', text: `-${step}s`, id: Date.now() });
-        setTimeout(() => setSkipFeedback(null), 800);
+        triggerSeek(-5);
       } else if (e.key === 'l' || e.key === 'L' || e.key === 'ArrowRight') {
         e.preventDefault();
-        const step = e.key === 'ArrowRight' ? 5 : 10;
-        if (videoRef.current) {
-          const target = Math.min(duration, videoRef.current.currentTime + step);
-          playbackPositionRef.current = target;
-          setCurrentTime(target);
-          if (!isAlreadyBuffered(target)) {
-            setIsBuffering(true);
-          }
-          videoRef.current.currentTime = target;
-        }
-        setSkipFeedback({ side: 'right', text: `+${step}s`, id: Date.now() });
-        setTimeout(() => setSkipFeedback(null), 800);
+        triggerSeek(5);
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
         updateVolume(Math.min(1, volume + 0.05), false);
@@ -2120,7 +2127,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isPlaying, duration, volume, updateVolume, toggleCaptions]);
+  }, [isPlaying, duration, volume, updateVolume, toggleCaptions, triggerSeek]);
 
   const formatTime = (seconds: number) => {
     if (isNaN(seconds)) return '00:00';
@@ -2968,7 +2975,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           <div className="flex items-center space-x-1 mb-1 animate-pulse">
             <RotateCcw className="w-8 h-8 sm:w-10 sm:h-10 text-white" />
           </div>
-          <span className="text-xs sm:text-sm font-bold tracking-wide text-white drop-shadow">10 seconds</span>
+          <span className="text-xs sm:text-sm font-bold tracking-wide text-white drop-shadow">
+            {skipFeedback.text}
+          </span>
         </div>
       )}
       {skipFeedback?.side === 'right' && (
@@ -2976,7 +2985,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           <div className="flex items-center space-x-1 mb-1 animate-pulse">
             <RotateCw className="w-8 h-8 sm:w-10 sm:h-10 text-white" />
           </div>
-          <span className="text-xs sm:text-sm font-bold tracking-wide text-white drop-shadow">10 seconds</span>
+          <span className="text-xs sm:text-sm font-bold tracking-wide text-white drop-shadow">
+            {skipFeedback.text}
+          </span>
         </div>
       )}
 
@@ -3028,18 +3039,17 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       {/* YouTube On-Screen Center Controls (Play/Pause & 10s Rewind/Forward) */}
       {showControls && !isBuffering && (
         <div className="absolute inset-0 m-auto flex items-center justify-center space-x-8 sm:space-x-14 z-20 pointer-events-none">
-          {/* Rewind 10s */}
+          {/* Rewind 5s */}
           <button
-            onClick={() => {
-              if (videoRef.current) videoRef.current.currentTime = Math.max(0, videoRef.current.currentTime - 10);
-              setSkipFeedback({ side: 'left', text: '10 seconds', id: Date.now() });
-              setTimeout(() => setSkipFeedback(null), 800);
-            }}
-            className="no-player-click pointer-events-auto w-10 h-10 sm:w-12 sm:h-12 bg-black/60 hover:bg-black/80 rounded-full flex items-center justify-center text-white/90 hover:text-white backdrop-blur-md transition-all hover:scale-110 active:scale-95 shadow-xl border border-white/10"
-            title="Seek back 10s"
-            aria-label="Seek back 10s"
+            onClick={() => triggerSeek(-5)}
+            className="no-player-click pointer-events-auto w-10 h-10 sm:w-12 sm:h-12 bg-black/60 hover:bg-black/80 rounded-full flex items-center justify-center text-white/90 hover:text-white backdrop-blur-md transition-all hover:scale-110 active:scale-95 shadow-xl border border-white/10 group/btn"
+            title="Seek back 5s"
+            aria-label="Seek back 5s"
           >
-            <RotateCcw className="w-5 h-5 sm:w-6 sm:h-6" />
+            <div className="relative flex items-center justify-center">
+              <RotateCcw className="w-5 h-5 sm:w-6 sm:h-6" />
+              <span className="absolute text-[8px] sm:text-[9px] font-extrabold top-[50%] -translate-y-1/2">5</span>
+            </div>
           </button>
 
           {/* Center Play / Pause Disc Button */}
@@ -3056,18 +3066,17 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             )}
           </button>
 
-          {/* Forward 10s */}
+          {/* Forward 5s */}
           <button
-            onClick={() => {
-              if (videoRef.current) videoRef.current.currentTime = Math.min(duration, videoRef.current.currentTime + 10);
-              setSkipFeedback({ side: 'right', text: '10 seconds', id: Date.now() });
-              setTimeout(() => setSkipFeedback(null), 800);
-            }}
-            className="no-player-click pointer-events-auto w-10 h-10 sm:w-12 sm:h-12 bg-black/60 hover:bg-black/80 rounded-full flex items-center justify-center text-white/90 hover:text-white backdrop-blur-md transition-all hover:scale-110 active:scale-95 shadow-xl border border-white/10"
-            title="Seek forward 10s"
-            aria-label="Seek forward 10s"
+            onClick={() => triggerSeek(5)}
+            className="no-player-click pointer-events-auto w-10 h-10 sm:w-12 sm:h-12 bg-black/60 hover:bg-black/80 rounded-full flex items-center justify-center text-white/90 hover:text-white backdrop-blur-md transition-all hover:scale-110 active:scale-95 shadow-xl border border-white/10 group/btn"
+            title="Seek forward 5s"
+            aria-label="Seek forward 5s"
           >
-            <RotateCw className="w-5 h-5 sm:w-6 sm:h-6" />
+            <div className="relative flex items-center justify-center">
+              <RotateCw className="w-5 h-5 sm:w-6 sm:h-6" />
+              <span className="absolute text-[8px] sm:text-[9px] font-extrabold top-[50%] -translate-y-1/2">5</span>
+            </div>
           </button>
         </div>
       )}
@@ -3091,7 +3100,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       {/* YouTube-Style Controls Overlay */}
       <div
         className={`absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/95 via-black/70 to-transparent transition-opacity duration-300 z-30 ${
-          showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'
+          showControls || !!cumulativeSeek ? 'opacity-100' : 'opacity-0 pointer-events-none'
         }`}
       >
         {/* YouTube Scrubber Progress Bar */}
@@ -3102,7 +3111,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           onMouseLeave={handleScrubberMouseLeave}
         >
           {/* Floating Time Tooltip */}
-          {scrubberHover.isHovering && duration > 0 && (
+          {scrubberHover.isHovering && duration > 0 && !cumulativeSeek && (
             <div
               className="absolute -top-7 -translate-x-1/2 bg-[#1f1f1f]/95 backdrop-blur-md text-white font-sans text-[11px] font-semibold px-2 py-0.5 rounded shadow-xl pointer-events-none border border-white/10 whitespace-nowrap z-40"
               style={{ left: `${Math.max(20, Math.min(scrubberHover.x + 12, (containerRef.current?.clientWidth || 400) - 20))}px` }}
@@ -3134,9 +3143,27 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               className="absolute left-0 top-0 h-full bg-[#FF0000] relative"
               style={{ width: `${duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0}%` }}
             >
-              {/* YouTube Red Scrubber Thumb (Circle) */}
-              <div className="absolute -top-[4px] -right-[6px] w-3 h-3 sm:w-3.5 sm:h-3.5 bg-[#FF0000] rounded-full scale-0 group-hover/scrub:scale-100 transition-transform duration-100 shadow-[0_0_6px_rgba(255,0,0,0.8)]" />
+              {/* YouTube Red Scrubber Thumb (Circle) - hidden when cumulativeSeek pill badge is visible */}
+              <div
+                className={`absolute -top-[4px] -right-[6px] w-3 h-3 sm:w-3.5 sm:h-3.5 bg-[#FF0000] rounded-full transition-all duration-100 shadow-[0_0_6px_rgba(255,0,0,0.8)] ${
+                  cumulativeSeek ? 'opacity-0 scale-0 pointer-events-none' : 'scale-0 group-hover/scrub:scale-100'
+                }`}
+              />
             </div>
+
+            {/* Cumulative Continuous Seek Red Pill Badge (-25s, +20s) directly centered on the timeline bar */}
+            {cumulativeSeek && duration > 0 && (
+              <div
+                className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 z-50 pointer-events-none transition-all duration-75 animate-fade-in-scale"
+                style={{
+                  left: `${Math.min(96, Math.max(4, (currentTime / duration) * 100))}%`,
+                }}
+              >
+                <div className="bg-[#FF0033] text-white text-[11px] sm:text-xs font-black px-2.5 py-0.5 sm:px-3 sm:py-0.5 rounded-full shadow-[0_2px_14px_rgba(255,0,51,0.85)] flex items-center justify-center whitespace-nowrap border border-white/30 tracking-tight drop-shadow select-none">
+                  {cumulativeSeek.delta > 0 ? `+${cumulativeSeek.delta}s` : `${cumulativeSeek.delta}s`}
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -3162,12 +3189,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             <button
               onClick={() => {
                 if (onEnded) onEnded();
-                else if (videoRef.current) {
-                  videoRef.current.currentTime = Math.min(duration, videoRef.current.currentTime + 10);
-                }
+                else triggerSeek(5);
               }}
               className="p-1 sm:p-1.5 text-white/90 hover:text-white transition-opacity flex-none"
-              title={onEnded ? 'Next episode (Shift+N)' : 'Seek forward 10s'}
+              title={onEnded ? 'Next episode (Shift+N)' : 'Seek forward 5s'}
               aria-label="Next Video"
             >
               <SkipForward className="w-4 h-4 sm:w-5 sm:h-5 fill-white" />
