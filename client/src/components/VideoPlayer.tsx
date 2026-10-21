@@ -204,42 +204,40 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const streamingProfile = React.useMemo(() => {
     if (isMobileDevice) {
       return {
-        // High forward buffer horizon on mobile
-        hlsMaxBufferLength: 1800,            // 30 min buffer horizon ahead while playing
-        hlsMaxMaxBufferLength: 3600,         // 60 min hard ceiling
-        hlsMaxBufferSize: 600 * 1000 * 1000, // 600 MB RAM ceiling
-        hlsBackBufferLength: 60,             // trim 60s behind playhead
-        hlsStartLevel: -1,                   // ABR picks optimal quality
+        hlsMaxBufferLength: 60,              // 60s safe forward buffer on mobile
+        hlsMaxMaxBufferLength: 120,          // 2 min max
+        hlsMaxBufferSize: 40 * 1000 * 1000,  // 40 MB safe mobile RAM
+        hlsBackBufferLength: 20,             // 20s behind
+        hlsStartLevel: -1,
         hlsMaxFragLookUpTolerance: 0.25,
         hlsLowLatencyMode: false,
-        hlsScheduleWhilePaused: true,        // KEEP FETCHING SEGMENTS WHILE USER PAUSES OR DURING AD
-        // DASH
-        dashInitialBufferLevel: 0.5,         // Sub-second startup threshold → playback begins almost instantly
-        dashBufferTimeDefault: 600,          // 10 minutes of chunks ahead while playing
-        dashBufferTimeAtTopQuality: 900,     // 15 min at top quality
-        dashBufferTimeAtTopQualityLongForm: 1200, // 20 min for long-form
-        dashInitialBitrate: 800,             // Snappy startup bitrate for cellular
-        dashBufferToKeep: 60,                // Safe mobile memory management
-        dashBufferPruningInterval: 30,
+        hlsScheduleWhilePaused: true,        // Keep fetching segments while paused or during ad
+        dashInitialBufferLevel: 0.5,
+        dashBufferTimeDefault: 60,           // 60s ahead
+        dashBufferTimeAtTopQuality: 90,
+        dashBufferTimeAtTopQualityLongForm: 120,
+        dashInitialBitrate: 800,
+        dashBufferToKeep: 20,
+        dashBufferPruningInterval: 15,
       };
     }
-    // Desktop / high-memory profile — ultra-aggressive full movie forward chunk buffering
+    // Desktop profile — optimal buffer length that fills Chrome's SourceBuffer to maximum without exceeding quota
     return {
-      hlsMaxBufferLength: 7200,             // 120 min (2 hours!) forward chunk horizon
-      hlsMaxMaxBufferLength: 10800,         // 180 min (3 hours!) hard ceiling
-      hlsMaxBufferSize: 1500 * 1000 * 1000, // 1.5 GB RAM ceiling
-      hlsBackBufferLength: 300,
+      hlsMaxBufferLength: 120,              // 2 minutes forward buffer (optimal for HD)
+      hlsMaxMaxBufferLength: 300,          // 5 minutes max
+      hlsMaxBufferSize: 80 * 1000 * 1000,  // 80 MB (safely below 100MB browser MSE quota)
+      hlsBackBufferLength: 30,             // 30s behind
       hlsStartLevel: -1,
       hlsMaxFragLookUpTolerance: 0.2,
       hlsLowLatencyMode: false,
-      hlsScheduleWhilePaused: true,         // KEEP FETCHING SEGMENTS WHILE USER PAUSES OR DURING AD
-      dashInitialBufferLevel: 0.6,
-      dashBufferTimeDefault: 1800,          // 30 minutes of chunks ahead
-      dashBufferTimeAtTopQuality: 2400,     // 40 minutes at top quality
-      dashBufferTimeAtTopQualityLongForm: 3600, // 60 minutes for feature-length
+      hlsScheduleWhilePaused: true,         // Keep fetching segments while paused or during ad
+      dashInitialBufferLevel: 0.5,
+      dashBufferTimeDefault: 90,           // 90s buffer ahead
+      dashBufferTimeAtTopQuality: 120,
+      dashBufferTimeAtTopQualityLongForm: 180,
       dashInitialBitrate: 2500,
-      dashBufferToKeep: 600,
-      dashBufferPruningInterval: 60,
+      dashBufferToKeep: 30,
+      dashBufferPruningInterval: 15,
     };
   }, [isMobileDevice]);
 
@@ -1598,21 +1596,22 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   useEffect(() => {
     const isDirectMp4 =
       streamUrl &&
-      (streamUrl.includes('/proxy') || streamUrl.includes('.mp4') || streamUrl.includes('/proxy-file/')) &&
       !streamUrl.includes('.mpd') &&
-      !streamUrl.includes('.m3u8');
+      !streamUrl.includes('.m3u8') &&
+      !streamUrl.includes('/hls/') &&
+      !streamUrl.includes('/dash/') &&
+      (streamUrl.includes('/proxy') || streamUrl.includes('.mp4') || streamUrl.includes('/proxy-file/'));
     if (!isDirectMp4 || !videoRef.current) return;
 
     let cancelled = false;
+    let isFetching = false;
     let prefetchOffset = 0;
-    const CHUNK_SIZE = 4 * 1024 * 1024;                 // 4 MB per range request
-    const PARALLEL_CONNECTIONS = 4;                     // 4 concurrent range fetches
-    // Full horizon: up to 1 GB or full file length so all possible chunks load during ad and pause!
-    const PREFETCH_HORIZON_BYTES = (isPlayingAd || !isPlaying) ? 1024 * 1024 * 1024 : 400 * 1024 * 1024;
-    const TICK_MS = 300;                                // Rapid scheduling
+    const CHUNK_SIZE = 2 * 1024 * 1024;                 // 2 MB per range request
+    const PREFETCH_HORIZON_BYTES = 50 * 1024 * 1024;    // 50 MB lookahead in browser HTTP cache
+    const TICK_MS = 1000;                               // 1 second interval
 
     const prefetchTick = async () => {
-      if (cancelled || !videoRef.current) return;
+      if (cancelled || !videoRef.current || isFetching) return;
       try {
         const vid = videoRef.current;
         let bufEnd = 0;
@@ -1627,32 +1626,27 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         const totalDur = vid.duration || duration || 0;
         if (totalDur > 0 && bufEnd >= totalDur - 1) return;
 
-        const estByteRate = 450000; // ~3.6 Mbps average (higher for HD sources)
+        const estByteRate = 450000;
         const currentTargetPos = bufEnd > 0 ? bufEnd : vid.currentTime;
         const targetByte = Math.floor(currentTargetPos * estByteRate);
         if (prefetchOffset < targetByte) {
           prefetchOffset = targetByte;
         }
 
-        // Full horizon during ad or pause loads ALL possible chunks
         if (prefetchOffset - targetByte > PREFETCH_HORIZON_BYTES) return;
 
-        // Fire PARALLEL_CONNECTIONS simultaneous range fetches to saturate the network
-        const jobs: Promise<Response | null>[] = [];
-        for (let c = 0; c < PARALLEL_CONNECTIONS; c++) {
-          const start = prefetchOffset + c * CHUNK_SIZE;
-          const end = start + CHUNK_SIZE - 1;
-          jobs.push(
-            fetch(streamUrl, {
-              headers: { Range: `bytes=${start}-${end}` },
-              cache: 'force-cache',
-            }).catch(() => null)
-          );
-        }
-        prefetchOffset += CHUNK_SIZE * PARALLEL_CONNECTIONS;
-        await Promise.all(jobs);
+        isFetching = true;
+        const start = prefetchOffset;
+        const end = start + CHUNK_SIZE - 1;
+        await fetch(streamUrl, {
+          headers: { Range: `bytes=${start}-${end}` },
+          cache: 'force-cache',
+        }).catch(() => null);
+        prefetchOffset += CHUNK_SIZE;
         updateBuffered();
-      } catch {}
+      } catch {} finally {
+        isFetching = false;
+      }
     };
 
     // Kick off immediately, then on interval
@@ -1662,7 +1656,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       cancelled = true;
       clearInterval(interval);
     };
-  }, [streamUrl, duration, isPlayingAd, isPlaying, updateBuffered]);
+  }, [streamUrl, duration, updateBuffered]);
 
   const handleTimeUpdate = () => {
     if (videoRef.current) {
@@ -2537,53 +2531,17 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }
 
     // =========================================================================
-    // Universal Continuous Chunk Buffering Engine (250ms Heartbeat)
+    // Universal Continuous Buffer Tracker (500ms Interval)
     // =========================================================================
-    // 1. While the pre-roll ad is showing: downloads and fills all possible chunks in background
-    // 2. When ad finishes: playback starts INSTANTLY with zero buffer spinner
-    // 3. While playing: continuously downloads upcoming chunks ahead (2h desktop / 30m mobile)
-    // 4. While user pauses: aggressively loads all possible chunks ahead up to full duration
+    // Hls.js and dash.js automatically schedule and load chunks continuously
+    // in the background via scheduleWhilePaused: true without interruption.
     if (bgBufferIntervalRef.current) clearInterval(bgBufferIntervalRef.current);
     bgBufferIntervalRef.current = setInterval(() => {
       const vid = videoRef.current;
       if (!vid) return;
 
-      // Compute seconds of buffered content ahead of the current playhead
-      let forwardBufferSec = 0;
-      if (vid.buffered && vid.buffered.length > 0) {
-        for (let i = 0; i < vid.buffered.length; i++) {
-          const s = vid.buffered.start(i);
-          const e = vid.buffered.end(i);
-          if (vid.currentTime >= s && vid.currentTime <= e) {
-            forwardBufferSec = e - vid.currentTime;
-            break;
-          }
-        }
-      }
-
-      // If ad is showing or video is paused: buffer ALL possible chunks up to full duration!
-      // While streaming loaded chunks: continuously pull ahead up to 2 hours (desktop) / 30 min (mobile)
-      const totalDur = vid.duration && !isNaN(vid.duration) && vid.duration > 0 ? vid.duration : 10800;
-      const targetForwardHorizon = (isPlayingAdRef.current || !isPlayingRef.current)
-        ? totalDur
-        : (isMobileDevice ? 1800 : 7200);
-
-      // HLS chunk loading engine: keep scheduling fragments ahead until horizon is full
-      if (hlsRef.current && forwardBufferSec < targetForwardHorizon) {
-        try {
-          hlsRef.current.startLoad(-1);
-        } catch {}
-      }
-
-      // DASH chunk loading engine: keep pulling representations and segments ahead
-      if (dashRef.current && forwardBufferSec < targetForwardHorizon) {
-        try {
-          (dashRef.current as any).preload?.();
-        } catch {}
-      }
-
       updateBuffered();
-    }, 250);
+    }, 500);
 
     return () => {
       isCancelled = true;
@@ -2771,6 +2729,19 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           setIsPlaying(false);
         }}
         onEnded={() => {
+          const vid = videoRef.current;
+          // Guard against false-alarm ended events if network stream stalled before reaching actual movie end
+          if (vid && vid.duration && !isNaN(vid.duration) && vid.duration > 10 && vid.currentTime < vid.duration - 5) {
+            console.warn('[VideoPlayer] Stalled stream fired premature ended event at', vid.currentTime, 'of', vid.duration);
+            if (hlsRef.current) {
+              try { hlsRef.current.startLoad(); } catch {}
+            }
+            setIsBuffering(true);
+            setTimeout(() => {
+              if (videoRef.current) videoRef.current.play().catch(() => {});
+            }, 500);
+            return;
+          }
           setIsPlaying(false);
           if (onEnded) onEnded();
         }}

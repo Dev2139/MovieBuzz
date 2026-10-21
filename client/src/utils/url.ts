@@ -25,6 +25,10 @@ export const getCloudflareProxyUrl = (): string =>
 export const wrapStreamWithCloudflare = (rawUrl?: string): string => {
   if (!rawUrl) return '';
   const resolved = resolveMediaUrl(rawUrl);
+  // Never route local development servers through external Cloudflare worker (worker cannot reach localhost)
+  if (resolved.includes('localhost') || resolved.includes('127.0.0.1')) {
+    return resolved;
+  }
   const cfProxy = getCloudflareProxyUrl()?.trim().replace(/\/+$/, '');
   if (!cfProxy) return resolved;
 

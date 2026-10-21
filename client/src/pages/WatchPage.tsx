@@ -329,14 +329,21 @@ export const WatchPage: React.FC = () => {
         (!episodeId || (h.episodeId && (h.episodeId._id === episodeId || h.episodeId === episodeId)))
     );
     if (match && match.progress > 0) {
-      initialPos = match.progress;
+      // If user was within 20 seconds of the end or > 95% finished, start fresh from 0
+      const isNearEnd = match.duration > 0 && (match.progress >= match.duration - 20 || match.progress / match.duration > 0.95);
+      if (!isNearEnd) {
+        initialPos = match.progress;
+      }
     }
   }
 
   if (!initialPos && contentId) {
     const localSavedItem = getLocalPlaybackItem(contentId, episodeId);
     if (localSavedItem && localSavedItem.position > 0) {
-      initialPos = localSavedItem.position;
+      const isNearEnd = localSavedItem.duration > 0 && (localSavedItem.position >= localSavedItem.duration - 20 || localSavedItem.position / localSavedItem.duration > 0.95);
+      if (!isNearEnd) {
+        initialPos = localSavedItem.position;
+      }
     }
   }
 
