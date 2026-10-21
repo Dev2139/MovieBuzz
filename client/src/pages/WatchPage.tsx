@@ -196,6 +196,9 @@ export const WatchPage: React.FC = () => {
 
   // High-Speed Direct Sources with stable memoization (Telegram First, MovieBox Fallback)
   const effectiveMediaList: any[] = React.useMemo(() => {
+    const list: any[] = [];
+    const seenUrls = new Set<string>();
+
     // 1. TIER 1 (Primary): Stored Telegram Media from our database, routed via Cloudflare
     const catalogMedia = isMovie ? movieData?.media : seriesData?.media;
     if (catalogMedia && Array.isArray(catalogMedia) && catalogMedia.length > 0) {
@@ -204,14 +207,15 @@ export const WatchPage: React.FC = () => {
         return Boolean(url && (m?.provider === 'telegram' || url.includes('/proxy-file/') || m?.providerMediaId));
       });
 
-      if (telegramMedia.length > 0) {
-        return telegramMedia.map((m: any, idx: number) => {
-          const directUrl = m.streamUrl || m.downloadUrl || '';
-          const streamUrl = wrapStreamWithCloudflare(directUrl);
-          const dlUrl = getDownloadUrl(m, contentTitle);
-          const qualityLabel = m.quality || '1080p';
+      telegramMedia.forEach((m: any, idx: number) => {
+        const directUrl = m.streamUrl || m.downloadUrl || '';
+        const streamUrl = wrapStreamWithCloudflare(directUrl);
+        const dlUrl = getDownloadUrl(m, contentTitle);
+        const qualityLabel = m.quality || '1080p';
 
-          return {
+        if (streamUrl && !seenUrls.has(streamUrl)) {
+          seenUrls.add(streamUrl);
+          list.push({
             _id: m._id || `tg-${m.providerMediaId || idx}`,
             quality: `${qualityLabel} • Telegram HD (Cloudflare Edge)`,
             resolution: m.resolution || qualityLabel,
@@ -226,53 +230,66 @@ export const WatchPage: React.FC = () => {
             audioLang: 'en',
             audioName: 'Original Audio',
             isOriginal: true,
-          };
-        });
-      }
+          });
+        }
+      });
 
       // Any other direct media in catalog
-      const otherDirect = catalogMedia.filter((m: any) => Boolean(m?.streamUrl || m?.downloadUrl));
-      if (otherDirect.length > 0) {
-        return otherDirect.map((m: any) => ({
-          _id: m._id,
-          quality: m.quality || 'HD',
-          resolution: m.resolution || 'Auto',
-          fileSize: m.fileSize || 'Standard',
-          codecName: 'auto',
-          mimeType: m.mimeType || 'video/mp4',
-          format: 'MP4',
-          provider: m.provider || 'direct',
-          streamUrl: wrapStreamWithCloudflare(m.streamUrl),
-          downloadUrl: m.downloadUrl || m.streamUrl,
-          audioLang: 'en',
-          audioName: 'Original Audio',
-          isOriginal: true,
-        }));
-      }
+      const otherDirect = catalogMedia.filter((m: any) => {
+        const url: string = m?.streamUrl || m?.downloadUrl || '';
+        return Boolean(url && m?.provider !== 'telegram' && !url.includes('/proxy-file/'));
+      });
+      otherDirect.forEach((m: any) => {
+        const sUrl = wrapStreamWithCloudflare(m.streamUrl);
+        if (sUrl && !seenUrls.has(sUrl)) {
+          seenUrls.add(sUrl);
+          list.push({
+            _id: m._id,
+            quality: m.quality || 'HD',
+            resolution: m.resolution || 'Auto',
+            fileSize: m.fileSize || 'Standard',
+            codecName: 'auto',
+            mimeType: m.mimeType || 'video/mp4',
+            format: 'MP4',
+            provider: m.provider || 'direct',
+            streamUrl: sUrl,
+            downloadUrl: m.downloadUrl || m.streamUrl,
+            audioLang: 'en',
+            audioName: 'Original Audio',
+            isOriginal: true,
+          });
+        }
+      });
     }
 
-    // 2. TIER 2 (Secondary Fallback): MovieBox / embed scrapers if title is not on Telegram
+    // 2. TIER 2 (Secondary Fallback): MovieBox / embed scrapers (DASH / HLS / MP4)
     if (movieboxData?.sources && movieboxData.sources.length > 0) {
-      return movieboxData.sources.map((s: any) => ({
-        _id: `src-${s.resourceId || s.quality}`,
-        quality: s.quality,
-        resolution: s.resolution,
-        fileSize: s.fileSize,
-        codecName: s.codecName,
-        mimeType: s.format === 'DASH' ? 'application/dash+xml' : (s.mimeType || 'video/mp4'),
-        format: s.format || 'MP4',
-        provider: 'cinestream',
-        providerMediaId: s.resourceId,
-        streamUrl: s.streamUrl,
-        downloadUrl: s.streamUrl,
-        audioLang: s.audioLang || 'en',
-        audioName: s.audioName || 'Original Audio',
-        dubSubjectId: s.dubSubjectId,
-        isOriginal: s.isOriginal,
-      }));
+      movieboxData.sources.forEach((s: any) => {
+        const sUrl = s.streamUrl;
+        if (sUrl && !seenUrls.has(sUrl)) {
+          seenUrls.add(sUrl);
+          list.push({
+            _id: `src-${s.resourceId || s.quality}`,
+            quality: s.quality,
+            resolution: s.resolution,
+            fileSize: s.fileSize,
+            codecName: s.codecName,
+            mimeType: s.format === 'DASH' ? 'application/dash+xml' : (s.mimeType || 'video/mp4'),
+            format: s.format || 'MP4',
+            provider: 'cinestream',
+            providerMediaId: s.resourceId,
+            streamUrl: sUrl,
+            downloadUrl: sUrl,
+            audioLang: s.audioLang || 'en',
+            audioName: s.audioName || 'Original Audio',
+            dubSubjectId: s.dubSubjectId,
+            isOriginal: s.isOriginal,
+          });
+        }
+      });
     }
 
-    return [];
+    return list;
   }, [movieData?.media, seriesData?.media, movieboxData?.sources, isMovie, contentTitle]);
 
   // Subtitles Query (resolves multi-language WebVTT tracks)
@@ -376,6 +393,7 @@ export const WatchPage: React.FC = () => {
           </div>
         ) : effectiveMediaList.length > 0 ? (
           <VideoPlayer
+            key={`${contentId || 'stream'}-${episodeId || (isSeries ? `${season}-${episode}` : 'movie')}`}
             mediaList={effectiveMediaList}
             contentId={contentId}
             episodeId={episodeId}
