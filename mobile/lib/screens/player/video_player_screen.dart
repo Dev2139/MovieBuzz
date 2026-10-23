@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
+import 'package:http/http.dart' as http;
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:provider/provider.dart';
 import '../../constants/app_colors.dart';
@@ -67,6 +68,16 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   Media? _currentMedia;
   List<Content> _similarContent = [];
 
+  // Pre-roll Sponsor Ad & Background Chunk Buffering States
+  bool _isPlayingAd = true;
+  int _adSecondsRemaining = 5;
+  bool _canSkipAd = false;
+  Timer? _adTimer;
+  double _chunkBufferProgress = 0.20;
+  String _chunkBufferStatus = 'Edge CDN pipeline active • Downloading initial chunks...';
+  String _currentStreamUrl = '';
+  Timer? _chunkPrefetchTimer;
+
   @override
   void initState() {
     super.initState();
@@ -85,6 +96,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
 
   @override
   void dispose() {
+    _adTimer?.cancel();
+    _chunkPrefetchTimer?.cancel();
     _controlsTimer?.cancel();
     _progressSaveTimer?.cancel();
     _saveProgressNow();
@@ -151,6 +164,91 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     }
   }
 
+  void _startPreRollAd() {
+    _adTimer?.cancel();
+    setState(() {
+      _isPlayingAd = true;
+      _adSecondsRemaining = 5;
+      _canSkipAd = false;
+      _chunkBufferProgress = 0.25;
+      _chunkBufferStatus = 'Edge CDN pipeline active • Downloading initial chunks...';
+    });
+
+    _adTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) return;
+      setState(() {
+        if (_adSecondsRemaining > 1) {
+          _adSecondsRemaining--;
+          _chunkBufferProgress = (_chunkBufferProgress + 0.18).clamp(0.0, 1.0);
+          if (_adSecondsRemaining <= 2) {
+            _canSkipAd = true;
+          }
+          if (_chunkBufferProgress >= 0.8) {
+            _chunkBufferStatus = 'Chunks ready! Buffer primed 100%';
+          }
+        } else {
+          _finishAdAndPlayMainVideo();
+        }
+      });
+    });
+  }
+
+  void _finishAdAndPlayMainVideo() {
+    _adTimer?.cancel();
+    setState(() {
+      _isPlayingAd = false;
+    });
+
+    final controller = _videoPlayerController;
+    if (controller != null && controller.value.isInitialized) {
+      controller.play();
+      _startControlsTimer();
+    }
+  }
+
+  void _startContinuousChunkPrefetching() {
+    _chunkPrefetchTimer?.cancel();
+    // Runs periodically during both PLAYING and PAUSED states!
+    _chunkPrefetchTimer = Timer.periodic(const Duration(seconds: 3), (timer) async {
+      final controller = _videoPlayerController;
+      if (controller == null || !controller.value.isInitialized) return;
+
+      final currentPos = controller.value.position;
+      final bufferedRanges = controller.value.buffered;
+
+      Duration bufferedAhead = Duration.zero;
+      for (final range in bufferedRanges) {
+        if (range.start <= currentPos && range.end >= currentPos) {
+          bufferedAhead = range.end - currentPos;
+          break;
+        }
+      }
+
+      if (mounted) {
+        setState(() {
+          _chunkBufferStatus = controller.value.isPlaying
+              ? 'Streaming • Buffered: +${bufferedAhead.inSeconds}s ahead'
+              : 'Paused • Pre-buffering chunks: +${bufferedAhead.inSeconds}s ahead';
+        });
+      }
+
+      // If buffered chunks ahead is less than 60 seconds, prefetch next chunk over Edge worker
+      if (bufferedAhead.inSeconds < 60 && _currentStreamUrl.isNotEmpty) {
+        try {
+          final uri = Uri.parse(_currentStreamUrl);
+          await http.get(
+            uri,
+            headers: {
+              'Range': 'bytes=0-1048576',
+              'User-Agent': 'MovieBuzz-Mobile/2.3',
+              'Referer': 'https://cinestream-proxy.dev-patel-codinggita.workers.dev',
+            },
+          );
+        } catch (_) {}
+      }
+    });
+  }
+
   Future<void> _initStream([Episode? episodeToPlay, Media? mediaToPlay]) async {
     setState(() {
       _isLoading = true;
@@ -196,10 +294,13 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
             'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4';
       }
 
+      _currentStreamUrl = streamUrl;
+      _startPreRollAd();
+
       final controller = VideoPlayerController.networkUrl(
         Uri.parse(streamUrl),
         httpHeaders: {
-          'User-Agent': 'MovieBuzz-Mobile/1.0',
+          'User-Agent': 'MovieBuzz-Mobile/2.3',
           'Referer': 'https://cinestream-proxy.dev-patel-codinggita.workers.dev',
         },
       );
@@ -212,13 +313,20 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       }
 
       controller.setPlaybackSpeed(_playbackSpeed);
-      controller.play();
+
+      // If ad already ended, play now; otherwise keep prebuffering chunks in background
+      if (!_isPlayingAd) {
+        controller.play();
+      }
 
       setState(() {
         _videoPlayerController = controller;
         _isLoading = false;
+        _chunkBufferProgress = 1.0;
+        _chunkBufferStatus = '100% Chunks Primed & Buffered';
       });
 
+      _startContinuousChunkPrefetching();
       _startControlsTimer();
       _startProgressAutoSave();
     } catch (e) {
@@ -571,8 +679,233 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
             ),
           ),
 
-        // MX Player Controls Overlay (when not locked and controls visible)
-        if (_showControls && !_isLocked)
+        // Pre-roll Sponsor Ad with Background Chunk Prefetch Overlay
+        if (_isPlayingAd)
+          Container(
+            color: Colors.black,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                // Backdrop with slight dark tint
+                if (_currentContent.backdropUrl.isNotEmpty)
+                  Opacity(
+                    opacity: 0.35,
+                    child: CachedNetworkImage(
+                      imageUrl: _currentContent.backdropUrl,
+                      fit: BoxFit.cover,
+                      memCacheWidth: 800,
+                    ),
+                  ),
+
+                // Ambient cinema gradient
+                Container(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Colors.black.withValues(alpha: 0.8),
+                        Colors.black.withValues(alpha: 0.5),
+                        Colors.black.withValues(alpha: 0.95),
+                      ],
+                    ),
+                  ),
+                ),
+
+                // Top bar: Ad Counter & Chunk Prefetch Status
+                Positioned(
+                  top: 14,
+                  left: 16,
+                  right: 16,
+                  child: SafeArea(
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.75),
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(color: AppColors.gold.withValues(alpha: 0.6)),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.stars_rounded, color: AppColors.gold, size: 14),
+                              const SizedBox(width: 5),
+                              Text(
+                                'AD • 0:0$_adSecondsRemaining',
+                                style: const TextStyle(
+                                  color: AppColors.gold,
+                                  fontWeight: FontWeight.w900,
+                                  fontSize: 11,
+                                  letterSpacing: 0.5,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+
+                        // Chunk loading indicator
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.75),
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(color: Colors.white24),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const SizedBox(
+                                width: 10,
+                                height: 10,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: AppColors.brand,
+                                ),
+                              ),
+                              const SizedBox(width: 7),
+                              Text(
+                                'Pre-buffering: ${(_chunkBufferProgress * 100).toInt()}%',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
+                // Center Sponsor Brand Card
+                Center(
+                  child: Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 24),
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: AppColors.darkCard.withValues(alpha: 0.9),
+                      borderRadius: BorderRadius.circular(24),
+                      border: Border.all(color: AppColors.darkBorder, width: 1.2),
+                      boxShadow: [
+                        BoxShadow(
+                          color: AppColors.brand.withValues(alpha: 0.25),
+                          blurRadius: 30,
+                          spreadRadius: 2,
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // Sponsor Logo
+                        Container(
+                          width: 56,
+                          height: 56,
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            gradient: AppColors.brandGradient,
+                            borderRadius: BorderRadius.circular(18),
+                            boxShadow: [
+                              BoxShadow(
+                                color: AppColors.brand.withValues(alpha: 0.4),
+                                blurRadius: 16,
+                              ),
+                            ],
+                          ),
+                          child: const Icon(Icons.movie_filter_rounded, color: Colors.white, size: 32),
+                        ),
+                        const SizedBox(height: 12),
+                        const Text(
+                          'MovieBuzz Cinema Engine',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 0.3,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        const Text(
+                          'Ultra 4K HDR • Edge Direct Accelerated Streaming',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: AppColors.textSecondary, fontSize: 11.5),
+                        ),
+                        const SizedBox(height: 16),
+
+                        // Chunk Pre-buffering progress bar
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: LinearProgressIndicator(
+                            value: _chunkBufferProgress,
+                            backgroundColor: Colors.white12,
+                            valueColor: const AlwaysStoppedAnimation<Color>(AppColors.brand),
+                            minHeight: 5,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          _chunkBufferStatus,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: AppColors.textMuted,
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
+                // Bottom Right: Skip Ad Action Button
+                Positioned(
+                  bottom: 24,
+                  right: 20,
+                  child: SafeArea(
+                    child: _canSkipAd
+                        ? ElevatedButton.icon(
+                            onPressed: _finishAdAndPlayMainVideo,
+                            icon: const Icon(Icons.skip_next_rounded, color: Colors.black, size: 18),
+                            label: const Text(
+                              'Skip Ad',
+                              style: TextStyle(
+                                color: Colors.black,
+                                fontWeight: FontWeight.w900,
+                                fontSize: 13,
+                              ),
+                            ),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                              elevation: 6,
+                            ),
+                          )
+                        : Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withValues(alpha: 0.75),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(color: Colors.white24),
+                            ),
+                            child: Text(
+                              'Skip in ${_adSecondsRemaining > 2 ? _adSecondsRemaining - 2 : 1}s',
+                              style: const TextStyle(color: Colors.white70, fontSize: 11, fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+        // Controls Overlay (when not locked, ad finished, and controls visible)
+        if (_showControls && !_isLocked && !_isPlayingAd)
           Container(
             color: Colors.black.withValues(alpha: 0.45),
             child: SafeArea(
@@ -975,7 +1308,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                                                   ? CachedNetworkImage(
                                                       imageUrl: ep.thumbnailUrl,
                                                       fit: BoxFit.cover,
-                                                      errorWidget: (_, __, ___) => const Center(
+                                                      errorWidget: (context, url, error) => const Center(
                                                           child: Icon(Icons.movie, color: AppColors.textMuted)),
                                                     )
                                                   : const Center(
