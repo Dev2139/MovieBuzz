@@ -44,6 +44,7 @@ class _HeroBannerState extends State<HeroBanner> {
           height: 460,
           child: PageView.builder(
             controller: _pageController,
+            physics: const BouncingScrollPhysics(),
             itemCount: widget.items.length,
             onPageChanged: (index) => setState(() => _currentPage = index),
             itemBuilder: (context, index) {
@@ -89,6 +90,9 @@ class _HeroBannerState extends State<HeroBanner> {
                                   imageUrl: imageUrl,
                                   fit: BoxFit.cover,
                                   alignment: Alignment.topCenter,
+                                  memCacheWidth: 900,
+                                  maxWidthDiskCache: 1400,
+                                  fadeInDuration: const Duration(milliseconds: 250),
                                   placeholder: (context, url) => Container(color: AppColors.darkCard),
                                   errorWidget: (context, url, error) => Container(color: AppColors.darkCard),
                                 )

@@ -88,6 +88,7 @@ class _MoviesScreenState extends State<MoviesScreen> {
             SizedBox(
               height: 44,
               child: ListView.builder(
+                physics: const BouncingScrollPhysics(),
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                 scrollDirection: Axis.horizontal,
                 itemCount: _genres.length + 1,
@@ -141,6 +142,7 @@ class _MoviesScreenState extends State<MoviesScreen> {
           Expanded(
             child: _isLoading
                 ? GridView.builder(
+                    physics: const BouncingScrollPhysics(),
                     padding: const EdgeInsets.all(16),
                     gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                       crossAxisCount: 3,
@@ -177,6 +179,7 @@ class _MoviesScreenState extends State<MoviesScreen> {
                         color: AppColors.brand,
                         onRefresh: _loadData,
                         child: CustomScrollView(
+                          physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
                           slivers: [
                             // Netflix Billboard Header for Featured Movie
                             if (billboard != null && _selectedGenre == null)
@@ -203,6 +206,9 @@ class _MoviesScreenState extends State<MoviesScreen> {
                                               ? CachedNetworkImage(
                                                   imageUrl: billboard.backdropUrl,
                                                   fit: BoxFit.cover,
+                                                  memCacheWidth: 900,
+                                                  maxWidthDiskCache: 1400,
+                                                  fadeInDuration: const Duration(milliseconds: 250),
                                                 )
                                               : Container(color: AppColors.darkCard),
                                           Container(

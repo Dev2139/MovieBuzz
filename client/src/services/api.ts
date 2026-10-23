@@ -657,4 +657,52 @@ export const fetchSubscriberPurchasesApi = async (userId: string) => {
   return res.data;
 };
 
+// ---------- APP UPDATE & BROADCAST NOTIFICATIONS ----------
+
+export interface AppUpdateItem {
+  _id?: string;
+  version: string;
+  versionCode: number;
+  title: string;
+  changelog: string;
+  downloadUrl: string;
+  apkSize: string;
+  isMandatory: boolean;
+  isActive: boolean;
+  usersNotifiedCount: number;
+  createdAt: string;
+}
+
+export const fetchLatestAppUpdateApi = async () => {
+  const res = await api.get<AppUpdateItem>('/app-updates/latest');
+  return res.data;
+};
+
+export const fetchAdminAppUpdatesApi = async () => {
+  const res = await api.get<{ updates: AppUpdateItem[]; totalUsers: number }>('/admin/app-updates');
+  return res.data;
+};
+
+export const createAdminAppUpdateApi = async (data: {
+  version: string;
+  versionCode?: number;
+  title: string;
+  changelog: string;
+  downloadUrl?: string;
+  apkSize?: string;
+  isMandatory?: boolean;
+  broadcastNotification?: boolean;
+}) => {
+  const res = await api.post<{ message: string; update: AppUpdateItem; notifiedCount: number }>(
+    '/admin/app-updates',
+    data
+  );
+  return res.data;
+};
+
+export const deleteAdminAppUpdateApi = async (id: string) => {
+  const res = await api.delete<{ message: string }>(`/admin/app-updates/${id}`);
+  return res.data;
+};
+
 

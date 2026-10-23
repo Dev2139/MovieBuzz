@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { usePWA } from '../context/PWAContext';
+import { fetchLatestAppUpdateApi } from '../services/api';
 import {
   X,
   Download,
@@ -10,17 +12,30 @@ import {
   QrCode,
   ExternalLink,
   Info,
+  Sparkles,
 } from 'lucide-react';
 
 export const InstallModal: React.FC = () => {
   const { showInstallModal, setShowInstallModal, downloadApk, apkDownloadUrl } = usePWA();
   const [showQr, setShowQr] = useState(false);
 
+  const { data: appUpdate } = useQuery({
+    queryKey: ['latest-app-update'],
+    queryFn: fetchLatestAppUpdateApi,
+    staleTime: 5 * 60 * 1000,
+  });
+
   if (!showInstallModal) return null;
+
+  const version = appUpdate?.version ? `v${appUpdate.version}` : 'v2.2.0';
+  const apkSize = appUpdate?.apkSize || '55 MB';
+  const effectiveDownloadUrl = appUpdate?.downloadUrl || apkDownloadUrl;
 
   // Build full APK URL for QR code
   const fullApkUrl = typeof window !== 'undefined'
-    ? `${window.location.origin}${apkDownloadUrl}`
+    ? (effectiveDownloadUrl.startsWith('http')
+        ? effectiveDownloadUrl
+        : `${window.location.origin}${effectiveDownloadUrl}`)
     : 'https://moviebuzz.vercel.app/moviebuzz.apk';
 
   const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(fullApkUrl)}`;
@@ -61,12 +76,25 @@ export const InstallModal: React.FC = () => {
             </h3>
             <div className="flex items-center gap-2 mt-1 flex-wrap">
               <span className="text-[10px] bg-emerald-500/20 text-emerald-400 font-extrabold px-2 py-0.5 rounded-full border border-emerald-500/30">
-                OFFICIAL APK
+                {version} LATEST
               </span>
-              <span className="text-xs text-gray-400">Universal Android • 55 MB</span>
+              <span className="text-xs text-gray-400">Universal Android • {apkSize}</span>
             </div>
           </div>
         </div>
+
+        {/* What's New Pill if Changelog available */}
+        {appUpdate?.changelog && (
+          <div className="bg-gradient-to-r from-brand-950/40 via-dark-surface to-dark-surface border border-brand-500/30 rounded-2xl p-3.5 mb-4 space-y-1.5">
+            <div className="flex items-center space-x-2 text-xs font-bold text-brand-400">
+              <Sparkles className="w-4 h-4" />
+              <span>What's New in {version}</span>
+            </div>
+            <p className="text-[11px] text-gray-300 leading-relaxed whitespace-pre-line pl-1">
+              {appUpdate.changelog}
+            </p>
+          </div>
+        )}
 
         {/* Highlight Perks Grid (Clean & Authentic) */}
         <div className="grid grid-cols-2 gap-2.5 mb-5">
@@ -102,15 +130,17 @@ export const InstallModal: React.FC = () => {
 
         {/* Primary Download Action Button */}
         <div className="space-y-3 mb-5">
-          <button
+          <a
+            href={effectiveDownloadUrl}
+            download="moviebuzz.apk"
             onClick={() => {
               downloadApk();
             }}
             className="w-full flex items-center justify-center space-x-2.5 py-3.5 bg-gradient-to-r from-brand-500 via-red-600 to-amber-600 hover:from-brand-600 hover:to-red-700 text-white font-extrabold text-sm sm:text-base rounded-2xl shadow-xl shadow-brand-500/30 transition-all transform hover:scale-[1.01] active:scale-[0.98]"
           >
             <Download className="w-5 h-5 flex-shrink-0" />
-            <span>Download Android App (.APK) — 55 MB</span>
-          </button>
+            <span>Download {version} APK ({apkSize})</span>
+          </a>
 
           <div className="flex items-center justify-between px-1">
             <button

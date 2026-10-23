@@ -39,8 +39,11 @@ class ContentCard extends StatelessWidget {
                   ? CachedNetworkImage(
                       imageUrl: content.posterUrl,
                       fit: BoxFit.cover,
-                      placeholder: (_, __) => const ShimmerBox(width: double.infinity, height: double.infinity),
-                      errorWidget: (_, __, ___) => Center(
+                      memCacheWidth: 350,
+                      maxWidthDiskCache: 600,
+                      fadeInDuration: const Duration(milliseconds: 180),
+                      placeholder: (context, url) => const ShimmerBox(width: double.infinity, height: double.infinity),
+                      errorWidget: (context, url, error) => Center(
                         child: Icon(
                           content.isSeries ? Icons.tv : Icons.movie,
                           color: AppColors.textMuted,

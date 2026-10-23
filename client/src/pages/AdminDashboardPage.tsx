@@ -46,11 +46,13 @@ import {
   Crown,
   UserX,
   Wallet,
+  Smartphone,
 } from 'lucide-react';
+import { AdminAppUpdatesTab } from '../components/admin/AdminAppUpdatesTab';
 
 export const AdminDashboardPage: React.FC = () => {
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState<'overview' | 'manage' | 'requests' | 'users' | 'redemptions' | 'subscribers' | 'add-movie' | 'add-series'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'manage' | 'requests' | 'users' | 'redemptions' | 'subscribers' | 'add-movie' | 'add-series' | 'app-updates'>('overview');
 
   // Stats query
   const { data: stats } = useQuery({
@@ -391,6 +393,7 @@ export const AdminDashboardPage: React.FC = () => {
           { id: 'requests', label: `User Requests (${stats?.pendingRequests || 0})` },
           { id: 'redemptions', label: 'CineCoins Redemptions' },
           { id: 'subscribers', label: `Premium Members (${subscribersData?.subscribers?.length ?? 0})` },
+          { id: 'app-updates', label: '📱 App Updates & Broadcast' },
           { id: 'manage', label: `Manage Catalog (${catalog?.total || 0})` },
           { id: 'add-movie', label: 'Add New Movie' },
           { id: 'add-series', label: 'Add New Series' },
@@ -1628,6 +1631,9 @@ export const AdminDashboardPage: React.FC = () => {
           )}
         </div>
       )}
+
+      {/* App Updates & Broadcast Notifications Tab */}
+      {activeTab === 'app-updates' && <AdminAppUpdatesTab />}
 
       {/* Edit Content Modal */}
       {editingItem && (

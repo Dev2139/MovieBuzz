@@ -29,6 +29,7 @@ import requestRoutes from './routes/requestRoutes';
 import notificationRoutes from './routes/notificationRoutes';
 import streamingRoutes from './routes/streamingRoutes';
 import recommendationRoutes from './routes/recommendationRoutes';
+import appUpdateRoutes from './routes/appUpdateRoutes';
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -108,6 +109,7 @@ app.use((req, res, next) => {
       req.url.startsWith('/requests') ||
       req.url.startsWith('/notifications') ||
       req.url.startsWith('/recommendations') ||
+      req.url.startsWith('/app-updates') ||
       req.url.startsWith('/admin') ||
       req.url.startsWith('/genres') ||
       req.url.startsWith('/search'))
@@ -129,6 +131,7 @@ app.use('/api/requests', requestRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/streaming', streamingRoutes);
 app.use('/api/recommendations', recommendationRoutes);
+app.use('/api/app-updates', appUpdateRoutes);
 
 // Direct Native Flutter Android App Download Endpoint
 app.get(['/api/app/download', '/api/download/app', '/download/moviebuzz.apk', '/moviebuzz.apk'], (req, res) => {

@@ -32,7 +32,6 @@ class _ContentDetailScreenState extends State<ContentDetailScreen> {
   List<Season> _seasons = [];
   List<Episode> _episodes = [];
   Season? _selectedSeason;
-  bool _isLoadingDetails = true;
   bool _isLoadingEpisodes = false;
 
   @override
@@ -42,14 +41,12 @@ class _ContentDetailScreenState extends State<ContentDetailScreen> {
   }
 
   Future<void> _loadContentDetails() async {
-    setState(() => _isLoadingDetails = true);
     try {
       if (widget.content.isMovie) {
         // Fetch media streams for movie
         final details = await _api.getContentBySlug(widget.content.slug);
         setState(() {
           _mediaList = details['media'] as List<Media>;
-          _isLoadingDetails = false;
         });
 
         if (widget.autoPlay && _mediaList.isNotEmpty) {
@@ -63,16 +60,13 @@ class _ContentDetailScreenState extends State<ContentDetailScreen> {
           if (_seasons.isNotEmpty) {
             _selectedSeason = _seasons.first;
           }
-          _isLoadingDetails = false;
         });
 
         if (_selectedSeason != null) {
           _loadEpisodesForSeason(_selectedSeason!.id);
         }
       }
-    } catch (_) {
-      setState(() => _isLoadingDetails = false);
-    }
+    } catch (_) {}
   }
 
   Future<void> _loadEpisodesForSeason(String seasonId) async {
@@ -129,6 +123,7 @@ class _ContentDetailScreenState extends State<ContentDetailScreen> {
     return Scaffold(
       backgroundColor: AppColors.darkBase,
       body: CustomScrollView(
+        physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
         slivers: [
           // Collapsible Backdrop Banner
           SliverAppBar(
@@ -139,7 +134,7 @@ class _ContentDetailScreenState extends State<ContentDetailScreen> {
               icon: Container(
                 padding: const EdgeInsets.all(6),
                 decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.55),
+                  color: Colors.black.withValues(alpha: 0.55),
                   shape: BoxShape.circle,
                 ),
                 child: const Icon(Icons.arrow_back, color: Colors.white, size: 20),
@@ -154,6 +149,9 @@ class _ContentDetailScreenState extends State<ContentDetailScreen> {
                       ? CachedNetworkImage(
                           imageUrl: backdrop,
                           fit: BoxFit.cover,
+                          memCacheWidth: 900,
+                          maxWidthDiskCache: 1400,
+                          fadeInDuration: const Duration(milliseconds: 250),
                           placeholder: (_, __) => Container(color: AppColors.darkCard),
                           errorWidget: (_, __, ___) => Container(color: AppColors.darkCard),
                         )
@@ -188,11 +186,11 @@ class _ContentDetailScreenState extends State<ContentDetailScreen> {
                       child: Container(
                         padding: const EdgeInsets.all(16),
                         decoration: BoxDecoration(
-                          color: AppColors.brand.withOpacity(0.9),
+                          color: AppColors.brand.withValues(alpha: 0.9),
                           shape: BoxShape.circle,
                           boxShadow: [
                             BoxShadow(
-                              color: AppColors.brand.withOpacity(0.5),
+                              color: AppColors.brand.withValues(alpha: 0.5),
                               blurRadius: 20,
                               spreadRadius: 2,
                             ),
@@ -505,6 +503,9 @@ class _ContentDetailScreenState extends State<ContentDetailScreen> {
                                               ? CachedNetworkImage(
                                                   imageUrl: epThumbnail,
                                                   fit: BoxFit.cover,
+                                                  memCacheWidth: 260,
+                                                  maxWidthDiskCache: 500,
+                                                  fadeInDuration: const Duration(milliseconds: 180),
                                                   placeholder: (_, __) =>
                                                       const ShimmerBox(width: 110, height: 65),
                                                   errorWidget: (_, __, ___) => const Center(
@@ -520,7 +521,7 @@ class _ContentDetailScreenState extends State<ContentDetailScreen> {
                                         Container(
                                           padding: const EdgeInsets.all(4),
                                           decoration: BoxDecoration(
-                                            color: Colors.black.withOpacity(0.6),
+                                            color: Colors.black.withValues(alpha: 0.6),
                                             shape: BoxShape.circle,
                                           ),
                                           child: const Icon(

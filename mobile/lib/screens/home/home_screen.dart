@@ -12,6 +12,8 @@ import '../movies/movies_screen.dart';
 import '../series/series_screen.dart';
 import '../requests/requests_screen.dart';
 import '../profile/profile_screen.dart';
+import '../../services/api_service.dart';
+import '../../widgets/app_update_dialog.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -38,7 +40,21 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       Provider.of<ContentProvider>(context, listen: false).loadHomeFeed();
+      _checkForAppUpdate();
     });
+  }
+
+  Future<void> _checkForAppUpdate() async {
+    try {
+      final update = await ApiService().getLatestAppUpdate();
+      if (update != null && mounted) {
+        final serverVersion = update['version'] as String? ?? '';
+        // If server version is newer or update marked active, display update bottom sheet
+        if (serverVersion.isNotEmpty && serverVersion != '1.0.0') {
+          AppUpdateDialog.show(context, update);
+        }
+      }
+    } catch (_) {}
   }
 
   @override
@@ -59,6 +75,7 @@ class _HomeScreenState extends State<HomeScreen> {
             await contentProvider.loadHomeFeed();
           },
           child: CustomScrollView(
+            physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
             slivers: [
               // Distinctive MovieBuzz App Bar
               SliverAppBar(
@@ -188,6 +205,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 child: SizedBox(
                   height: 38,
                   child: ListView.builder(
+                    physics: const BouncingScrollPhysics(),
                     padding: const EdgeInsets.symmetric(horizontal: 16),
                     scrollDirection: Axis.horizontal,
                     itemCount: _categoryFilters.length,

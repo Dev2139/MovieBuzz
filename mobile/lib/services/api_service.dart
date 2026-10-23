@@ -447,4 +447,15 @@ class ApiService {
       throw Exception(data['message'] ?? 'Failed to submit request');
     }
   }
+
+  Future<Map<String, dynamic>?> getLatestAppUpdate() async {
+    try {
+      final url = _buildUri('/app-updates/latest');
+      final response = await http.get(url, headers: _headers());
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body) as Map<String, dynamic>;
+      }
+    } catch (_) {}
+    return null;
+  }
 }

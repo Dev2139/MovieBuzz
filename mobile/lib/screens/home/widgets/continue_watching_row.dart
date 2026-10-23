@@ -43,6 +43,7 @@ class ContinueWatchingRow extends StatelessWidget {
         SizedBox(
           height: 155,
           child: ListView.builder(
+            physics: const BouncingScrollPhysics(),
             padding: const EdgeInsets.symmetric(horizontal: 16),
             scrollDirection: Axis.horizontal,
             itemCount: items.length,
@@ -93,6 +94,9 @@ class ContinueWatchingRow extends StatelessWidget {
                                   ? CachedNetworkImage(
                                       imageUrl: imageUrl,
                                       fit: BoxFit.cover,
+                                      memCacheWidth: 380,
+                                      maxWidthDiskCache: 600,
+                                      fadeInDuration: const Duration(milliseconds: 180),
                                       placeholder: (context, url) => const ShimmerBox(
                                         width: 180,
                                         height: 104,

@@ -1,12 +1,23 @@
 import React, { useState, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { usePWA } from '../context/PWAContext';
-import { Download, X, HelpCircle } from 'lucide-react';
+import { fetchLatestAppUpdateApi } from '../services/api';
+import { Download, X, HelpCircle, Sparkles } from 'lucide-react';
 
 export const InstallBanner: React.FC = () => {
-  const { downloadApk, setShowInstallModal } = usePWA();
+  const { downloadApk, setShowInstallModal, apkDownloadUrl } = usePWA();
   const location = useLocation();
   const [dismissed, setDismissed] = useState(true);
+
+  const { data: appUpdate } = useQuery({
+    queryKey: ['latest-app-update'],
+    queryFn: fetchLatestAppUpdateApi,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const version = appUpdate?.version ? `v${appUpdate.version}` : 'v2.2.0';
+  const apkSize = appUpdate?.apkSize || '55 MB';
 
   useEffect(() => {
     // Check if dismissed recently (24 hours)
@@ -44,11 +55,11 @@ export const InstallBanner: React.FC = () => {
             <div className="flex items-center gap-2">
               <span className="text-sm font-bold text-white tracking-wide">Download Our Android App</span>
               <span className="text-[10px] bg-emerald-500/20 text-emerald-400 font-bold px-2 py-0.5 rounded-full border border-emerald-500/30">
-                OFFICIAL
+                {version}
               </span>
             </div>
             <p className="text-xs text-gray-300 truncate mt-0.5">
-              Direct universal APK • Fast & smooth streaming (55 MB)
+              Direct universal APK • Fast & smooth streaming ({apkSize})
             </p>
           </div>
         </div>

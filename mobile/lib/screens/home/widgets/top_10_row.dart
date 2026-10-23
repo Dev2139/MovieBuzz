@@ -122,6 +122,7 @@ class _Top10RowState extends State<Top10Row> {
           child: ListView.builder(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             scrollDirection: Axis.horizontal,
+            physics: const BouncingScrollPhysics(),
             itemCount: topItems.length,
             itemBuilder: (context, index) {
               final item = topItems[index];
@@ -159,6 +160,9 @@ class _Top10RowState extends State<Top10Row> {
                                 ? CachedNetworkImage(
                                     imageUrl: item.posterUrl,
                                     fit: BoxFit.cover,
+                                    memCacheWidth: 350,
+                                    maxWidthDiskCache: 600,
+                                    fadeInDuration: const Duration(milliseconds: 180),
                                     placeholder: (context, url) => Container(color: AppColors.darkCard),
                                     errorWidget: (context, url, error) => const Center(
                                       child: Icon(Icons.movie, color: AppColors.textMuted),

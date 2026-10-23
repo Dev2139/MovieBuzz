@@ -66,6 +66,7 @@ class ContentRow extends StatelessWidget {
           child: ListView.builder(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             scrollDirection: Axis.horizontal,
+            physics: const BouncingScrollPhysics(),
             itemCount: items.length,
             itemBuilder: (context, index) {
               return ContentCard(

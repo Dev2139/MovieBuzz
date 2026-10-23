@@ -32,6 +32,11 @@ import {
   adminExtendSubscription,
   adminSubscriberPurchases,
 } from '../controllers/coinsController';
+import {
+  getAdminAppUpdates,
+  createAppUpdate,
+  deleteAppUpdate,
+} from '../controllers/appUpdateController';
 import { authenticate, requireAdmin } from '../middleware/authMiddleware';
 
 const router = Router();
@@ -81,5 +86,10 @@ router.get('/subscribers', adminListSubscribers);
 router.get('/subscribers/:userId/purchases', adminSubscriberPurchases);
 router.post('/subscribers/:userId/cancel', adminCancelSubscription);
 router.post('/subscribers/:userId/extend', adminExtendSubscription);
+
+// App Updates & Broadcast Notifications
+router.get('/app-updates', getAdminAppUpdates);
+router.post('/app-updates', createAppUpdate);
+router.delete('/app-updates/:id', deleteAppUpdate);
 
 export default router;

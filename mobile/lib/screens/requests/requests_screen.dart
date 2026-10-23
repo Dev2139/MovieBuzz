@@ -260,6 +260,7 @@ class _RequestsScreenState extends State<RequestsScreen> {
                         color: AppColors.brand,
                         onRefresh: _loadRequests,
                         child: ListView.builder(
+                          physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
                           padding: const EdgeInsets.all(16),
                           itemCount: _requests.length,
                           itemBuilder: (context, index) {

@@ -164,6 +164,7 @@ class _SearchScreenState extends State<SearchScreen> {
           Expanded(
             child: _isLoading
                 ? GridView.builder(
+                    physics: const BouncingScrollPhysics(),
                     padding: const EdgeInsets.all(16),
                     gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                       crossAxisCount: 3,
@@ -202,6 +203,7 @@ class _SearchScreenState extends State<SearchScreen> {
                             ),
                           )
                         : GridView.builder(
+                            physics: const BouncingScrollPhysics(),
                             padding: const EdgeInsets.all(16),
                             gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                               crossAxisCount: 3,
@@ -251,6 +253,7 @@ class _SearchScreenState extends State<SearchScreen> {
   /// Netflix-style "Top Searches" vertical feed with thumbnail, title, and play button
   Widget _buildNetflixTopSearchesView() {
     return SingleChildScrollView(
+      physics: const BouncingScrollPhysics(),
       padding: const EdgeInsets.only(top: 14, bottom: 24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -339,6 +342,9 @@ class _SearchScreenState extends State<SearchScreen> {
                                 ? CachedNetworkImage(
                                     imageUrl: image,
                                     fit: BoxFit.cover,
+                                    memCacheWidth: 320,
+                                    maxWidthDiskCache: 600,
+                                    fadeInDuration: const Duration(milliseconds: 180),
                                   )
                                 : Container(color: Colors.black26),
                           ),

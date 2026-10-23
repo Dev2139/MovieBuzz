@@ -1,3 +1,4 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -16,7 +17,7 @@ void main() async {
     const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
       statusBarIconBrightness: Brightness.light,
-      systemNavigationBarColor: Color(0xFF121218),
+      systemNavigationBarColor: Color(0xFF0D0D14),
       systemNavigationBarIconBrightness: Brightness.light,
     ),
   );
@@ -25,6 +26,23 @@ void main() async {
   await StorageService.init();
 
   runApp(const MovieBuzzApp());
+}
+
+class SmoothScrollBehavior extends MaterialScrollBehavior {
+  const SmoothScrollBehavior();
+
+  @override
+  Set<PointerDeviceKind> get dragDevices => {
+        PointerDeviceKind.touch,
+        PointerDeviceKind.mouse,
+        PointerDeviceKind.trackpad,
+        PointerDeviceKind.stylus,
+      };
+
+  @override
+  ScrollPhysics getScrollPhysics(BuildContext context) {
+    return const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics());
+  }
 }
 
 class MovieBuzzApp extends StatelessWidget {
@@ -42,6 +60,7 @@ class MovieBuzzApp extends StatelessWidget {
         title: 'MovieBuzz',
         debugShowCheckedModeBanner: false,
         theme: AppTheme.darkTheme,
+        scrollBehavior: const SmoothScrollBehavior(),
         home: const MainScreen(),
       ),
     );
