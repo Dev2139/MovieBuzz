@@ -2,12 +2,11 @@ import React, { useState } from 'react';
 import { usePWA } from '../context/PWAContext';
 import {
   X,
-  Smartphone,
   Download,
   CheckCircle2,
   ShieldCheck,
   Zap,
-  Sliders,
+  Film,
   QrCode,
   ExternalLink,
   Info,
@@ -27,87 +26,89 @@ export const InstallModal: React.FC = () => {
   const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(fullApkUrl)}`;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-fade-in overflow-y-auto">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-md animate-fade-in overflow-y-auto">
       <div
-        className="relative w-full max-w-lg bg-dark-card border border-dark-border rounded-3xl p-6 sm:p-7 shadow-2xl overflow-hidden my-8"
+        className="relative w-full max-w-lg bg-dark-card border border-dark-border rounded-3xl p-5 sm:p-7 shadow-2xl overflow-hidden my-6"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Glow ambient background effect */}
         <div className="absolute -top-16 -right-16 w-44 h-44 bg-brand-500/20 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute -bottom-16 -left-16 w-44 h-44 bg-emerald-500/15 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute -bottom-16 -left-16 w-44 h-44 bg-amber-500/15 rounded-full blur-3xl pointer-events-none" />
 
         {/* Close Button */}
         <button
           onClick={() => setShowInstallModal(false)}
-          className="absolute top-5 right-5 p-2 text-gray-400 hover:text-white rounded-full hover:bg-dark-surface/80 transition-colors z-10"
+          className="absolute top-4 right-4 p-2 text-gray-400 hover:text-white rounded-full hover:bg-dark-surface/80 transition-colors z-20"
           aria-label="Close"
         >
           <X className="w-5 h-5" />
         </button>
 
         {/* App Logo & Header */}
-        <div className="flex items-center space-x-3.5 mb-5">
-          <div className="w-13 h-13 rounded-2xl bg-gradient-to-br from-brand-500 via-red-600 to-amber-600 p-0.5 shadow-xl shadow-brand-500/25 flex-shrink-0">
-            <div className="w-full h-full bg-dark-card rounded-2xl flex items-center justify-center">
-              <Smartphone className="w-6 h-6 text-brand-500" />
-            </div>
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h3 className="text-xl font-black text-white tracking-wide">
-                MovieBuzz for Android
-              </h3>
-              <span className="text-[10px] bg-brand-500/20 text-brand-400 font-extrabold px-2 py-0.5 rounded-full border border-brand-500/30">
-                FLUTTER
+        <div className="flex items-center space-x-3.5 mb-5 pr-10">
+          <img
+            src="/app-icon.png"
+            alt="MovieBuzz App Icon"
+            className="w-14 h-14 rounded-2xl shadow-xl shadow-brand-500/30 object-cover flex-shrink-0 border border-white/10"
+            onError={(e) => {
+              // Fallback if image load fails
+              (e.target as HTMLElement).style.display = 'none';
+            }}
+          />
+          <div className="min-w-0 flex-1">
+            <h3 className="text-lg sm:text-xl font-black text-white tracking-wide truncate">
+              Download Our Android App
+            </h3>
+            <div className="flex items-center gap-2 mt-1 flex-wrap">
+              <span className="text-[10px] bg-emerald-500/20 text-emerald-400 font-extrabold px-2 py-0.5 rounded-full border border-emerald-500/30">
+                OFFICIAL APK
               </span>
+              <span className="text-xs text-gray-400">Universal Android • 55 MB</span>
             </div>
-            <p className="text-xs text-gray-400 mt-0.5">
-              Direct Native App (APK) • Universal Build • 55 MB
-            </p>
           </div>
         </div>
 
-        {/* Highlight Perks Grid */}
-        <div className="grid grid-cols-2 gap-2.5 mb-6">
+        {/* Highlight Perks Grid (Clean & Authentic) */}
+        <div className="grid grid-cols-2 gap-2.5 mb-5">
           <div className="bg-dark-surface/70 border border-dark-border/80 rounded-xl p-3 flex items-start space-x-2.5">
-            <Sliders className="w-4 h-4 text-brand-400 flex-shrink-0 mt-0.5" />
+            <Film className="w-4 h-4 text-brand-400 flex-shrink-0 mt-0.5" />
             <div>
-              <p className="text-xs font-bold text-white">MX-Player Gestures</p>
-              <p className="text-[11px] text-gray-400 leading-tight mt-0.5">Double-tap 10s seek, swipe brightness & volume</p>
+              <p className="text-xs font-bold text-white">Cinema HD Streaming</p>
+              <p className="text-[11px] text-gray-400 leading-tight mt-0.5">Buffer-free 4K playback & Dolby audio</p>
             </div>
           </div>
           <div className="bg-dark-surface/70 border border-dark-border/80 rounded-xl p-3 flex items-start space-x-2.5">
             <Zap className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
             <div>
-              <p className="text-xs font-bold text-white">Edge CDN Acceleration</p>
-              <p className="text-[11px] text-gray-400 leading-tight mt-0.5">Cloudflare HLS streaming with instant start</p>
+              <p className="text-xs font-bold text-white">Edge Acceleration</p>
+              <p className="text-[11px] text-gray-400 leading-tight mt-0.5">Cloudflare high-speed direct stream</p>
             </div>
           </div>
           <div className="bg-dark-surface/70 border border-dark-border/80 rounded-xl p-3 flex items-start space-x-2.5">
             <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
             <div>
-              <p className="text-xs font-bold text-white">True Native Flutter</p>
-              <p className="text-[11px] text-gray-400 leading-tight mt-0.5">Zero browser lag, smooth 120Hz rendering</p>
+              <p className="text-xs font-bold text-white">Native Mobile App</p>
+              <p className="text-[11px] text-gray-400 leading-tight mt-0.5">Smooth, responsive 120Hz fluid UI</p>
             </div>
           </div>
           <div className="bg-dark-surface/70 border border-dark-border/80 rounded-xl p-3 flex items-start space-x-2.5">
             <ShieldCheck className="w-4 h-4 text-blue-400 flex-shrink-0 mt-0.5" />
             <div>
-              <p className="text-xs font-bold text-white">Safe & Direct</p>
+              <p className="text-xs font-bold text-white">Safe & Direct Install</p>
               <p className="text-[11px] text-gray-400 leading-tight mt-0.5">No Play Store account or login required</p>
             </div>
           </div>
         </div>
 
-        {/* Primary Action Button */}
-        <div className="space-y-3 mb-6">
+        {/* Primary Download Action Button */}
+        <div className="space-y-3 mb-5">
           <button
             onClick={() => {
               downloadApk();
             }}
-            className="w-full flex items-center justify-center space-x-2.5 py-3.5 bg-gradient-to-r from-brand-500 via-red-600 to-amber-600 hover:from-brand-600 hover:to-red-700 text-white font-extrabold text-sm rounded-2xl shadow-xl shadow-brand-500/30 transition-all transform hover:scale-[1.01] active:scale-[0.98]"
+            className="w-full flex items-center justify-center space-x-2.5 py-3.5 bg-gradient-to-r from-brand-500 via-red-600 to-amber-600 hover:from-brand-600 hover:to-red-700 text-white font-extrabold text-sm sm:text-base rounded-2xl shadow-xl shadow-brand-500/30 transition-all transform hover:scale-[1.01] active:scale-[0.98]"
           >
-            <Download className="w-5 h-5" />
+            <Download className="w-5 h-5 flex-shrink-0" />
             <span>Download Android App (.APK) — 55 MB</span>
           </button>
 
@@ -133,7 +134,7 @@ export const InstallModal: React.FC = () => {
 
         {/* Scan QR Code Section (Collapsible) */}
         {showQr && (
-          <div className="bg-dark-surface/90 border border-dark-border rounded-2xl p-4 mb-6 flex flex-col sm:flex-row items-center gap-4 text-center sm:text-left animate-fade-in">
+          <div className="bg-dark-surface/90 border border-dark-border rounded-2xl p-4 mb-5 flex flex-col sm:flex-row items-center gap-4 text-center sm:text-left animate-fade-in">
             <div className="bg-white p-2 rounded-xl shadow-md flex-shrink-0">
               <img
                 src={qrImageUrl}
@@ -151,7 +152,7 @@ export const InstallModal: React.FC = () => {
         )}
 
         {/* 3-Step Simple Installation Guide */}
-        <div className="bg-dark-surface/60 border border-dark-border/80 rounded-2xl p-4 space-y-3">
+        <div className="bg-dark-surface/60 border border-dark-border/80 rounded-2xl p-4 space-y-2.5">
           <div className="flex items-center space-x-2 text-xs font-bold text-gray-200">
             <Info className="w-4 h-4 text-brand-400" />
             <span>How to install in 3 easy steps</span>
@@ -180,7 +181,7 @@ export const InstallModal: React.FC = () => {
         </div>
 
         {/* Footer */}
-        <div className="mt-5 text-center">
+        <div className="mt-4 text-center">
           <button
             onClick={() => setShowInstallModal(false)}
             className="text-xs text-gray-400 hover:text-white transition-colors"

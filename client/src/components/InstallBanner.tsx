@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import { usePWA } from '../context/PWAContext';
-import { Download, X, Smartphone, HelpCircle } from 'lucide-react';
+import { Download, X, HelpCircle } from 'lucide-react';
 
 export const InstallBanner: React.FC = () => {
   const { downloadApk, setShowInstallModal } = usePWA();
@@ -33,20 +33,22 @@ export const InstallBanner: React.FC = () => {
 
   return (
     <div className="fixed bottom-16 md:bottom-6 right-4 left-4 sm:left-auto sm:right-6 sm:max-w-lg z-40 animate-slide-up">
-      <div className="bg-dark-card/95 backdrop-blur-xl border border-dark-border/90 rounded-2xl p-4 shadow-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-white ring-1 ring-white/10">
+      <div className="bg-dark-card/95 backdrop-blur-xl border border-dark-border/90 rounded-2xl p-3.5 sm:p-4 shadow-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-white ring-1 ring-white/10">
         <div className="flex items-center space-x-3 overflow-hidden">
-          <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-brand-500 via-red-600 to-amber-600 flex items-center justify-center flex-shrink-0 shadow-lg shadow-brand-500/25">
-            <Smartphone className="w-6 h-6 text-white" />
-          </div>
+          <img
+            src="/app-icon.png"
+            alt="MovieBuzz App Icon"
+            className="w-11 h-11 rounded-xl shadow-lg shadow-brand-500/25 object-cover flex-shrink-0 border border-white/10"
+          />
           <div className="truncate">
             <div className="flex items-center gap-2">
-              <span className="text-sm font-bold text-white tracking-wide">MovieBuzz Android App</span>
+              <span className="text-sm font-bold text-white tracking-wide">Download Our Android App</span>
               <span className="text-[10px] bg-emerald-500/20 text-emerald-400 font-bold px-2 py-0.5 rounded-full border border-emerald-500/30">
-                FLUTTER APK
+                OFFICIAL
               </span>
             </div>
             <p className="text-xs text-gray-300 truncate mt-0.5">
-              Direct install • Gesture controls, 4K streaming & offline mode
+              Direct universal APK • Fast & smooth streaming (55 MB)
             </p>
           </div>
         </div>
