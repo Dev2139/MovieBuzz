@@ -29,6 +29,7 @@ const AdminTelegramPage = lazy(() => import('./pages/AdminTelegramPage').then(m 
 const ProfilePage = lazy(() => import('./pages/ProfilePage').then(m => ({ default: m.ProfilePage })));
 const PremiumPage = lazy(() => import('./pages/PremiumPage').then(m => ({ default: m.PremiumPage })));
 const RequestsLeaderboardPage = lazy(() => import('./pages/RequestsLeaderboardPage').then(m => ({ default: m.RequestsLeaderboardPage })));
+const DownloadAppPage = lazy(() => import('./pages/DownloadAppPage').then(m => ({ default: m.DownloadAppPage })));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -77,6 +78,9 @@ const MainLayout: React.FC = () => {
             <Route path="/profile" element={<ProfilePage />} />
             <Route path="/premium" element={<PremiumPage />} />
             <Route path="/requests" element={<RequestsLeaderboardPage />} />
+            <Route path="/download" element={<DownloadAppPage />} />
+            <Route path="/install" element={<DownloadAppPage />} />
+            <Route path="/app" element={<DownloadAppPage />} />
 
             {/* Admin Routes */}
             <Route

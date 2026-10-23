@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { usePWA } from '../context/PWAContext';
 import { fetchLatestAppUpdateApi } from '../services/api';
@@ -211,10 +212,18 @@ export const InstallModal: React.FC = () => {
         </div>
 
         {/* Footer */}
-        <div className="mt-4 text-center">
+        <div className="mt-4 flex items-center justify-between text-xs text-gray-400 px-1">
+          <Link
+            to="/download"
+            onClick={() => setShowInstallModal(false)}
+            className="text-brand-400 hover:text-brand-300 font-semibold flex items-center gap-1 transition-colors"
+          >
+            <span>View Full Install Page</span>
+            <ExternalLink className="w-3 h-3" />
+          </Link>
           <button
             onClick={() => setShowInstallModal(false)}
-            className="text-xs text-gray-400 hover:text-white transition-colors"
+            className="hover:text-white transition-colors"
           >
             Close
           </button>
