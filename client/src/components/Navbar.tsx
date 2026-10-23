@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { Film, Bookmark, History, Shield, LogOut, User as UserIcon, Menu, Crown } from 'lucide-react';
+import { usePWA } from '../context/PWAContext';
+import { Film, Bookmark, History, Shield, LogOut, User as UserIcon, Menu, Crown, Smartphone, Download } from 'lucide-react';
 import { NotificationBell } from './NotificationBell';
 
 export const Navbar: React.FC = () => {
   const { user, logout, openAuthModal } = useAuth();
+  const { setShowInstallModal } = usePWA();
   const location = useLocation();
   const [isScrolled, setIsScrolled] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -93,6 +95,16 @@ export const Navbar: React.FC = () => {
 
         {/* Right Search & Profile Area (Desktop) */}
         <div className="hidden md:flex items-center space-x-3">
+          {/* Direct Android APK Install Button */}
+          <button
+            onClick={() => setShowInstallModal(true)}
+            className="flex items-center space-x-1.5 text-xs font-bold px-3 py-1.5 rounded-full bg-dark-card hover:bg-dark-hover border border-dark-border hover:border-brand-500/50 text-gray-200 hover:text-white transition-all shadow-sm"
+            title="Download MovieBuzz Android App (APK)"
+          >
+            <Smartphone className="w-3.5 h-3.5 text-brand-500" />
+            <span>Get App</span>
+          </button>
+
           <NotificationBell />
 
           {user ? (
@@ -228,6 +240,16 @@ export const Navbar: React.FC = () => {
               <Crown className="w-4 h-4" />
               Premium · Earn CineCoins
             </Link>
+            <button
+              onClick={() => {
+                setShowInstallModal(true);
+                setIsMobileMenuOpen(false);
+              }}
+              className="col-span-2 flex items-center justify-center gap-2 px-3.5 py-2.5 bg-gradient-to-r from-brand-500/20 via-red-600/20 to-amber-500/20 rounded-xl text-xs font-bold text-white border border-brand-500/40 transition-colors"
+            >
+              <Smartphone className="w-4 h-4 text-brand-500" />
+              <span>Download Android App (.APK)</span>
+            </button>
           </div>
 
           {user?.role === 'admin' && (

@@ -14,6 +14,8 @@ import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
+import path from 'path';
+import fs from 'fs';
 import { connectDB } from './config/db';
 
 import authRoutes from './routes/authRoutes';
@@ -127,6 +129,20 @@ app.use('/api/requests', requestRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/streaming', streamingRoutes);
 app.use('/api/recommendations', recommendationRoutes);
+
+// Direct Native Flutter Android App Download Endpoint
+app.get(['/api/app/download', '/api/download/app', '/download/moviebuzz.apk', '/moviebuzz.apk'], (req, res) => {
+  const localApkPath = path.resolve(__dirname, '../../mobile/build/app/outputs/flutter-apk/app-release.apk');
+  const clientApkPath = path.resolve(__dirname, '../../client/public/moviebuzz.apk');
+
+  if (fs.existsSync(localApkPath)) {
+    return res.download(localApkPath, 'moviebuzz.apk');
+  } else if (fs.existsSync(clientApkPath)) {
+    return res.download(clientApkPath, 'moviebuzz.apk');
+  } else {
+    return res.redirect('/downloads/moviebuzz.apk');
+  }
+});
 
 // Root & Health check endpoints
 app.get(['/', '/api', '/api/health', '/healthz'], (req, res) => {
