@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { Notification } from '../models/Notification';
+import { User } from '../models/User';
 
 /**
  * GET /api/notifications
@@ -53,5 +54,44 @@ export const markAllNotificationsRead = async (req: AuthRequest, res: Response) 
     return res.json({ message: 'All notifications marked read' });
   } catch (error) {
     return res.status(500).json({ message: 'Failed to update notifications' });
+  }
+};
+
+/**
+ * POST /api/admin/broadcast-notification
+ * Admin broadcast a custom system notification to all users.
+ */
+export const adminBroadcastNotification = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user || req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'Forbidden: Admin access required' });
+    }
+
+    const { title, body, link = '/download' } = req.body;
+    if (!title) {
+      return res.status(400).json({ message: 'Title is required' });
+    }
+
+    const users = await User.find({}, '_id');
+    if (users.length > 0) {
+      const notifications = users.map((u) => ({
+        userId: u._id,
+        type: 'system',
+        title: String(title).trim(),
+        body: body ? String(body).trim() : undefined,
+        link: String(link).trim(),
+        read: false,
+      }));
+
+      await Notification.insertMany(notifications, { ordered: false });
+    }
+
+    return res.status(201).json({
+      message: `Broadcast notification successfully sent to ${users.length} users!`,
+      count: users.length,
+    });
+  } catch (error) {
+    console.error('adminBroadcastNotification error:', error);
+    return res.status(500).json({ message: 'Failed to broadcast notification' });
   }
 };

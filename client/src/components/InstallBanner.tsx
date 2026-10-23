@@ -16,8 +16,8 @@ export const InstallBanner: React.FC = () => {
     staleTime: 5 * 60 * 1000,
   });
 
-  const version = appUpdate?.version ? `v${appUpdate.version}` : 'v2.2.0';
-  const apkSize = appUpdate?.apkSize || '55 MB';
+  const version = appUpdate?.version ? `v${appUpdate.version}` : 'v2.4.0';
+  const apkSize = appUpdate?.apkSize || '53 MB';
 
   useEffect(() => {
     // Check if dismissed recently (24 hours)

@@ -37,6 +37,7 @@ import {
   createAppUpdate,
   deleteAppUpdate,
 } from '../controllers/appUpdateController';
+import { adminBroadcastNotification } from '../controllers/notificationController';
 import { authenticate, requireAdmin } from '../middleware/authMiddleware';
 
 const router = Router();
@@ -91,5 +92,6 @@ router.post('/subscribers/:userId/extend', adminExtendSubscription);
 router.get('/app-updates', getAdminAppUpdates);
 router.post('/app-updates', createAppUpdate);
 router.delete('/app-updates/:id', deleteAppUpdate);
+router.post('/broadcast-notification', adminBroadcastNotification);
 
 export default router;

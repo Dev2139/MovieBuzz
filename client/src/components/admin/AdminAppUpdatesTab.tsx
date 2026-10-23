@@ -4,6 +4,7 @@ import {
   fetchAdminAppUpdatesApi,
   createAdminAppUpdateApi,
   deleteAdminAppUpdateApi,
+  broadcastAdminNotificationApi,
   AppUpdateItem,
 } from '../../services/api';
 import {
@@ -23,14 +24,14 @@ import {
 export const AdminAppUpdatesTab: React.FC = () => {
   const queryClient = useQueryClient();
 
-  const [version, setVersion] = useState('2.2.0');
-  const [versionCode, setVersionCode] = useState('22');
-  const [title, setTitle] = useState('MovieBuzz v2.2.0 — 120fps Cinema Engine');
+  const [version, setVersion] = useState('2.4.0');
+  const [versionCode, setVersionCode] = useState('24');
+  const [title, setTitle] = useState('MovieBuzz v2.4.0 — Zero-Lag Cinema Video Ad & Active Stream Prefetching');
   const [changelog, setChangelog] = useState(
-    '• Silky smooth 120fps bouncing scrolling across all screens\n• Premium 3D cinema squircle app icon\n• Direct edge acceleration and zero frame drops\n• Modern distraction-free player controls'
+    '• Cinema Sponsor Video Ad Integration: Full HD sponsor video plays smoothly before stream startup\n• Concurrent Stream Chunk Pre-Buffering: Video chunks prefetch in parallel while the sponsor video plays\n• Continuous Background Chunk Buffering: Prefetches successive chunks while playing and while paused\n• Zero-Lag Resume: Instantaneous playback resume from pause with continuous background cache\n• Dedicated Web App Installation Hub & Live Changelog'
   );
   const [downloadUrl, setDownloadUrl] = useState('/moviebuzz.apk');
-  const [apkSize, setApkSize] = useState('55 MB');
+  const [apkSize, setApkSize] = useState('53 MB');
   const [isMandatory, setIsMandatory] = useState(false);
   const [broadcastNotification, setBroadcastNotification] = useState(true);
 
@@ -65,6 +66,35 @@ export const AdminAppUpdatesTab: React.FC = () => {
       queryClient.invalidateQueries({ queryKey: ['latest-app-update'] });
     },
   });
+
+  // Standalone Custom Notification Broadcast
+  const [quickTitle, setQuickTitle] = useState('🔥 New App Update v2.4.0 is Ready to Install!');
+  const [quickBody, setQuickBody] = useState('Experience zero-lag background stream buffering & sponsor cinema video ad. Tap here to install!');
+  const [quickLink, setQuickLink] = useState('/download');
+
+  const broadcastMutation = useMutation({
+    mutationFn: broadcastAdminNotificationApi,
+    onSuccess: (res) => {
+      alert(`🔔 ${res.message}`);
+    },
+    onError: (err: any) => {
+      alert(err.response?.data?.message || 'Failed to broadcast notification');
+    },
+  });
+
+  const handleBroadcastOnly = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!quickTitle.trim()) {
+      alert('Notification title is required.');
+      return;
+    }
+    if (!confirm(`Send notification "${quickTitle}" to all ${totalUsers} user(s)?`)) return;
+    broadcastMutation.mutate({
+      title: quickTitle.trim(),
+      body: quickBody.trim(),
+      link: quickLink.trim() || '/download',
+    });
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -318,6 +348,83 @@ export const AdminAppUpdatesTab: React.FC = () => {
                 </span>
               </div>
             </div>
+          </div>
+
+          {/* Instant Admin Notification Broadcast Form */}
+          <div className="bg-dark-card border border-brand-500/30 rounded-2xl p-6 shadow-xl space-y-4 relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-32 h-32 bg-brand-500/10 rounded-full blur-2xl pointer-events-none" />
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <Bell className="w-4 h-4 text-brand-400" />
+                <span>Instant Broadcast Notification to All Users</span>
+              </h3>
+              <span className="text-[10px] bg-brand-500/20 text-brand-400 font-extrabold px-2 py-0.5 rounded-full border border-brand-500/30">
+                {totalUsers} Users
+              </span>
+            </div>
+            <p className="text-xs text-gray-400">
+              Broadcast an immediate notification alert to every registered user on MovieBuzz to install the new app release:
+            </p>
+
+            <form onSubmit={handleBroadcastOnly} className="space-y-3">
+              <div>
+                <label className="block text-[11px] font-bold text-gray-300 mb-1">
+                  Notification Title
+                </label>
+                <input
+                  type="text"
+                  value={quickTitle}
+                  onChange={(e) => setQuickTitle(e.target.value)}
+                  className="w-full bg-dark-surface border border-dark-border rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-brand-500"
+                  placeholder="e.g. 🔥 New App Update v2.4.0 is Ready to Install!"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-gray-300 mb-1">
+                  Notification Body Message
+                </label>
+                <textarea
+                  value={quickBody}
+                  onChange={(e) => setQuickBody(e.target.value)}
+                  rows={2}
+                  className="w-full bg-dark-surface border border-dark-border rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-brand-500 resize-none"
+                  placeholder="e.g. Experience zero-lag background stream buffering & sponsor cinema video ad. Tap here to install!"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-gray-300 mb-1">
+                  Target Route / Link
+                </label>
+                <input
+                  type="text"
+                  value={quickLink}
+                  onChange={(e) => setQuickLink(e.target.value)}
+                  className="w-full bg-dark-surface border border-dark-border rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-brand-500"
+                  placeholder="/download"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={broadcastMutation.isPending}
+                className="w-full flex items-center justify-center space-x-2 py-2.5 bg-gradient-to-r from-brand-500 to-amber-600 hover:from-brand-600 hover:to-amber-700 text-white font-extrabold text-xs rounded-xl shadow-lg shadow-brand-500/25 transition-all disabled:opacity-50"
+              >
+                {broadcastMutation.isPending ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Sending Notification to All Users...</span>
+                  </>
+                ) : (
+                  <>
+                    <Send className="w-3.5 h-3.5" />
+                    <span>Dispatch Notification to All Users</span>
+                  </>
+                )}
+              </button>
+            </form>
           </div>
 
           <div className="bg-dark-card border border-dark-border rounded-2xl p-6 shadow-xl space-y-4">

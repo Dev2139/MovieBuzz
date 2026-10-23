@@ -705,4 +705,16 @@ export const deleteAdminAppUpdateApi = async (id: string) => {
   return res.data;
 };
 
+export const broadcastAdminNotificationApi = async (data: {
+  title: string;
+  body?: string;
+  link?: string;
+}) => {
+  const res = await api.post<{ message: string; count: number }>(
+    '/admin/broadcast-notification',
+    data
+  );
+  return res.data;
+};
+
 

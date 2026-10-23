@@ -31,11 +31,11 @@ export const DownloadAppPage: React.FC = () => {
     staleTime: 5 * 60 * 1000,
   });
 
-  const version = updateData?.version ? `v${updateData.version}` : 'v2.2.0';
-  const apkSize = updateData?.apkSize || '55 MB';
+  const version = updateData?.version ? `v${updateData.version}` : 'v2.4.0';
+  const apkSize = updateData?.apkSize || '53 MB';
   const downloadUrl = updateData?.downloadUrl || '/moviebuzz.apk';
   const changelog = updateData?.changelog || '';
-  const updateTitle = updateData?.title || 'MovieBuzz v2.2.0 — Cinema Engine';
+  const updateTitle = updateData?.title || 'MovieBuzz v2.4.0 — Zero-Lag Cinema Video Ad & Active Stream Prefetching';
 
   // Construct absolute APK URL for QR code
   const absoluteApkUrl = typeof window !== 'undefined'

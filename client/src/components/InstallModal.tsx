@@ -28,8 +28,8 @@ export const InstallModal: React.FC = () => {
 
   if (!showInstallModal) return null;
 
-  const version = appUpdate?.version ? `v${appUpdate.version}` : 'v2.2.0';
-  const apkSize = appUpdate?.apkSize || '55 MB';
+  const version = appUpdate?.version ? `v${appUpdate.version}` : 'v2.4.0';
+  const apkSize = appUpdate?.apkSize || '53 MB';
   const effectiveDownloadUrl = appUpdate?.downloadUrl || apkDownloadUrl;
 
   // Build full APK URL for QR code
