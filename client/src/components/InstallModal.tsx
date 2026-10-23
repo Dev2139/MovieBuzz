@@ -1,127 +1,191 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { usePWA } from '../context/PWAContext';
-import { X, Smartphone, Monitor, Share2, PlusSquare, CheckCircle2, Film, Zap, Download } from 'lucide-react';
+import {
+  X,
+  Smartphone,
+  Download,
+  CheckCircle2,
+  ShieldCheck,
+  Zap,
+  Sliders,
+  QrCode,
+  ExternalLink,
+  Info,
+} from 'lucide-react';
 
 export const InstallModal: React.FC = () => {
-  const { showInstallModal, setShowInstallModal, isIOS, deferredPrompt, promptInstall } = usePWA();
+  const { showInstallModal, setShowInstallModal, downloadApk, apkDownloadUrl } = usePWA();
+  const [showQr, setShowQr] = useState(false);
 
   if (!showInstallModal) return null;
 
+  // Build full APK URL for QR code
+  const fullApkUrl = typeof window !== 'undefined'
+    ? `${window.location.origin}${apkDownloadUrl}`
+    : 'https://moviebuzz.vercel.app/moviebuzz.apk';
+
+  const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(fullApkUrl)}`;
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
-      <div 
-        className="relative w-full max-w-md bg-dark-card border border-dark-border rounded-2xl p-6 shadow-2xl overflow-hidden"
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-fade-in overflow-y-auto">
+      <div
+        className="relative w-full max-w-lg bg-dark-card border border-dark-border rounded-3xl p-6 sm:p-7 shadow-2xl overflow-hidden my-8"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Glow ambient effect */}
-        <div className="absolute -top-12 -right-12 w-36 h-36 bg-brand-500/20 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute -bottom-12 -left-12 w-36 h-36 bg-red-600/15 rounded-full blur-3xl pointer-events-none" />
+        {/* Glow ambient background effect */}
+        <div className="absolute -top-16 -right-16 w-44 h-44 bg-brand-500/20 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute -bottom-16 -left-16 w-44 h-44 bg-emerald-500/15 rounded-full blur-3xl pointer-events-none" />
 
         {/* Close Button */}
         <button
           onClick={() => setShowInstallModal(false)}
-          className="absolute top-4 right-4 p-2 text-gray-400 hover:text-white rounded-full hover:bg-dark-surface transition-colors"
+          className="absolute top-5 right-5 p-2 text-gray-400 hover:text-white rounded-full hover:bg-dark-surface/80 transition-colors z-10"
           aria-label="Close"
         >
           <X className="w-5 h-5" />
         </button>
 
-        {/* App Logo & Title */}
-        <div className="flex items-center space-x-3 mb-5">
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-brand-500 to-red-700 flex items-center justify-center text-white shadow-lg shadow-brand-500/30">
-            <Film className="w-6 h-6" />
+        {/* App Logo & Header */}
+        <div className="flex items-center space-x-3.5 mb-5">
+          <div className="w-13 h-13 rounded-2xl bg-gradient-to-br from-brand-500 via-red-600 to-amber-600 p-0.5 shadow-xl shadow-brand-500/25 flex-shrink-0">
+            <div className="w-full h-full bg-dark-card rounded-2xl flex items-center justify-center">
+              <Smartphone className="w-6 h-6 text-brand-500" />
+            </div>
           </div>
           <div>
-            <h3 className="text-lg font-bold text-white flex items-center gap-1.5">
-              Install MovieBuzz App
-            </h3>
-            <p className="text-xs text-gray-400">Stream on mobile or desktop like a native app</p>
-          </div>
-        </div>
-
-        {/* Benefits list */}
-        <div className="grid grid-cols-2 gap-2 mb-5">
-          <div className="bg-dark-surface/60 border border-dark-border/50 rounded-xl p-2.5 flex items-center space-x-2">
-            <Zap className="w-4 h-4 text-brand-500 flex-shrink-0" />
-            <span className="text-xs text-gray-200 font-medium">Instant Launch</span>
-          </div>
-          <div className="bg-dark-surface/60 border border-dark-border/50 rounded-xl p-2.5 flex items-center space-x-2">
-            <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-            <span className="text-xs text-gray-200 font-medium">Full-Screen Mode</span>
-          </div>
-        </div>
-
-        {/* Device-Specific Instructions */}
-        {deferredPrompt ? (
-          <div className="space-y-4">
-            <p className="text-xs text-gray-300">
-              Click below to install MovieBuzz directly to your home screen or desktop application list.
+            <div className="flex items-center gap-2">
+              <h3 className="text-xl font-black text-white tracking-wide">
+                MovieBuzz for Android
+              </h3>
+              <span className="text-[10px] bg-brand-500/20 text-brand-400 font-extrabold px-2 py-0.5 rounded-full border border-brand-500/30">
+                FLUTTER
+              </span>
+            </div>
+            <p className="text-xs text-gray-400 mt-0.5">
+              Direct Native App (APK) • Universal Build • 55 MB
             </p>
+          </div>
+        </div>
+
+        {/* Highlight Perks Grid */}
+        <div className="grid grid-cols-2 gap-2.5 mb-6">
+          <div className="bg-dark-surface/70 border border-dark-border/80 rounded-xl p-3 flex items-start space-x-2.5">
+            <Sliders className="w-4 h-4 text-brand-400 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="text-xs font-bold text-white">MX-Player Gestures</p>
+              <p className="text-[11px] text-gray-400 leading-tight mt-0.5">Double-tap 10s seek, swipe brightness & volume</p>
+            </div>
+          </div>
+          <div className="bg-dark-surface/70 border border-dark-border/80 rounded-xl p-3 flex items-start space-x-2.5">
+            <Zap className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="text-xs font-bold text-white">Edge CDN Acceleration</p>
+              <p className="text-[11px] text-gray-400 leading-tight mt-0.5">Cloudflare HLS streaming with instant start</p>
+            </div>
+          </div>
+          <div className="bg-dark-surface/70 border border-dark-border/80 rounded-xl p-3 flex items-start space-x-2.5">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="text-xs font-bold text-white">True Native Flutter</p>
+              <p className="text-[11px] text-gray-400 leading-tight mt-0.5">Zero browser lag, smooth 120Hz rendering</p>
+            </div>
+          </div>
+          <div className="bg-dark-surface/70 border border-dark-border/80 rounded-xl p-3 flex items-start space-x-2.5">
+            <ShieldCheck className="w-4 h-4 text-blue-400 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="text-xs font-bold text-white">Safe & Direct</p>
+              <p className="text-[11px] text-gray-400 leading-tight mt-0.5">No Play Store account or login required</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Primary Action Button */}
+        <div className="space-y-3 mb-6">
+          <button
+            onClick={() => {
+              downloadApk();
+            }}
+            className="w-full flex items-center justify-center space-x-2.5 py-3.5 bg-gradient-to-r from-brand-500 via-red-600 to-amber-600 hover:from-brand-600 hover:to-red-700 text-white font-extrabold text-sm rounded-2xl shadow-xl shadow-brand-500/30 transition-all transform hover:scale-[1.01] active:scale-[0.98]"
+          >
+            <Download className="w-5 h-5" />
+            <span>Download Android App (.APK) — 55 MB</span>
+          </button>
+
+          <div className="flex items-center justify-between px-1">
             <button
-              onClick={() => {
-                promptInstall();
-              }}
-              className="w-full flex items-center justify-center space-x-2 py-3 bg-gradient-to-r from-brand-500 to-red-600 hover:from-brand-600 hover:to-red-700 text-white font-bold text-sm rounded-xl shadow-lg shadow-brand-500/30 transition-all transform hover:scale-[1.02] active:scale-[0.98]"
+              onClick={() => setShowQr(!showQr)}
+              className="flex items-center space-x-1.5 text-xs text-gray-400 hover:text-white transition-colors"
             >
-              <Download className="w-4 h-4" />
-              <span>Install to Device Now</span>
+              <QrCode className="w-4 h-4 text-brand-400" />
+              <span>{showQr ? 'Hide Mobile QR Code' : 'Scan QR code with your phone'}</span>
             </button>
+
+            <a
+              href={apkDownloadUrl}
+              download="moviebuzz.apk"
+              className="flex items-center space-x-1 text-xs text-gray-400 hover:text-white transition-colors"
+            >
+              <span>Direct Link</span>
+              <ExternalLink className="w-3 h-3" />
+            </a>
           </div>
-        ) : isIOS ? (
-          <div className="space-y-3 bg-dark-surface/70 border border-dark-border rounded-xl p-4">
-            <div className="flex items-center space-x-2 text-brand-400 font-semibold text-xs pb-1 border-b border-dark-border/60">
-              <Smartphone className="w-4 h-4" />
-              <span>Install on iPhone / iPad (Safari)</span>
+        </div>
+
+        {/* Scan QR Code Section (Collapsible) */}
+        {showQr && (
+          <div className="bg-dark-surface/90 border border-dark-border rounded-2xl p-4 mb-6 flex flex-col sm:flex-row items-center gap-4 text-center sm:text-left animate-fade-in">
+            <div className="bg-white p-2 rounded-xl shadow-md flex-shrink-0">
+              <img
+                src={qrImageUrl}
+                alt="Scan QR code to download MovieBuzz APK"
+                className="w-28 h-28"
+              />
             </div>
-            <ol className="text-xs text-gray-300 space-y-2.5 pt-1">
-              <li className="flex items-start space-x-2">
-                <span className="w-5 h-5 rounded-full bg-dark-card border border-dark-border text-center text-[11px] font-bold text-brand-400 flex-shrink-0">
-                  1
-                </span>
-                <span>
-                  Tap the <strong className="text-white">Share</strong> button <Share2 className="inline w-3.5 h-3.5 text-blue-400 ml-0.5" /> in Safari’s navigation bar.
-                </span>
-              </li>
-              <li className="flex items-start space-x-2">
-                <span className="w-5 h-5 rounded-full bg-dark-card border border-dark-border text-center text-[11px] font-bold text-brand-400 flex-shrink-0">
-                  2
-                </span>
-                <span>
-                  Scroll down the menu and tap <strong className="text-white">Add to Home Screen</strong> <PlusSquare className="inline w-3.5 h-3.5 text-gray-300 ml-0.5" />.
-                </span>
-              </li>
-              <li className="flex items-start space-x-2">
-                <span className="w-5 h-5 rounded-full bg-dark-card border border-dark-border text-center text-[11px] font-bold text-brand-400 flex-shrink-0">
-                  3
-                </span>
-                <span>
-                  Tap <strong className="text-white">Add</strong> in the top right corner. MovieBuzz is now ready!
-                </span>
-              </li>
-            </ol>
-          </div>
-        ) : (
-          <div className="space-y-3 bg-dark-surface/70 border border-dark-border rounded-xl p-4">
-            <div className="flex items-center space-x-2 text-brand-400 font-semibold text-xs pb-1 border-b border-dark-border/60">
-              <Monitor className="w-4 h-4" />
-              <span>Desktop / Android Browser</span>
+            <div>
+              <p className="text-sm font-bold text-white">Scan from Phone Camera</p>
+              <p className="text-xs text-gray-400 mt-1 leading-relaxed">
+                Point your Android camera at the QR code to instantly start the direct APK download on your device.
+              </p>
             </div>
-            <p className="text-xs text-gray-300">
-              Look for the <strong className="text-white">Install Icon</strong> (⊕ or ⬇) located in your browser's address bar next to the URL, or:
-            </p>
-            <ol className="text-xs text-gray-400 space-y-1.5 list-decimal pl-4">
-              <li>Click your browser’s menu (<strong className="text-white">⋮</strong> or <strong className="text-white">⋯</strong>).</li>
-              <li>Select <strong className="text-white">"Install MovieBuzz"</strong> or <strong className="text-white">"Add to Home screen"</strong>.</li>
-            </ol>
           </div>
         )}
 
+        {/* 3-Step Simple Installation Guide */}
+        <div className="bg-dark-surface/60 border border-dark-border/80 rounded-2xl p-4 space-y-3">
+          <div className="flex items-center space-x-2 text-xs font-bold text-gray-200">
+            <Info className="w-4 h-4 text-brand-400" />
+            <span>How to install in 3 easy steps</span>
+          </div>
+
+          <ol className="text-xs text-gray-300 space-y-2 pl-1">
+            <li className="flex items-start space-x-2.5">
+              <span className="w-5 h-5 rounded-full bg-brand-500/20 text-brand-400 border border-brand-500/30 flex items-center justify-center text-[10px] font-black flex-shrink-0 mt-0.5">
+                1
+              </span>
+              <span>Tap <strong className="text-white">Download APK</strong> above to download the <code className="text-amber-300 bg-black/40 px-1 py-0.5 rounded">moviebuzz.apk</code> file.</span>
+            </li>
+            <li className="flex items-start space-x-2.5">
+              <span className="w-5 h-5 rounded-full bg-brand-500/20 text-brand-400 border border-brand-500/30 flex items-center justify-center text-[10px] font-black flex-shrink-0 mt-0.5">
+                2
+              </span>
+              <span>Open the downloaded file from your browser notifications or <strong className="text-white">Files / Downloads</strong> app.</span>
+            </li>
+            <li className="flex items-start space-x-2.5">
+              <span className="w-5 h-5 rounded-full bg-brand-500/20 text-brand-400 border border-brand-500/30 flex items-center justify-center text-[10px] font-black flex-shrink-0 mt-0.5">
+                3
+              </span>
+              <span>Tap <strong className="text-white">Install</strong>. If Android asks for permission, toggle <strong className="text-white">"Allow from this source"</strong> and install!</span>
+            </li>
+          </ol>
+        </div>
+
+        {/* Footer */}
         <div className="mt-5 text-center">
           <button
             onClick={() => setShowInstallModal(false)}
             className="text-xs text-gray-400 hover:text-white transition-colors"
           >
-            Maybe later
+            Close
           </button>
         </div>
       </div>

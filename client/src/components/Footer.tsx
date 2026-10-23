@@ -1,8 +1,10 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { Film, ShieldCheck } from 'lucide-react';
+import { Film, ShieldCheck, Smartphone } from 'lucide-react';
+import { usePWA } from '../context/PWAContext';
 
 export const Footer: React.FC = () => {
+  const { setShowInstallModal } = usePWA();
   return (
     <footer className="bg-dark-surface border-t border-dark-border text-gray-400 text-sm mt-16">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
@@ -20,9 +22,18 @@ export const Footer: React.FC = () => {
             <p className="text-xs text-gray-400 max-w-sm leading-relaxed">
               CineStream is an authorized streaming platform serving legally licensed movie and TV series content. Enjoy high-definition playback with instant streaming and direct downloads.
             </p>
-            <div className="flex items-center space-x-2 text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-3 py-1.5 rounded-lg w-fit">
-              <ShieldCheck className="w-4 h-4" />
-              <span>Authorized License Operator Distribution</span>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center space-x-2 text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-3 py-1.5 rounded-lg w-fit">
+                <ShieldCheck className="w-4 h-4" />
+                <span>Authorized License Operator Distribution</span>
+              </div>
+              <button
+                onClick={() => setShowInstallModal(true)}
+                className="flex items-center space-x-1.5 text-xs font-bold text-white bg-brand-500/15 hover:bg-brand-500/25 border border-brand-500/30 px-3 py-1.5 rounded-lg transition-all"
+              >
+                <Smartphone className="w-3.5 h-3.5 text-brand-400" />
+                <span>Download Android App (.APK)</span>
+              </button>
             </div>
           </div>
 

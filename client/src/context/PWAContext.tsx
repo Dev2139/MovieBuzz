@@ -8,6 +8,8 @@ interface PWAContextType {
   showInstallModal: boolean;
   setShowInstallModal: (show: boolean) => void;
   promptInstall: () => Promise<void>;
+  downloadApk: () => void;
+  apkDownloadUrl: string;
 }
 
 const PWAContext = createContext<PWAContextType>({
@@ -18,6 +20,8 @@ const PWAContext = createContext<PWAContextType>({
   showInstallModal: false,
   setShowInstallModal: () => {},
   promptInstall: async () => {},
+  downloadApk: () => {},
+  apkDownloadUrl: '/moviebuzz.apk',
 });
 
 export const PWAProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -119,6 +123,18 @@ export const PWAProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  const apkDownloadUrl = '/moviebuzz.apk';
+
+  const downloadApk = () => {
+    const link = document.createElement('a');
+    link.href = apkDownloadUrl;
+    link.setAttribute('download', 'moviebuzz.apk');
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setShowInstallModal(true);
+  };
+
   // User can install if they're not in standalone mode
   const canInstall = !isInstalled;
 
@@ -132,6 +148,8 @@ export const PWAProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         showInstallModal,
         setShowInstallModal,
         promptInstall,
+        downloadApk,
+        apkDownloadUrl,
       }}
     >
       {children}
