@@ -344,7 +344,7 @@ export const manualTelegramImport = async (req: Request, res: Response) => {
     }
 
     const botToken = process.env.TELEGRAM_BOT_TOKEN;
-    const backendUrl = process.env.BACKEND_URL || 'https://moviebuzz-server.onrender.com';
+    const backendUrl = process.env.BACKEND_URL || 'https://moviebuzz-qr1i.onrender.com';
 
     const streamUrl = `${backendUrl}/api/media/proxy-file/${encodeURIComponent(fileId)}`;
     const downloadUrl = `${backendUrl}/api/media/download-file/${encodeURIComponent(fileId)}`;

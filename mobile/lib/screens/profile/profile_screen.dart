@@ -45,7 +45,7 @@ class ProfileScreen extends StatelessWidget {
                           labelStyle: const TextStyle(fontSize: 11, color: Colors.white),
                           onPressed: () {
                             setDialogState(() {
-                              controller.text = 'https://moviebuzz-server.onrender.com/api';
+                              controller.text = 'https://moviebuzz-qr1i.onrender.com/api';
                             });
                           },
                         ),
@@ -90,7 +90,7 @@ class ProfileScreen extends StatelessWidget {
                       style: const TextStyle(color: Colors.white, fontSize: 13),
                       decoration: InputDecoration(
                         labelText: 'API Base URL',
-                        hintText: 'https://moviebuzz-server.onrender.com/api',
+                        hintText: 'https://moviebuzz-qr1i.onrender.com/api',
                         filled: true,
                         fillColor: AppColors.darkSurface,
                         contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),

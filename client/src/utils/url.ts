@@ -8,7 +8,7 @@ const getApiBase = (): string => {
   if (!raw) {
     return typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
       ? 'http://localhost:5000/api'
-      : 'https://moviebuzz-server.onrender.com/api';
+      : 'https://moviebuzz-qr1i.onrender.com/api';
   }
   let clean = raw.trim().replace(/\/+$/, '');
   if (!clean.endsWith('/api')) {
@@ -37,12 +37,9 @@ export const wrapStreamWithCloudflare = (rawUrl?: string): string => {
     return resolved;
   }
 
-  // Route Telegram proxy-file endpoints through Cloudflare /tg/ edge cache
-  if (resolved.includes('/proxy-file/')) {
-    const fileId = resolved.substring(resolved.indexOf('/proxy-file/') + '/proxy-file/'.length);
-    return `${cfProxy}/tg/${fileId}`;
-  }
-  if (resolved.includes('/media/')) {
+  // Never route Telegram proxy-file or backend media endpoints through the Cloudflare worker
+  // (Telegram media files require continuous dynamic multi-gigabyte HTTP 206 byte-range streaming directly from the active API backend)
+  if (resolved.includes('/proxy-file/') || resolved.includes('/media/')) {
     return resolved;
   }
 

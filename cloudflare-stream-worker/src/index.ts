@@ -517,7 +517,7 @@ export default {
       }
 
       // --- 2. Cache Miss: Fetch chunk from origin backend with Keep-Alive ---
-      const backendOrigin = (env.ORIGIN_URL || 'https://moviebuzz-server.onrender.com').replace(/\/+$/, '');
+      const backendOrigin = (env.ORIGIN_URL || 'https://moviebuzz-qr1i.onrender.com').replace(/\/+$/, '');
       const targetUrl = `${backendOrigin}/api/media/proxy-file/${encodeURIComponent(fileId)}?direct=true`;
 
       const upstreamHeaders = new Headers();

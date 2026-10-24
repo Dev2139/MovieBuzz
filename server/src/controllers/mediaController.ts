@@ -23,13 +23,9 @@ export const getMediaWatchStream = async (req: Request, res: Response) => {
     const protocol = (req.headers['x-forwarded-proto'] as string) || req.protocol || 'http';
     const baseUrl = `${protocol}://${host}`;
 
-    const cfProxy = (process.env.CLOUDFLARE_STREAM_PROXY_URL || 'https://cinestream-stream-proxy.dev-patel-codinggita.workers.dev').trim().replace(/\/+$/, '');
     let streamUrl = mediaObj.streamUrl;
     if (mediaObj.provider === 'telegram' && mediaObj.providerMediaId) {
-      const isLocal = host.includes('localhost') || host.includes('127.0.0.1');
-      streamUrl = isLocal
-        ? `${baseUrl}/api/media/proxy-file/${encodeURIComponent(mediaObj.providerMediaId)}`
-        : `${cfProxy}/tg/${encodeURIComponent(mediaObj.providerMediaId)}`;
+      streamUrl = `${baseUrl}/api/media/proxy-file/${encodeURIComponent(mediaObj.providerMediaId)}`;
     }
 
     return res.json({
@@ -84,14 +80,6 @@ export const proxyTelegramFileStream = async (req: Request, res: Response) => {
     // If AAC compatibility / transcoding is explicitly requested, route to FFmpeg audio transcoder
     if (req.query.transcode === 'true' || req.query.compat === 'true' || req.query.aac === 'true') {
       return transcodeTelegramFileStream(req, res);
-    }
-
-    // Direct requests from browsers on Render: 307 redirect to Cloudflare Worker to protect Render free bandwidth
-    const host = req.get('host') || '';
-    const isLocal = host.includes('localhost') || host.includes('127.0.0.1');
-    const cfProxy = (process.env.CLOUDFLARE_STREAM_PROXY_URL || 'https://cinestream-stream-proxy.dev-patel-codinggita.workers.dev').trim().replace(/\/+$/, '');
-    if (!isLocal && cfProxy && req.query.direct !== 'true') {
-      return res.redirect(307, `${cfProxy}/tg/${encodeURIComponent(fileId)}`);
     }
 
     const range = req.headers.range;
