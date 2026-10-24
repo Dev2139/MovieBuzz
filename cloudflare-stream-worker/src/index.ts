@@ -90,6 +90,7 @@ function looksLikeMpd(u: string): boolean {
 
 interface DashTokenPayload {
   r?: string; // referer to inject
+  c?: string; // cookie to inject
 }
 
 function encodeDashToken(payload: DashTokenPayload): string {
@@ -173,11 +174,12 @@ function rewriteDashManifest(
 
 // Rewrite an HLS playlist so every child URI (segments, variant playlists,
 // EXT-X-KEY / EXT-X-MAP URIs) resolves back through this /embed endpoint.
-function rewriteHlsManifest(text: string, manifestUrl: string, referer: string, proxyBase: string): string {
+function rewriteHlsManifest(text: string, manifestUrl: string, referer: string, proxyBase: string, cookie?: string): string {
   const resolveAbs = (u: string): string => new URL(u, manifestUrl).toString();
   const wrap = (abs: string, isManifest: boolean): string => {
     const p = new URLSearchParams({ url: abs });
     if (referer) p.set('r', referer);
+    if (cookie) p.set('c', cookie);
     if (isManifest) p.set('ext', '.m3u8');
     return `${proxyBase}?${p.toString()}`;
   };
@@ -346,9 +348,14 @@ export default {
     //    Carries arbitrary embed-CDN streams (found by the headless extractor)
     //    through Cloudflare's free/unmetered egress so the origin server uses no
     //    bandwidth. Injects the per-source hotlink Referer and rewrites HLS.
+    // 5. Generic embed relay: /embed?url=...&r=<referer>&c=<cookie>&ext=<marker>
+    //    Carries arbitrary embed-CDN streams (found by the headless extractor)
+    //    through Cloudflare's free/unmetered egress so the origin server uses no
+    //    bandwidth. Injects the per-source hotlink Referer, auth Cookie, and rewrites HLS/DASH.
     if (url.pathname === '/embed') {
       const targetUrl = url.searchParams.get('url') || '';
       const referer = url.searchParams.get('r') || '';
+      const cookie = url.searchParams.get('c') || '';
       const ext = url.searchParams.get('ext') || '';
       if (!targetUrl || !isSafeExternalUrl(targetUrl)) {
         return new Response('Invalid or disallowed video URL', { status: 400 });
@@ -367,11 +374,14 @@ export default {
           /* ignore */
         }
       }
+      if (cookie) {
+        upstreamHeaders.set('Cookie', cookie);
+      }
       const range = request.headers.get('range');
       if (range) upstreamHeaders.set('Range', range);
 
       // MPEG-DASH manifests are fetched as text and rewritten so all segment
-      // references resolve back through /es/<token> here (hotlink headers are
+      // references resolve back through /es/<token> here (hotlink headers and cookies are
       // then re-added on every segment request).
       if (looksLikeMpd(targetUrl) || ext === '.mpd') {
         const res = await fetch(targetUrl, { headers: upstreamHeaders, redirect: 'follow' });
@@ -383,7 +393,7 @@ export default {
         if (res.status !== 200 || !/<MPD/i.test(text)) {
           return new Response('Failed to fetch DASH manifest', { status: res.status || 502, headers: h });
         }
-        const token = encodeDashToken({ r: referer });
+        const token = encodeDashToken({ r: referer, c: cookie });
         return new Response(rewriteDashManifest(text, finalUrl, referer, token), { status: 200, headers: h });
       }
 
@@ -399,16 +409,15 @@ export default {
         if (res.status !== 200 || !text.startsWith('#EXTM3U')) {
           return new Response('Failed to fetch HLS manifest', { status: res.status || 502, headers: h });
         }
-        return new Response(rewriteHlsManifest(text, finalUrl, referer, proxyBase), { status: 200, headers: h });
+        return new Response(rewriteHlsManifest(text, finalUrl, referer, proxyBase, cookie), { status: 200, headers: h });
       }
 
       // Only true discrete media segments (.m4s, .ts) are edge-cached.
-      // Continuous dynamic multi-gigabyte files (like Telegram proxy-file) must NEVER use cacheEverything
       const isSegment = /\.(m4s|ts)(\?|$)/i.test(targetUrl);
       const relayOptions: any = {
         headers: upstreamHeaders,
         redirect: 'follow',
-        ...(isSegment ? { cf: { cacheEverything: true, cacheTtl: 86400 } } : {}),
+        ...(isSegment ? { cf: { cacheEverything: true, cacheTtl: 604800 } } : {}),
       };
       const upstreamRes = await fetch(targetUrl, relayOptions);
 
@@ -417,14 +426,17 @@ export default {
       respHeaders.set('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
       respHeaders.set('Access-Control-Allow-Headers', '*');
       respHeaders.set('Accept-Ranges', 'bytes');
-      if (isSegment) respHeaders.set('Cache-Control', 'public, max-age=86400');
+      if (isSegment) {
+        respHeaders.set('Cache-Control', 'public, max-age=604800, immutable');
+        respHeaders.set('X-Edge-Cache', 'HIT');
+      }
 
       return new Response(upstreamRes.body, { status: upstreamRes.status, headers: respHeaders });
     }
 
     // 6. DASH segment relay: /es/<token>/<upstream-host>/<path>?<query>
     //    Rewritten manifests point every init/media segment here so the CDN's
-    //    hotlink Referer is present on each byte-range request and CORS is fine.
+    //    hotlink Referer and auth Cookie are present on each byte-range request and CORS is fine.
     if (url.pathname.startsWith('/es/')) {
       const rest = url.pathname.slice('/es/'.length);
       const slashIdx = rest.indexOf('/');
@@ -452,13 +464,16 @@ export default {
           /* ignore */
         }
       }
+      if (payload.c) {
+        segHeaders.set('Cookie', payload.c);
+      }
       const range = request.headers.get('range');
       if (range) segHeaders.set('Range', range);
 
       const segFetchOptions: any = {
         headers: segHeaders,
         redirect: 'follow',
-        cf: { cacheEverything: true, cacheTtl: 86400 },
+        cf: { cacheEverything: true, cacheTtl: 604800 },
       };
       const res = await fetch(targetUrl, segFetchOptions);
 
@@ -467,6 +482,8 @@ export default {
       respHeaders.set('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
       respHeaders.set('Access-Control-Allow-Headers', '*');
       respHeaders.set('Accept-Ranges', 'bytes');
+      respHeaders.set('Cache-Control', 'public, max-age=604800, immutable');
+      respHeaders.set('X-Edge-Cache', 'HIT');
       return new Response(res.body, { status: res.status, headers: respHeaders });
     }
 
@@ -483,8 +500,9 @@ export default {
       }
 
       const rangeHeader = request.headers.get('range') || 'full';
-      // Deterministic Edge Cache Key for this file chunk
-      const cacheUrl = `https://cinestream-edge.internal/tg/${encodeURIComponent(fileId)}/${encodeURIComponent(rangeHeader)}`;
+      const searchStr = url.search || '';
+      // Deterministic Edge Cache Key for this file chunk + search params
+      const cacheUrl = `https://cinestream-edge.internal/tg/${encodeURIComponent(fileId)}/${encodeURIComponent(searchStr)}/${encodeURIComponent(rangeHeader)}`;
       const cacheKey = new Request(cacheUrl, { method: 'GET' });
       const cache = (caches as any).default;
 
@@ -518,7 +536,7 @@ export default {
 
       // --- 2. Cache Miss: Fetch chunk from origin backend with Keep-Alive ---
       const backendOrigin = (env.ORIGIN_URL || 'https://moviebuzz-qr1i.onrender.com').replace(/\/+$/, '');
-      const targetUrl = `${backendOrigin}/api/media/proxy-file/${encodeURIComponent(fileId)}?direct=true`;
+      const targetUrl = `${backendOrigin}/api/media/proxy-file/${encodeURIComponent(fileId)}?direct=true${searchStr ? '&' + searchStr.slice(1) : ''}`;
 
       const upstreamHeaders = new Headers();
       upstreamHeaders.set('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) CineStream-Edge/1.0');

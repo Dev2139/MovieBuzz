@@ -37,9 +37,13 @@ export const wrapStreamWithCloudflare = (rawUrl?: string): string => {
     return resolved;
   }
 
-  // Never route Telegram proxy-file or backend media endpoints through the Cloudflare worker
-  // (Telegram media files require continuous dynamic multi-gigabyte HTTP 206 byte-range streaming directly from the active API backend)
-  if (resolved.includes('/proxy-file/') || resolved.includes('/media/')) {
+  // Route Telegram proxy-file streams through Cloudflare /tg/ edge cache for fastest chunk loading & 0 server bandwidth
+  if (resolved.includes('/proxy-file/')) {
+    const fileId = resolved.substring(resolved.indexOf('/proxy-file/') + '/proxy-file/'.length);
+    return `${cfProxy}/tg/${fileId}`;
+  }
+
+  if (resolved.includes('/media/') || resolved.includes('/streaming/')) {
     return resolved;
   }
 

@@ -129,8 +129,16 @@ const PROVIDERS: Record<string, ProviderFn> = {
   // which loads the gated embed page in a real browser and captures the actual
   // playable .m3u8/.mp4 request. Returns it so your own player streams it.
   'headless': async (ctx) => {
-    const base = (process.env.STREAM_EXTRACTOR_URL || '').trim();
-    if (!base) return [];
+    const candidateBases = Array.from(
+      new Set(
+        [
+          (process.env.STREAM_EXTRACTOR_URL || '').trim(),
+          'http://127.0.0.1:8080',
+          'http://localhost:8080',
+        ].filter((b) => Boolean(b && b.startsWith('http')))
+      )
+    );
+    if (candidateBases.length === 0) return [];
     const id = ctx.imdbId || ctx.tmdbId;
     if (!id) return [];
     const params = new URLSearchParams({
@@ -140,18 +148,12 @@ const PROVIDERS: Record<string, ProviderFn> = {
     });
     if (ctx.imdbId) params.set('imdbId', ctx.imdbId);
     if (ctx.tmdbId) params.set('tmdbId', String(ctx.tmdbId));
-    const clean = base.replace(/\/+$/, '');
 
-    // Embed sites are intermittently flaky per title (their CDN challenge only
-    // resolves on some attempts) — the worker itself re-draws each provider.
-    // The extractor already retries each provider/id-form internally, so a
-    // definitive 404 ("no media anywhere") is honest and re-running it would
-    // just double the wait. A retry only helps when the CALL itself failed
-    // (worker restart, transient network/5xx), so that case is retried once.
-    const fetchExtract = async (attempt = 1): Promise<RawEmbedSource[]> => {
+    for (const base of candidateBases) {
+      const clean = base.replace(/\/+$/, '');
       try {
         const res = await axios.get(`${clean}/extract?${params.toString()}`, {
-          timeout: 90000,
+          timeout: 45000,
           validateStatus: () => true,
         });
         const data = res.data;
@@ -164,23 +166,12 @@ const PROVIDERS: Record<string, ProviderFn> = {
             },
           ];
         }
-        // If Render returned 502/503 during cold-start, wait 4s and retry once
-        if ((res.status === 502 || res.status === 503) && attempt < 2) {
-          await new Promise((r) => setTimeout(r, 4000));
-          return fetchExtract(attempt + 1);
-        }
         if (res.status === 404) return [];
       } catch {
-        if (attempt < 2) {
-          await new Promise((r) => setTimeout(r, 3000));
-          return fetchExtract(attempt + 1);
-        }
-        return [];
+        continue;
       }
-      return [];
-    };
-
-    return fetchExtract();
+    }
+    return [];
   },
 };
 

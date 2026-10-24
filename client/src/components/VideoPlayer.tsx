@@ -204,38 +204,38 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const streamingProfile = React.useMemo(() => {
     if (isMobileDevice) {
       return {
-        hlsMaxBufferLength: 60,              // 60s safe forward buffer on mobile
-        hlsMaxMaxBufferLength: 120,          // 2 min max
-        hlsMaxBufferSize: 40 * 1000 * 1000,  // 40 MB safe mobile RAM
+        hlsMaxBufferLength: 90,              // 90s safe forward buffer on mobile
+        hlsMaxMaxBufferLength: 180,          // 3 min max
+        hlsMaxBufferSize: 60 * 1000 * 1000,  // 60 MB safe mobile RAM
         hlsBackBufferLength: 20,             // 20s behind
         hlsStartLevel: -1,
         hlsMaxFragLookUpTolerance: 0.25,
         hlsLowLatencyMode: false,
         hlsScheduleWhilePaused: true,        // Keep fetching segments while paused or during ad
-        dashInitialBufferLevel: 0.5,
-        dashBufferTimeDefault: 60,           // 60s ahead
-        dashBufferTimeAtTopQuality: 90,
-        dashBufferTimeAtTopQualityLongForm: 120,
-        dashInitialBitrate: 800,
+        dashInitialBufferLevel: 1.0,         // Start with 1.0s buffer immediately
+        dashBufferTimeDefault: 90,           // 90s ahead
+        dashBufferTimeAtTopQuality: 120,
+        dashBufferTimeAtTopQualityLongForm: 150,
+        dashInitialBitrate: 1500,
         dashBufferToKeep: 20,
         dashBufferPruningInterval: 15,
       };
     }
     // Desktop profile — optimal buffer length that fills Chrome's SourceBuffer to maximum without exceeding quota
     return {
-      hlsMaxBufferLength: 120,              // 2 minutes forward buffer (optimal for HD)
-      hlsMaxMaxBufferLength: 300,          // 5 minutes max
-      hlsMaxBufferSize: 80 * 1000 * 1000,  // 80 MB (safely below 100MB browser MSE quota)
+      hlsMaxBufferLength: 180,              // 3 minutes forward buffer (optimal for HD)
+      hlsMaxMaxBufferLength: 360,          // 6 minutes max
+      hlsMaxBufferSize: 120 * 1000 * 1000, // 120 MB (fastest buffer fill)
       hlsBackBufferLength: 30,             // 30s behind
       hlsStartLevel: -1,
       hlsMaxFragLookUpTolerance: 0.2,
       hlsLowLatencyMode: false,
       hlsScheduleWhilePaused: true,         // Keep fetching segments while paused or during ad
-      dashInitialBufferLevel: 0.5,
-      dashBufferTimeDefault: 90,           // 90s buffer ahead
-      dashBufferTimeAtTopQuality: 120,
-      dashBufferTimeAtTopQualityLongForm: 180,
-      dashInitialBitrate: 2500,
+      dashInitialBufferLevel: 1.0,         // Start with 1.0s buffer immediately
+      dashBufferTimeDefault: 120,          // 120s buffer ahead
+      dashBufferTimeAtTopQuality: 180,
+      dashBufferTimeAtTopQualityLongForm: 240,
+      dashInitialBitrate: 3500,
       dashBufferToKeep: 30,
       dashBufferPruningInterval: 15,
     };
@@ -2237,24 +2237,11 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           streaming: {
             scheduling: {
               scheduleWhilePaused: true,     // KEEP FETCHING SEGMENTS WHILE USER PAUSES
-              // Milliseconds before the next scheduling tick (dashjs:
-              // getScheduleTimeout()). The old value of 60 was almost certainly
-              // meant as 60 seconds, but the unit is ms, so it fired ticks 8x
-              // faster than dashjs' 500 ms default and issued segment requests
-              // essentially back-to-back. On a rate-limited relay that is more
-              // likely to hit 503s, not less (unproven as the sole cause -- the
-              // free relay is overloaded on its own). Only affects the DASH
-              // path; the extractor now hands us HLS, which goes through hls.js.
-              defaultTimeout: 500,
+              // Milliseconds before the next scheduling tick: 200ms provides smooth, rapid consecutive segment requests
+              defaultTimeout: 200,
             },
             buffer: {
               initialBufferLevel: streamingProfile.dashInitialBufferLevel,
-              // bufferTimeDefault IS dashjs v5's stable buffer target. The old
-              // `stableBufferTime` key was removed in v5; dashjs logs
-              // "Settings parameter streaming.buffer.stableBufferTime is not
-              // supported" and ignores only that key, so dropping it here is
-              // hygiene with no change in behaviour (this key was already being
-              // applied).
               bufferTimeDefault: streamingProfile.dashBufferTimeDefault,
               bufferTimeAtTopQuality: streamingProfile.dashBufferTimeAtTopQuality,
               bufferTimeAtTopQualityLongForm: streamingProfile.dashBufferTimeAtTopQualityLongForm,
@@ -2263,9 +2250,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               avoidCurrentTimeRangePruning: true,
               enableSeekDecorrelationFix: true,
               fastSwitchEnabled: true,
-              // `enableBufferFastAbsent` never existed in dashjs, so it was
-              // ignored (same per-key "not supported" log). Seek-into-unbuffered
-              // behaviour is handled by streaming.gaps below.
               reuseExistingSourceBuffers: true,
             },
             gaps: {
@@ -2286,14 +2270,14 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               },
             },
             retryIntervals: {
-              MPD: 250,
-              InitializationSegment: 250,
-              MediaSegment: 400,
+              MPD: 150,
+              InitializationSegment: 150,
+              MediaSegment: 250,
             },
             retryAttempts: {
-              MPD: 8,
-              InitializationSegment: 8,
-              MediaSegment: 8,
+              MPD: 10,
+              InitializationSegment: 10,
+              MediaSegment: 10,
             },
           },
         });
@@ -2424,20 +2408,20 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         // Continue scheduling and loading segments even when video is paused (KEY for buffering during pause & ads)
         scheduleWhilePaused: streamingProfile.hlsScheduleWhilePaused,
         // Rapid fragment loading & fault-tolerant retries to eliminate stutter
-        fragLoadingTimeOut: 20000,
+        fragLoadingTimeOut: 15000,
         fragLoadingMaxRetry: 10,
-        fragLoadingRetryDelay: 200,
-        fragLoadingMaxRetryTimeout: 4000,
+        fragLoadingRetryDelay: 100,
+        fragLoadingMaxRetryTimeout: 2000,
         levelLoadingTimeOut: 10000,
         manifestLoadingTimeOut: 10000,
         levelLoadingMaxRetry: 6,
         manifestLoadingMaxRetry: 6,
-        abrBandWidthFactor: 0.85,
-        abrBandWidthUpFactor: 0.65,
-        abrEwmaDefaultEstimate: 4000000,
-        abrEwmaFast: 4,
-        abrEwmaSlow: 9,
-        maxLoadingDelay: 1,
+        abrBandWidthFactor: 0.90,
+        abrBandWidthUpFactor: 0.70,
+        abrEwmaDefaultEstimate: 5000000,
+        abrEwmaFast: 3,
+        abrEwmaSlow: 8,
+        maxLoadingDelay: 0.5,
         // Wider tolerance for gaps in fragmented MP4 to avoid unnecessary stalls
         maxBufferHole: 1.0,
         highBufferWatchdogPeriod: 1,
@@ -2733,6 +2717,25 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             return;
           }
 
+          const errCode = vid.error?.code;
+
+          // Auto-recovery: If format/decode error (e.g. Matroska container in direct MP4 mode), seamless auto-fallback to transcode
+          if ((errCode === 3 || errCode === 4) && !isTranscodeMode) {
+            console.warn('[VideoPlayer] Format/decode error detected (code ' + errCode + '). Seamless auto-switching to high-compatibility stream...');
+            setIsTranscodeMode(true);
+            setIsBuffering(true);
+            setStreamError(null);
+            setTimeout(() => {
+              const transcodeUrl = getEffectiveStreamUrl(streamUrl, true);
+              if (videoRef.current) {
+                videoRef.current.src = transcodeUrl;
+                videoRef.current.load();
+                videoRef.current.play().catch(() => {});
+              }
+            }, 300);
+            return;
+          }
+
           // Silent transparent auto-retry on initial load before ever showing an error popup
           if (autoRetryAttemptsRef.current < 2 && !isRetryingRef.current) {
             autoRetryAttemptsRef.current += 1;
@@ -2776,7 +2779,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             }
           }
 
-          const errCode = vid.error?.code;
           const errMsg = vid.error?.message || '';
           let userMsg = 'Video failed to load.';
           if (errCode === 2) userMsg = 'Network error — stream could not be fetched.';
