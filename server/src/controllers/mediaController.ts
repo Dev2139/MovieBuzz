@@ -242,24 +242,11 @@ export const proxyTelegramFileStream = async (req: Request, res: Response) => {
       }
     }
 
-    // --- TIER 3: Pipe stored direct streamUrl if it's a real HTTP URL (not circular) ---
+    // --- TIER 3: Direct HTTP streamUrl -> 307 redirect to Cloudflare Worker (0 Render bandwidth) ---
     if (storedStreamUrl && storedStreamUrl.startsWith('http') && !storedStreamUrl.includes('/proxy-file/')) {
-      try {
-        const directRes = await axios.get(storedStreamUrl, {
-          headers: range ? { Range: range } : {},
-          responseType: 'stream',
-          timeout: 30000,
-        });
-        res.writeHead(directRes.status, {
-          ...directRes.headers as any,
-          'Accept-Ranges': 'bytes',
-          'Cache-Control': 'public, max-age=3600',
-        });
-        directRes.data.pipe(res);
-        return;
-      } catch (directErr: any) {
-        console.warn('[proxyTelegramFileStream] Direct URL Tier-3 notice:', directErr.message);
-      }
+      const cfRoot = (process.env.CLOUDFLARE_STREAM_PROXY_URL || 'https://cinestream-proxy.dev-patel-codinggita.workers.dev').trim().replace(/\/+$/, '');
+      const marker = storedStreamUrl.includes('.m3u8') ? '.m3u8' : storedStreamUrl.includes('.mpd') ? '.mpd' : '.mp4';
+      return res.redirect(307, `${cfRoot}/embed?url=${encodeURIComponent(storedStreamUrl)}&ext=${marker}`);
     }
 
     // All tiers failed — return a proper 503 with Accept-Ranges so browser doesn't hang

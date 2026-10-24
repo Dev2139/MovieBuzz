@@ -70,6 +70,14 @@ function isAllowedUrl(targetUrl: string): boolean {
   }
 }
 
+export const DEFAULT_CLOUDFLARE_PROXY_URL = 'https://cinestream-proxy.dev-patel-codinggita.workers.dev';
+
+export const getCloudflareStreamProxyUrl = (): string => {
+  return (process.env.CLOUDFLARE_STREAM_PROXY_URL || DEFAULT_CLOUDFLARE_PROXY_URL)
+    .trim()
+    .replace(/\/+$/, '');
+};
+
 function formatStreamingSources(sources: any[], baseUrl: string) {
   const seenQualities = new Map<string, number>();
 
@@ -77,9 +85,7 @@ function formatStreamingSources(sources: any[], baseUrl: string) {
     const isDash = s.format === 'DASH' || s.isDash || Boolean(s.dashManifestUrl);
     let streamUrl = '';
 
-    const streamProxyBase = process.env.CLOUDFLARE_STREAM_PROXY_URL
-      ? process.env.CLOUDFLARE_STREAM_PROXY_URL.replace(/\/+$/, '')
-      : `${baseUrl}/api/streaming`;
+    const streamProxyBase = getCloudflareStreamProxyUrl();
 
     if (isDash && s.dashBaseUrl && s.signCookie) {
       const token = Buffer.from(
@@ -308,10 +314,9 @@ function embedKindToFormat(kind: ValidatedEmbedSource['kind']) {
  */
 function formatEmbedSources(sources: ValidatedEmbedSource[], baseUrl: string) {
   // Prefer the Cloudflare Worker relay (free/unmetered egress) so video bytes
-  // never touch Render's bandwidth. Fall back to Render's own embed-proxy only
-  // when no CF worker base is configured.
-  const cfRoot = (process.env.CLOUDFLARE_STREAM_PROXY_URL || '').trim().replace(/\/+$/, '');
-  const proxyEndpoint = cfRoot ? `${cfRoot}/embed` : `${baseUrl}/api/streaming/embed-proxy`;
+  // never touch Render's bandwidth.
+  const cfRoot = getCloudflareStreamProxyUrl();
+  const proxyEndpoint = `${cfRoot}/embed`;
   return sources.map((s, idx) => {
     const { format, mimeType } = embedKindToFormat(s.kind);
     const marker = s.kind === 'hls' ? '.m3u8' : s.kind === 'dash' ? '.mpd' : '.mp4';
@@ -338,8 +343,8 @@ function formatEmbedSources(sources: ValidatedEmbedSource[], baseUrl: string) {
 }
 
 function formatMovieBoxSources(sources: MovieBoxStreamSource[], baseUrl: string) {
-  const cfRoot = (process.env.CLOUDFLARE_STREAM_PROXY_URL || '').trim().replace(/\/+$/, '');
-  const proxyEndpoint = cfRoot ? `${cfRoot}/embed` : `${baseUrl}/api/streaming/embed-proxy`;
+  const cfRoot = getCloudflareStreamProxyUrl();
+  const proxyEndpoint = `${cfRoot}/embed`;
   return sources.map((s, idx) => {
     const marker = s.format === 'HLS' ? '.m3u8' : s.format === 'DASH' ? '.mpd' : '.mp4';
     const params = new URLSearchParams({ url: s.url });
@@ -780,6 +785,13 @@ export const proxyDashStream = async (req: Request, res: Response) => {
     const { token } = req.params;
     const subpath = req.params[0]; // e.g. "index.mpd", "init-stream0.m4s", "chunk-stream0-00001.m4s"
 
+    // Bandwidth Shield: 307 Redirect directly to Cloudflare Worker to protect Render free bandwidth
+    const cfRoot = getCloudflareStreamProxyUrl();
+    if (cfRoot && !req.query.direct && token && subpath) {
+      const cleanSub = subpath.startsWith('/') ? subpath.slice(1) : subpath;
+      return res.redirect(307, `${cfRoot}/dash/${token}/${cleanSub}`);
+    }
+
     if (!token || !subpath) {
       return res.status(400).json({ error: 'Token and subpath are required.' });
     }
@@ -934,6 +946,12 @@ export const proxyVideoStream = async (req: Request, res: Response) => {
     return res.status(400).json({ error: 'Invalid or disallowed video URL.' });
   }
 
+  // Bandwidth Shield: 307 Redirect directly to Cloudflare Worker to protect Render free bandwidth
+  const cfRoot = getCloudflareStreamProxyUrl();
+  if (cfRoot && !req.query.direct) {
+    return res.redirect(307, `${cfRoot}/proxy?url=${encodeURIComponent(targetUrl)}`);
+  }
+
   const range = req.headers.range;
   const requestHeaders: Record<string, string> = { ...DOWNLOAD_HEADERS };
   if (range) {
@@ -995,6 +1013,13 @@ export const proxyEmbedStream = async (req: Request, res: Response) => {
   const referer = (req.query.r as string) || undefined;
   if (!targetUrl || !isSafeExternalUrl(targetUrl)) {
     return res.status(400).json({ error: 'Invalid or disallowed video URL.' });
+  }
+
+  // Bandwidth Shield: 307 Redirect directly to Cloudflare Worker to protect Render free bandwidth
+  const cfRoot = getCloudflareStreamProxyUrl();
+  if (cfRoot && !req.query.direct) {
+    const queryStr = req.url.includes('?') ? req.url.slice(req.url.indexOf('?') + 1) : '';
+    return res.redirect(307, `${cfRoot}/embed?${queryStr}`);
   }
 
   const range = req.headers.range;
