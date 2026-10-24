@@ -47,16 +47,19 @@ class MediaUrlResolver {
       return resolved;
     }
 
-    // Telegram media endpoints and backend proxy files require HTTP 206 multi-chunk streaming
-    // directly from the Render server backend.
-    if (resolved.contains('/proxy-file/') ||
-        resolved.contains('/media/') ||
-        resolved.contains('/streaming/')) {
+    final cfProxy = ApiConstants.cloudflareStreamProxyUrl.replaceAll(RegExp(r'/+$'), '');
+
+    // Route Telegram proxy-file streams through Cloudflare /tg/ edge cache
+    if (resolved.contains('/proxy-file/')) {
+      final fileId = resolved.substring(resolved.indexOf('/proxy-file/') + '/proxy-file/'.length);
+      return '$cfProxy/tg/$fileId';
+    }
+
+    if (resolved.contains('/media/') || resolved.contains('/streaming/')) {
       return resolved;
     }
 
     // For external CDNs, HLS (.m3u8), DASH (.mpd), or MP4 streams, route via Cloudflare worker
-    final cfProxy = ApiConstants.cloudflareStreamProxyUrl.replaceAll(RegExp(r'/+$'), '');
     final marker = resolved.contains('.m3u8')
         ? '.m3u8'
         : resolved.contains('.mpd')

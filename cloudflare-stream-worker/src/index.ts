@@ -470,7 +470,7 @@ export default {
       return new Response(res.body, { status: res.status, headers: respHeaders });
     }
 
-    // 7. Dedicated Telegram stream relay: /tg/:fileId or /telegram/:fileId
+    // 7. Ultra-High Performance Telegram Chunk Edge-Caching Relay: /tg/:fileId or /telegram/:fileId
     if (url.pathname.startsWith('/tg/') || url.pathname.startsWith('/telegram/')) {
       const parts = url.pathname.replace(/^\/(tg|telegram)\//, '').split('/');
       const fileId = decodeURIComponent(parts[0]);
@@ -478,40 +478,102 @@ export default {
         return new Response('Missing Telegram fileId', { status: 400 });
       }
 
+      if (request.method === 'OPTIONS') {
+        return new Response(null, { status: 204, headers: corsHeaders() });
+      }
+
+      const rangeHeader = request.headers.get('range') || 'full';
+      // Deterministic Edge Cache Key for this file chunk
+      const cacheUrl = `https://cinestream-edge.internal/tg/${encodeURIComponent(fileId)}/${encodeURIComponent(rangeHeader)}`;
+      const cacheKey = new Request(cacheUrl, { method: 'GET' });
+      const cache = (caches as any).default;
+
+      // --- 1. Check Cloudflare Edge Memory / SSD Cache ---
+      try {
+        const cachedRes = await cache.match(cacheKey);
+        if (cachedRes) {
+          const cachedBuf = await cachedRes.arrayBuffer();
+          const contentRange = cachedRes.headers.get('X-Stored-Content-Range') || cachedRes.headers.get('Content-Range');
+          const contentType = cachedRes.headers.get('Content-Type') || 'video/mp4';
+
+          const hitHeaders = new Headers();
+          hitHeaders.set('Content-Type', contentType);
+          hitHeaders.set('Accept-Ranges', 'bytes');
+          hitHeaders.set('Access-Control-Allow-Origin', '*');
+          hitHeaders.set('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+          hitHeaders.set('Access-Control-Allow-Headers', '*');
+          hitHeaders.set('Cache-Control', 'public, max-age=604800, immutable');
+          hitHeaders.set('X-Edge-Cache', 'HIT');
+          hitHeaders.set('Content-Length', String(cachedBuf.byteLength));
+
+          if (contentRange) {
+            hitHeaders.set('Content-Range', contentRange);
+            return new Response(cachedBuf, { status: 206, headers: hitHeaders });
+          }
+          return new Response(cachedBuf, { status: 200, headers: hitHeaders });
+        }
+      } catch (cacheErr) {
+        // Continue to fetch if cache lookup fails
+      }
+
+      // --- 2. Cache Miss: Fetch chunk from origin backend with Keep-Alive ---
       const backendOrigin = (env.ORIGIN_URL || 'https://moviebuzz-server.onrender.com').replace(/\/+$/, '');
-      const targetUrl = `${backendOrigin}/api/media/proxy-file/${encodeURIComponent(fileId)}`;
+      const targetUrl = `${backendOrigin}/api/media/proxy-file/${encodeURIComponent(fileId)}?direct=true`;
 
       const upstreamHeaders = new Headers();
-      upstreamHeaders.set('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) CineStream/1.0');
-      const range = request.headers.get('range');
-      if (range) {
-        upstreamHeaders.set('Range', range);
+      upstreamHeaders.set('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) CineStream-Edge/1.0');
+      upstreamHeaders.set('Connection', 'keep-alive');
+      if (rangeHeader !== 'full') {
+        upstreamHeaders.set('Range', rangeHeader);
       }
 
-      const fetchOptions: any = {
+      const upstreamRes = await fetch(targetUrl, {
         headers: upstreamHeaders,
-        cf: {
-          cacheEverything: true,
-          cacheTtl: 86400,
-        },
-      };
-
-      const upstreamRes = await fetch(targetUrl, fetchOptions);
-
-      const respHeaders = new Headers(upstreamRes.headers);
-      respHeaders.set('Access-Control-Allow-Origin', '*');
-      respHeaders.set('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
-      respHeaders.set('Access-Control-Allow-Headers', '*');
-      respHeaders.set('Accept-Ranges', 'bytes');
-      if (!respHeaders.get('Content-Type')) {
-        respHeaders.set('Content-Type', 'video/mp4');
-      }
-      respHeaders.set('Cache-Control', 'public, max-age=86400');
-
-      return new Response(upstreamRes.body, {
-        status: upstreamRes.status,
-        headers: respHeaders,
+        redirect: 'follow',
       });
+
+      if (upstreamRes.status === 200 || upstreamRes.status === 206) {
+        const buf = await upstreamRes.arrayBuffer();
+        const contentRange = upstreamRes.headers.get('Content-Range') || '';
+        const contentType = upstreamRes.headers.get('Content-Type') || 'video/mp4';
+
+        const clientHeaders = new Headers();
+        clientHeaders.set('Content-Type', contentType);
+        clientHeaders.set('Accept-Ranges', 'bytes');
+        clientHeaders.set('Access-Control-Allow-Origin', '*');
+        clientHeaders.set('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+        clientHeaders.set('Access-Control-Allow-Headers', '*');
+        clientHeaders.set('Cache-Control', 'public, max-age=604800, s-maxage=604800, immutable');
+        clientHeaders.set('X-Edge-Cache', 'MISS');
+        clientHeaders.set('Content-Length', String(buf.byteLength));
+        if (contentRange) {
+          clientHeaders.set('Content-Range', contentRange);
+        }
+
+        // Store into Cloudflare edge cache asynchronously as 200 with X-Stored-Content-Range metadata
+        try {
+          const storeHeaders = new Headers();
+          storeHeaders.set('Content-Type', contentType);
+          storeHeaders.set('Cache-Control', 'public, max-age=604800, s-maxage=604800, immutable');
+          if (contentRange) {
+            storeHeaders.set('X-Stored-Content-Range', contentRange);
+          }
+          const responseToCache = new Response(buf, { status: 200, headers: storeHeaders });
+          ctx.waitUntil(cache.put(cacheKey, responseToCache));
+        } catch (err) {
+          // ignore cache put errors
+        }
+
+        return new Response(buf, {
+          status: upstreamRes.status,
+          headers: clientHeaders,
+        });
+      }
+
+      // Pass through errors if origin fails
+      const errHeaders = new Headers(upstreamRes.headers);
+      errHeaders.set('Access-Control-Allow-Origin', '*');
+      return new Response(upstreamRes.body, { status: upstreamRes.status, headers: errHeaders });
     }
 
     return new Response('Not Found', { status: 404 });

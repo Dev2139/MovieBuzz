@@ -20,7 +20,7 @@ const getApiBase = (): string => {
 export const getCloudflareProxyUrl = (): string =>
   import.meta.env.VITE_CLOUDFLARE_STREAM_PROXY_URL ||
   import.meta.env.VITE_CLOUDFLARE_PROXY_URL ||
-  'https://cinestream-proxy.dev-patel-codinggita.workers.dev';
+  'https://cinestream-stream-proxy.dev-patel-codinggita.workers.dev';
 
 export const wrapStreamWithCloudflare = (rawUrl?: string): string => {
   if (!rawUrl) return '';
@@ -37,10 +37,12 @@ export const wrapStreamWithCloudflare = (rawUrl?: string): string => {
     return resolved;
   }
 
-  // Never route Telegram proxy-file or backend media endpoints through the Cloudflare worker
-  // (Telegram media files require continuous dynamic multi-gigabyte HTTP 206 byte-range streaming directly from the API backend;
-  // routing them through a basic edge worker breaks multi-range chunking and truncates the stream)
-  if (resolved.includes('/proxy-file/') || resolved.includes('/media/')) {
+  // Route Telegram proxy-file endpoints through Cloudflare /tg/ edge cache
+  if (resolved.includes('/proxy-file/')) {
+    const fileId = resolved.substring(resolved.indexOf('/proxy-file/') + '/proxy-file/'.length);
+    return `${cfProxy}/tg/${fileId}`;
+  }
+  if (resolved.includes('/media/')) {
     return resolved;
   }
 

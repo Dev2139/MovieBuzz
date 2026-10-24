@@ -4,7 +4,11 @@ class ApiConstants {
   static const String productionBaseUrl = 'https://moviebuzz-server.onrender.com/api';
 
   // Deployed Cloudflare Stream Worker (handles high-speed CDN streaming, edge caching, and CORS bypass)
-  static const String cloudflareStreamProxyUrl = 'https://cinestream-proxy.dev-patel-codinggita.workers.dev';
+  static const String cloudflareStreamProxyUrl = 'https://cinestream-stream-proxy.dev-patel-codinggita.workers.dev';
+
+  // Mobile App Release Version
+  static const String appVersion = '2.5.0';
+  static const int appVersionCode = 25;
 
   // Local development backend presets
   static const String localHostBaseUrl = 'http://localhost:5000/api';

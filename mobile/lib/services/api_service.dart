@@ -458,4 +458,33 @@ class ApiService {
     } catch (_) {}
     return null;
   }
+
+  /// Resolves high-speed MovieBox Edge CDN and embed streams (4K, 1080p, 720p, 420p, Dubs)
+  Future<Map<String, dynamic>> resolveStreamingSources({
+    required String title,
+    int? year,
+    String type = 'movie',
+    int? season,
+    int? episode,
+    String? imdbId,
+    String? tmdbId,
+  }) async {
+    try {
+      final queryParams = <String, dynamic>{
+        'title': title,
+        if (year != null && year > 0) 'year': year.toString(),
+        'type': type,
+        if (season != null && season > 0) 'season': season.toString(),
+        if (episode != null && episode > 0) 'episode': episode.toString(),
+        if (imdbId != null && imdbId.isNotEmpty) 'imdbId': imdbId,
+        if (tmdbId != null && tmdbId.isNotEmpty) 'tmdbId': tmdbId,
+      };
+      final url = _buildUri('/streaming/resolve', queryParams);
+      final response = await http.get(url, headers: _headers());
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body) as Map<String, dynamic>;
+      }
+    } catch (_) {}
+    return {'sources': [], 'dubs': [], 'subtitles': []};
+  }
 }

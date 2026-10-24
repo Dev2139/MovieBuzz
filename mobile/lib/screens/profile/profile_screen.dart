@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../constants/app_colors.dart';
+import '../../constants/api_constants.dart';
 import '../../providers/auth_provider.dart';
 import '../auth/login_screen.dart';
 import '../auth/register_screen.dart';
@@ -383,13 +384,13 @@ class ProfileScreen extends StatelessWidget {
             _buildSettingsTile(
               icon: Icons.info_outline,
               title: 'About MovieBuzz',
-              subtitle: 'Version 1.0.0 (Mobile Edition)',
+              subtitle: 'Version ${ApiConstants.appVersion} (Cloudflare Edge Edition)',
               onTap: () {
                 showAboutDialog(
                   context: context,
                   applicationName: 'MovieBuzz',
-                  applicationVersion: '1.0.0',
-                  applicationLegalese: 'Cinematic streaming client',
+                  applicationVersion: ApiConstants.appVersion,
+                  applicationLegalese: 'Cinematic streaming client with Cloudflare Edge acceleration',
                 );
               },
             ),

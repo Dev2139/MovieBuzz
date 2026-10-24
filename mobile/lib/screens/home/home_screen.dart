@@ -14,6 +14,7 @@ import '../requests/requests_screen.dart';
 import '../profile/profile_screen.dart';
 import '../../services/api_service.dart';
 import '../../widgets/app_update_dialog.dart';
+import '../../constants/api_constants.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -48,9 +49,18 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       final update = await ApiService().getLatestAppUpdate();
       if (update != null && mounted) {
+        final serverVersionCode = update['versionCode'] is int
+            ? update['versionCode'] as int
+            : int.tryParse(update['versionCode']?.toString() ?? '0') ?? 0;
         final serverVersion = update['version'] as String? ?? '';
-        // If server version is newer or update marked active, display update bottom sheet
-        if (serverVersion.isNotEmpty && serverVersion != '1.0.0') {
+
+        // Strict Check: ONLY notify user if they are on an OLDER version.
+        // If they already have the latest version (e.g. 25 / 2.5.0), do NOT notify!
+        final bool isNewer = serverVersionCode > 0
+            ? serverVersionCode > ApiConstants.appVersionCode
+            : (serverVersion.isNotEmpty && serverVersion != ApiConstants.appVersion);
+
+        if (isNewer) {
           AppUpdateDialog.show(context, update);
         }
       }

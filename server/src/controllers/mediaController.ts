@@ -23,9 +23,13 @@ export const getMediaWatchStream = async (req: Request, res: Response) => {
     const protocol = (req.headers['x-forwarded-proto'] as string) || req.protocol || 'http';
     const baseUrl = `${protocol}://${host}`;
 
+    const cfProxy = (process.env.CLOUDFLARE_STREAM_PROXY_URL || 'https://cinestream-stream-proxy.dev-patel-codinggita.workers.dev').trim().replace(/\/+$/, '');
     let streamUrl = mediaObj.streamUrl;
     if (mediaObj.provider === 'telegram' && mediaObj.providerMediaId) {
-      streamUrl = `${baseUrl}/api/media/proxy-file/${encodeURIComponent(mediaObj.providerMediaId)}`;
+      const isLocal = host.includes('localhost') || host.includes('127.0.0.1');
+      streamUrl = isLocal
+        ? `${baseUrl}/api/media/proxy-file/${encodeURIComponent(mediaObj.providerMediaId)}`
+        : `${cfProxy}/tg/${encodeURIComponent(mediaObj.providerMediaId)}`;
     }
 
     return res.json({
@@ -80,6 +84,14 @@ export const proxyTelegramFileStream = async (req: Request, res: Response) => {
     // If AAC compatibility / transcoding is explicitly requested, route to FFmpeg audio transcoder
     if (req.query.transcode === 'true' || req.query.compat === 'true' || req.query.aac === 'true') {
       return transcodeTelegramFileStream(req, res);
+    }
+
+    // Direct requests from browsers on Render: 307 redirect to Cloudflare Worker to protect Render free bandwidth
+    const host = req.get('host') || '';
+    const isLocal = host.includes('localhost') || host.includes('127.0.0.1');
+    const cfProxy = (process.env.CLOUDFLARE_STREAM_PROXY_URL || 'https://cinestream-stream-proxy.dev-patel-codinggita.workers.dev').trim().replace(/\/+$/, '');
+    if (!isLocal && cfProxy && req.query.direct !== 'true') {
+      return res.redirect(307, `${cfProxy}/tg/${encodeURIComponent(fileId)}`);
     }
 
     const range = req.headers.range;
@@ -138,17 +150,17 @@ export const proxyTelegramFileStream = async (req: Request, res: Response) => {
     const totalSize = (await withTimeout(telegramStreamService.getFileSize(activeFileId, messageId), 3500, null)) || 1500000000;
 
     let start = 0;
-    let reqSize = 512 * 1024;
+    let reqSize = 1024 * 1024; // 1 MB high-speed standard chunk for fast buffer fill
 
     if (range) {
       const parts = range.replace(/bytes=/, '').split('-');
       start = parseInt(parts[0], 10) || 0;
       if (parts[1]) {
         const requestedEnd = parseInt(parts[1], 10);
-        reqSize = Math.min(requestedEnd - start + 1, 1024 * 1024);
+        reqSize = Math.min(requestedEnd - start + 1, 2 * 1024 * 1024); // Up to 2MB for fast scrub & seek
       } else {
-        // Open-ended Range requests (e.g. bytes=0-) get a full 1MB chunk for instant playback startup
-        reqSize = 1024 * 1024;
+        // Open-ended Range requests (e.g. bytes=0-) get a full 1.5MB chunk for instant playback startup
+        reqSize = 1536 * 1024;
       }
     }
 

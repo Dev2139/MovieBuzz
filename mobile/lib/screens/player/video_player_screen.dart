@@ -280,7 +280,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
             headers: {
               'Range': 'bytes=0-1048576',
               'User-Agent': 'MovieBuzz-Mobile/2.3',
-              'Referer': 'https://cinestream-proxy.dev-patel-codinggita.workers.dev',
+              'Referer': 'https://cinestream-stream-proxy.dev-patel-codinggita.workers.dev',
             },
           );
         } catch (_) {}
@@ -304,18 +304,54 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
 
       if (_currentMedia != null) {
         streamUrl = _currentMedia!.streamUrl;
-      } else if (_currentEpisode != null) {
-        // Fetch episode streams
-        final res = await _api.getContentBySlug(_currentContent.slug);
-        _availableQualities = (res['media'] as List<Media>?) ?? [];
-        if (_availableQualities.isNotEmpty) {
-          _currentMedia = _availableQualities.first;
-          streamUrl = _currentMedia!.streamUrl;
-        }
       } else {
-        // Fetch movie streams
-        final res = await _api.getContentBySlug(_currentContent.slug);
-        _availableQualities = (res['media'] as List<Media>?) ?? [];
+        final List<Media> sourcesList = [];
+
+        // 1. TIER 1: High-Speed MovieBox & Edge CDN Streams (Matches Website 1:1)
+        try {
+          final res = await _api.resolveStreamingSources(
+            title: _currentContent.title,
+            year: _currentContent.releaseYear,
+            type: _currentContent.isSeries ? 'series' : 'movie',
+            season: _currentEpisode?.seasonNumber,
+            episode: _currentEpisode?.episodeNumber,
+            imdbId: _currentContent.imdbId,
+            tmdbId: _currentContent.tmdbId?.toString(),
+          );
+          final rawSources = (res['sources'] as List<dynamic>?) ?? [];
+          for (final s in rawSources) {
+            final q = (s['quality'] ?? '1080p').toString();
+            final resStr = (s['resolution'] ?? '1080p').toString();
+            final sUrl = (s['streamUrl'] ?? '').toString();
+            if (sUrl.isNotEmpty) {
+              sourcesList.add(Media(
+                id: s['resourceId']?.toString() ?? 'src-$q',
+                contentId: _currentContent.id,
+                quality: q,
+                resolution: resStr,
+                fileSize: (s['fileSize'] ?? 'Standard').toString(),
+                streamUrl: sUrl,
+                downloadUrl: sUrl,
+                mimeType: s['mimeType']?.toString() ?? 'video/mp4',
+                format: s['format']?.toString(),
+                provider: 'cinestream',
+              ));
+            }
+          }
+        } catch (_) {}
+
+        // 2. TIER 2: Direct catalog / Telegram media
+        try {
+          final catalogRes = await _api.getContentBySlug(_currentContent.slug);
+          final catalogMedia = (catalogRes['media'] as List<Media>?) ?? [];
+          for (final cm in catalogMedia) {
+            if (!sourcesList.any((s) => s.streamUrl == cm.streamUrl)) {
+              sourcesList.add(cm);
+            }
+          }
+        } catch (_) {}
+
+        _availableQualities = sourcesList;
         if (_availableQualities.isNotEmpty) {
           _currentMedia = _availableQualities.first;
           streamUrl = _currentMedia!.streamUrl;
@@ -340,7 +376,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
         Uri.parse(streamUrl),
         httpHeaders: {
           'User-Agent': 'MovieBuzz-Mobile/2.3',
-          'Referer': 'https://cinestream-proxy.dev-patel-codinggita.workers.dev',
+          'Referer': 'https://cinestream-stream-proxy.dev-patel-codinggita.workers.dev',
         },
       );
 
@@ -582,6 +618,87 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
               }),
             ],
           ),
+        );
+      },
+    );
+  }
+
+  void _showEpisodesModal() {
+    if (_playlist.isEmpty) return;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.darkCard,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return DraggableScrollableSheet(
+          initialChildSize: 0.6,
+          maxChildSize: 0.85,
+          minChildSize: 0.35,
+          expand: false,
+          builder: (context, scrollController) {
+            return Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Episodes (${_playlist.length})',
+                        style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close, color: Colors.white70),
+                        onPressed: () => Navigator.of(context).pop(),
+                      ),
+                    ],
+                  ),
+                ),
+                const Divider(height: 1, color: AppColors.darkBorder),
+                Expanded(
+                  child: ListView.builder(
+                    controller: scrollController,
+                    itemCount: _playlist.length,
+                    itemBuilder: (context, index) {
+                      final ep = _playlist[index];
+                      final isCurrent = _currentEpisode?.id == ep.id;
+                      return ListTile(
+                        leading: Container(
+                          width: 44,
+                          height: 44,
+                          decoration: BoxDecoration(
+                            color: isCurrent ? AppColors.brand : AppColors.darkHover,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Center(
+                            child: isCurrent
+                                ? const Icon(Icons.play_arrow_rounded, color: Colors.white)
+                                : Text('${ep.episodeNumber}',
+                                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                          ),
+                        ),
+                        title: Text(
+                          ep.title,
+                          style: TextStyle(
+                            color: isCurrent ? AppColors.brand : Colors.white,
+                            fontWeight: isCurrent ? FontWeight.bold : FontWeight.w600,
+                          ),
+                        ),
+                        subtitle: Text('Episode ${ep.episodeNumber}', style: const TextStyle(color: Colors.white54, fontSize: 12)),
+                        onTap: () {
+                          Navigator.of(context).pop();
+                          _initStream(ep);
+                        },
+                      );
+                    },
+                  ),
+                ),
+              ],
+            );
+          },
         );
       },
     );
@@ -1022,6 +1139,14 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                           tooltip: 'Aspect Ratio',
                           onPressed: _toggleFitMode,
                         ),
+
+                        // Episodes Drawer (MovieBox feature for TV Series)
+                        if (_currentContent.isSeries && _playlist.isNotEmpty)
+                          IconButton(
+                            icon: const Icon(Icons.video_library_rounded, color: Colors.white, size: 20),
+                            tooltip: 'Episodes',
+                            onPressed: _showEpisodesModal,
+                          ),
 
                         // Playback Speed
                         IconButton(

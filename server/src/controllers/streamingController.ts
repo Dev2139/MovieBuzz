@@ -70,7 +70,7 @@ function isAllowedUrl(targetUrl: string): boolean {
   }
 }
 
-export const DEFAULT_CLOUDFLARE_PROXY_URL = 'https://cinestream-proxy.dev-patel-codinggita.workers.dev';
+export const DEFAULT_CLOUDFLARE_PROXY_URL = 'https://cinestream-stream-proxy.dev-patel-codinggita.workers.dev';
 
 export const getCloudflareStreamProxyUrl = (): string => {
   return (process.env.CLOUDFLARE_STREAM_PROXY_URL || DEFAULT_CLOUDFLARE_PROXY_URL)
