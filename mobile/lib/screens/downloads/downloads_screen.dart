@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import '../../constants/app_colors.dart';
 import '../../models/content.dart';
 import '../../models/offline_download_item.dart';
@@ -18,6 +19,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
   List<OfflineDownloadItem> _downloads = [];
   bool _isLoading = true;
   int _totalBytes = 0;
+  String _selectedFilter = 'All'; // 'All', 'Movies', 'Series'
 
   @override
   void initState() {
@@ -37,6 +39,18 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
       });
     }
   }
+
+  List<OfflineDownloadItem> get _filteredDownloads {
+    if (_selectedFilter == 'Movies') {
+      return _downloads.where((d) => !d.isSeries).toList();
+    } else if (_selectedFilter == 'Series') {
+      return _downloads.where((d) => d.isSeries).toList();
+    }
+    return _downloads;
+  }
+
+  int get _moviesCount => _downloads.where((d) => !d.isSeries).length;
+  int get _seriesCount => _downloads.where((d) => d.isSeries).length;
 
   String _formatBytes(int bytes) {
     if (bytes < 1024 * 1024) {
@@ -119,10 +133,93 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
     }
   }
 
+  Widget _buildPosterThumbnail(OfflineDownloadItem item) {
+    return GestureDetector(
+      onTap: () => _playOffline(item),
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: Container(
+              width: 72,
+              height: 96,
+              color: const Color(0xFF1C1C28),
+              child: item.posterUrl.isNotEmpty
+                  ? CachedNetworkImage(
+                      imageUrl: item.posterUrl,
+                      fit: BoxFit.cover,
+                      placeholder: (context, url) => Container(
+                        color: const Color(0xFF1E1E2C),
+                        child: const Center(
+                          child: Icon(Icons.movie_rounded, color: AppColors.textMuted, size: 24),
+                        ),
+                      ),
+                      errorWidget: (context, url, error) => Container(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [
+                              AppColors.brand.withValues(alpha: 0.3),
+                              const Color(0xFF14141E),
+                            ],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
+                        ),
+                        child: Center(
+                          child: Icon(
+                            item.isSeries ? Icons.tv_rounded : Icons.movie_filter_rounded,
+                            color: Colors.white70,
+                            size: 28,
+                          ),
+                        ),
+                      ),
+                    )
+                  : Container(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [
+                            AppColors.brand.withValues(alpha: 0.3),
+                            const Color(0xFF14141E),
+                          ],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
+                      ),
+                      child: Center(
+                        child: Icon(
+                          item.isSeries ? Icons.tv_rounded : Icons.movie_filter_rounded,
+                          color: Colors.white70,
+                          size: 28,
+                        ),
+                      ),
+                    ),
+            ),
+          ),
+          Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.7),
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white24, width: 1),
+            ),
+            child: const Icon(
+              Icons.play_arrow_rounded,
+              color: Colors.white,
+              size: 20,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final downloadService = Provider.of<DownloadService>(context);
     final activeIds = downloadService.activeDownloadIds;
+    final filtered = _filteredDownloads;
 
     return Scaffold(
       backgroundColor: AppColors.darkBase,
@@ -134,8 +231,8 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
             Icon(Icons.download_for_offline_rounded, color: AppColors.brand, size: 22),
             SizedBox(width: 8),
             Text(
-              'Offline Downloads',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+              'Downloads',
+              style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18),
             ),
           ],
         ),
@@ -154,6 +251,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
               backgroundColor: AppColors.darkCard,
               onRefresh: _loadDownloads,
               child: ListView(
+                physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
                 children: [
                   // Storage & Offline Status Banner
@@ -162,24 +260,24 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
                         colors: [
-                          AppColors.brand.withValues(alpha: 0.15),
+                          AppColors.brand.withValues(alpha: 0.16),
                           AppColors.darkCard,
                         ],
                         begin: Alignment.topLeft,
                         end: Alignment.bottomRight,
                       ),
                       borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: AppColors.brand.withValues(alpha: 0.3)),
+                      border: Border.all(color: AppColors.brand.withValues(alpha: 0.35)),
                     ),
                     child: Row(
                       children: [
                         Container(
                           padding: const EdgeInsets.all(12),
                           decoration: BoxDecoration(
-                            color: AppColors.brand.withValues(alpha: 0.2),
+                            color: AppColors.brand.withValues(alpha: 0.22),
                             borderRadius: BorderRadius.circular(12),
                           ),
-                          child: const Icon(Icons.folder_special_rounded, color: AppColors.brand, size: 28),
+                          child: const Icon(Icons.offline_pin_rounded, color: AppColors.brand, size: 28),
                         ),
                         const SizedBox(width: 14),
                         Expanded(
@@ -187,16 +285,16 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                '${_downloads.length} ${_downloads.length == 1 ? 'Title' : 'Titles'} Downloaded',
+                                '${_downloads.length} ${_downloads.length == 1 ? 'Title' : 'Titles'} Available Offline',
                                 style: const TextStyle(
                                   color: Colors.white,
                                   fontSize: 15,
-                                  fontWeight: FontWeight.bold,
+                                  fontWeight: FontWeight.w900,
                                 ),
                               ),
                               const SizedBox(height: 3),
                               Text(
-                                '${_formatBytes(_totalBytes)} stored in mobile cache • In-app offline only',
+                                '${_formatBytes(_totalBytes)} stored • 100% playable without internet',
                                 style: const TextStyle(
                                   color: AppColors.textSecondary,
                                   fontSize: 12,
@@ -209,9 +307,27 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                     ),
                   ),
 
-                  const SizedBox(height: 18),
+                  const SizedBox(height: 16),
 
-                  // Active Downloads Section (if any)
+                  // Category Filter Pills: All, Movies, Series
+                  SizedBox(
+                    height: 36,
+                    child: ListView(
+                      scrollDirection: Axis.horizontal,
+                      physics: const BouncingScrollPhysics(),
+                      children: [
+                        _buildFilterPill('All', _downloads.length),
+                        const SizedBox(width: 8),
+                        _buildFilterPill('Movies', _moviesCount),
+                        const SizedBox(width: 8),
+                        _buildFilterPill('Series', _seriesCount),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  // Active Downloads Section (if any downloading right now)
                   if (activeIds.isNotEmpty) ...[
                     const Row(
                       children: [
@@ -283,63 +399,99 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                     const SizedBox(height: 10),
                   ],
 
-                  // Downloaded Titles Section
-                  if (_downloads.isEmpty && activeIds.isEmpty) ...[
-                    const SizedBox(height: 60),
+                  // Downloaded Titles Section or Empty State
+                  if (filtered.isEmpty && activeIds.isEmpty) ...[
+                    const SizedBox(height: 48),
                     Center(
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           Container(
-                            width: 80,
-                            height: 80,
+                            width: 84,
+                            height: 84,
                             decoration: BoxDecoration(
                               color: AppColors.darkCard,
                               shape: BoxShape.circle,
-                              border: Border.all(color: AppColors.darkBorder),
+                              border: Border.all(color: AppColors.darkBorder, width: 1.5),
                             ),
                             child: const Icon(
-                              Icons.cloud_download_outlined,
-                              size: 40,
+                              Icons.cloud_off_rounded,
+                              size: 42,
                               color: AppColors.textMuted,
                             ),
                           ),
                           const SizedBox(height: 18),
                           const Text(
-                            'No Offline Downloads Yet',
+                            'No Downloaded Content',
                             style: TextStyle(
                               color: Colors.white,
-                              fontSize: 17,
-                              fontWeight: FontWeight.bold,
+                              fontSize: 18,
+                              fontWeight: FontWeight.w900,
                             ),
                           ),
                           const SizedBox(height: 8),
-                          const Padding(
-                            padding: EdgeInsets.symmetric(horizontal: 32),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 32),
                             child: Text(
-                              'Download movies & episodes to watch anywhere with zero internet, buffered in your device storage.',
+                              _selectedFilter == 'All'
+                                  ? 'You do not have any downloaded movies or series. Download titles while online to watch them anywhere without any network connection.'
+                                  : (_selectedFilter == 'Movies'
+                                      ? 'No downloaded movies found in offline storage.'
+                                      : 'No downloaded series episodes found in offline storage.'),
                               textAlign: TextAlign.center,
-                              style: TextStyle(
+                              style: const TextStyle(
                                 color: AppColors.textSecondary,
                                 fontSize: 13,
-                                height: 1.4,
+                                height: 1.45,
                               ),
+                            ),
+                          ),
+                          const SizedBox(height: 20),
+                          ElevatedButton.icon(
+                            onPressed: () => Navigator.of(context).pop(),
+                            icon: const Icon(Icons.home_rounded, size: 18, color: Colors.white),
+                            label: const Text(
+                              'Return to Home',
+                              style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
+                            ),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppColors.brand,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                             ),
                           ),
                         ],
                       ),
                     ),
                   ] else ...[
-                    const Text(
-                      'Ready to Watch Offline',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 14,
-                        fontWeight: FontWeight.bold,
-                      ),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'Ready to Watch Offline (${filtered.length})',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 14.5,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const Row(
+                          children: [
+                            Icon(Icons.wifi_off_rounded, color: Colors.greenAccent, size: 14),
+                            SizedBox(width: 4),
+                            Text(
+                              'Zero Data Playback',
+                              style: TextStyle(
+                                color: Colors.greenAccent,
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 10),
-                    ..._downloads.map((item) {
+                    const SizedBox(height: 12),
+                    ...filtered.map((item) {
                       return Container(
                         margin: const EdgeInsets.only(bottom: 12),
                         padding: const EdgeInsets.all(10),
@@ -351,42 +503,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                         child: Row(
                           children: [
                             // Poster / Thumbnail with Play Overlay
-                            GestureDetector(
-                              onTap: () => _playOffline(item),
-                              child: Stack(
-                                alignment: Alignment.center,
-                                children: [
-                                  ClipRRect(
-                                    borderRadius: BorderRadius.circular(8),
-                                    child: Container(
-                                      width: 70,
-                                      height: 90,
-                                      color: Colors.black26,
-                                      child: item.posterUrl.isNotEmpty
-                                          ? Image.network(
-                                              item.posterUrl,
-                                              fit: BoxFit.cover,
-                                              errorBuilder: (_, __, ___) => const Icon(Icons.movie, color: AppColors.textMuted),
-                                            )
-                                          : const Icon(Icons.movie, color: AppColors.textMuted),
-                                    ),
-                                  ),
-                                  Container(
-                                    width: 32,
-                                    height: 32,
-                                    decoration: BoxDecoration(
-                                      color: Colors.black.withValues(alpha: 0.65),
-                                      shape: BoxShape.circle,
-                                    ),
-                                    child: const Icon(
-                                      Icons.play_arrow_rounded,
-                                      color: Colors.white,
-                                      size: 20,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
+                            _buildPosterThumbnail(item),
 
                             const SizedBox(width: 12),
 
@@ -395,6 +512,27 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
+                                  // Category Tag: Movie vs Series
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: item.isSeries
+                                          ? Colors.indigo.withValues(alpha: 0.25)
+                                          : AppColors.brand.withValues(alpha: 0.25),
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: Text(
+                                      item.isSeries ? 'SERIES' : 'MOVIE',
+                                      style: TextStyle(
+                                        color: item.isSeries ? const Color(0xFF818CF8) : AppColors.brand,
+                                        fontSize: 9.5,
+                                        fontWeight: FontWeight.w900,
+                                        letterSpacing: 0.5,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+
                                   Text(
                                     item.displayTitle,
                                     style: const TextStyle(
@@ -406,19 +544,19 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                                     maxLines: 2,
                                     overflow: TextOverflow.ellipsis,
                                   ),
-                                  const SizedBox(height: 6),
+                                  const SizedBox(height: 5),
                                   Row(
                                     children: [
                                       Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
                                         decoration: BoxDecoration(
-                                          color: AppColors.brand.withValues(alpha: 0.2),
+                                          color: const Color(0xFF242436),
                                           borderRadius: BorderRadius.circular(4),
                                         ),
                                         child: Text(
                                           item.quality,
                                           style: const TextStyle(
-                                            color: AppColors.brand,
+                                            color: Colors.white70,
                                             fontSize: 10,
                                             fontWeight: FontWeight.bold,
                                           ),
@@ -470,6 +608,34 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                 ],
               ),
             ),
+    );
+  }
+
+  Widget _buildFilterPill(String title, int count) {
+    final isSelected = _selectedFilter == title;
+    return GestureDetector(
+      onTap: () => setState(() => _selectedFilter = title),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+        decoration: BoxDecoration(
+          color: isSelected ? AppColors.brand : const Color(0xFF14141E),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: isSelected ? AppColors.brand : const Color(0xFF242436),
+            width: 0.8,
+          ),
+        ),
+        child: Center(
+          child: Text(
+            '$title ($count)',
+            style: TextStyle(
+              color: isSelected ? Colors.white : AppColors.textSecondary,
+              fontSize: 12,
+              fontWeight: isSelected ? FontWeight.w800 : FontWeight.w500,
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

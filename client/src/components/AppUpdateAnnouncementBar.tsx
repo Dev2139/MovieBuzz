@@ -16,7 +16,7 @@ export const AppUpdateAnnouncementBar: React.FC = () => {
     staleTime: 5 * 60 * 1000,
   });
 
-  const version = updateData?.version ? `v${updateData.version}` : 'v2.7.0';
+  const version = updateData?.version ? `v${updateData.version}` : 'v2.8.0';
   const storageKey = `moviebuzz_announcement_${version}_dismissed`;
 
   useEffect(() => {
@@ -47,7 +47,7 @@ export const AppUpdateAnnouncementBar: React.FC = () => {
             {version} Live
           </span>
           <p className="truncate text-gray-200 text-xs sm:text-sm">
-            <strong className="text-white font-semibold">New Release:</strong> Watch movies offline directly in our Android App! Direct playable MP4 source streaming enabled.
+            <strong className="text-white font-semibold">New Release:</strong> Smart offline mode with slow network auto-redirect to downloads & zero-data playback!
           </p>
         </div>
 

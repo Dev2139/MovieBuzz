@@ -18,6 +18,7 @@ import '../../constants/api_constants.dart';
 import '../downloads/downloads_screen.dart';
 import '../../models/content.dart';
 import '../../widgets/content_card.dart';
+import '../../services/network_monitor_service.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -74,6 +75,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     final contentProvider = Provider.of<ContentProvider>(context);
     final authProvider = Provider.of<AuthProvider>(context);
+    final networkMonitor = Provider.of<NetworkMonitorService>(context);
     final user = authProvider.user;
 
     return Scaffold(
@@ -85,6 +87,7 @@ class _HomeScreenState extends State<HomeScreen> {
           color: AppColors.brand,
           backgroundColor: AppColors.darkCard,
           onRefresh: () async {
+            await networkMonitor.checkConnectivity();
             await contentProvider.loadHomeFeed();
           },
           child: CustomScrollView(
@@ -290,33 +293,99 @@ class _HomeScreenState extends State<HomeScreen> {
                     ],
                   ),
                 )
-              else if (contentProvider.error != null && contentProvider.trendingMovies.isEmpty)
+              else if ((contentProvider.error != null || networkMonitor.isOffline) && contentProvider.trendingMovies.isEmpty)
                 SliverFillRemaining(
+                  hasScrollBody: false,
                   child: Center(
                     child: Padding(
                       padding: const EdgeInsets.all(24.0),
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          const Icon(Icons.cloud_off_rounded, size: 54, color: AppColors.textMuted),
-                          const SizedBox(height: 16),
-                          const Text(
-                            'Unable to connect to MovieBuzz',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            authProvider.currentBaseUrl,
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(fontSize: 12, color: AppColors.textMuted),
+                          Container(
+                            width: 88,
+                            height: 88,
+                            decoration: BoxDecoration(
+                              color: AppColors.brand.withValues(alpha: 0.12),
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: AppColors.brand.withValues(alpha: 0.35),
+                                width: 1.5,
+                              ),
+                            ),
+                            child: const Icon(
+                              Icons.wifi_off_rounded,
+                              size: 44,
+                              color: AppColors.brand,
+                            ),
                           ),
                           const SizedBox(height: 20),
-                          ElevatedButton.icon(
-                            onPressed: () => contentProvider.loadHomeFeed(),
-                            icon: const Icon(Icons.refresh),
-                            label: const Text('Try Again'),
-                            style: ElevatedButton.styleFrom(backgroundColor: AppColors.brand),
+                          const Text(
+                            'Network Offline or Slow',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 19,
+                              fontWeight: FontWeight.w900,
+                              color: Colors.white,
+                              letterSpacing: 0.2,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          const Padding(
+                            padding: EdgeInsets.symmetric(horizontal: 16),
+                            child: Text(
+                              'Network connection is currently unavailable or too slow to stream. You can still watch all your downloaded movies & series offline anytime!',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: AppColors.textSecondary,
+                                height: 1.45,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 24),
+                          // Primary Redirect Button to Downloads
+                          ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 320),
+                            child: SizedBox(
+                              width: double.infinity,
+                              height: 48,
+                              child: ElevatedButton.icon(
+                              onPressed: () {
+                                Navigator.of(context).push(
+                                  MaterialPageRoute(builder: (_) => const DownloadsScreen()),
+                                );
+                              },
+                              icon: const Icon(Icons.download_for_offline_rounded, color: Colors.white, size: 21),
+                              label: const Text(
+                                'Go to Downloads (Watch Offline)',
+                                style: TextStyle(
+                                  fontSize: 14.5,
+                                  fontWeight: FontWeight.w900,
+                                  color: Colors.white,
+                                ),
+                              ),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: AppColors.brand,
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                                elevation: 6,
+                                shadowColor: AppColors.brand.withValues(alpha: 0.5),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                          // Secondary Retry Button
+                          TextButton.icon(
+                            onPressed: () async {
+                              await networkMonitor.checkConnectivity();
+                              contentProvider.loadHomeFeed();
+                            },
+                            icon: const Icon(Icons.refresh_rounded, size: 18, color: AppColors.textSecondary),
+                            label: const Text(
+                              'Retry Connection',
+                              style: TextStyle(color: AppColors.textSecondary, fontSize: 13, fontWeight: FontWeight.w600),
+                            ),
                           ),
                         ],
                       ),
@@ -326,6 +395,102 @@ class _HomeScreenState extends State<HomeScreen> {
               else
                 SliverList(
                   delegate: SliverChildListDelegate([
+                    // Network Warning Banner if network is slow or offline while content is cached
+                    if (networkMonitor.isProblematic)
+                      Container(
+                        margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: networkMonitor.isOffline
+                                ? [
+                                    const Color(0xFFEF4444).withValues(alpha: 0.22),
+                                    const Color(0xFF1F1113),
+                                  ]
+                                : [
+                                    const Color(0xFFF59E0B).withValues(alpha: 0.22),
+                                    const Color(0xFF1F1A11),
+                                  ],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: networkMonitor.isOffline
+                                ? const Color(0xFFEF4444).withValues(alpha: 0.5)
+                                : const Color(0xFFF59E0B).withValues(alpha: 0.5),
+                            width: 1.2,
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: (networkMonitor.isOffline ? Colors.redAccent : Colors.amber)
+                                    .withValues(alpha: 0.2),
+                                shape: BoxShape.circle,
+                              ),
+                              child: Icon(
+                                networkMonitor.isOffline ? Icons.wifi_off_rounded : Icons.speed_rounded,
+                                color: networkMonitor.isOffline ? const Color(0xFFF87171) : const Color(0xFFFBBF24),
+                                size: 20,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    networkMonitor.isOffline
+                                        ? 'No Internet Connection'
+                                        : 'Slow Network Connection',
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w800,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    networkMonitor.isOffline
+                                        ? 'Watch your downloaded titles without buffering'
+                                        : 'Streaming may lag. Switch to offline downloads',
+                                    style: const TextStyle(
+                                      color: AppColors.textSecondary,
+                                      fontSize: 11.5,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            ElevatedButton.icon(
+                              onPressed: () {
+                                Navigator.of(context).push(
+                                  MaterialPageRoute(builder: (_) => const DownloadsScreen()),
+                                );
+                              },
+                              icon: const Icon(Icons.download_for_offline_rounded, size: 16, color: Colors.white),
+                              label: const Text(
+                                'Downloads',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w800,
+                                  color: Colors.white,
+                                ),
+                              ),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: AppColors.brand,
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+
                     // 1. Cinematic Hero Showcase Carousel
                     HeroBanner(items: contentProvider.featured),
 

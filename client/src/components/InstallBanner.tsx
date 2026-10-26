@@ -16,7 +16,7 @@ export const InstallBanner: React.FC = () => {
     staleTime: 5 * 60 * 1000,
   });
 
-  const version = appUpdate?.version ? `v${appUpdate.version}` : 'v2.7.0';
+  const version = appUpdate?.version ? `v${appUpdate.version}` : 'v2.8.0';
   const apkSize = appUpdate?.apkSize || '54 MB';
 
   useEffect(() => {
@@ -62,7 +62,7 @@ export const InstallBanner: React.FC = () => {
               </span>
             </div>
             <p className="text-xs text-gray-300 truncate mt-0.5">
-              In-App Offline Downloads • Fast edge streaming ({apkSize})
+              Smart Offline Redirect • Zero-Data Playback ({apkSize})
             </p>
           </div>
         </div>

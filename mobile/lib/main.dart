@@ -9,6 +9,7 @@ import 'providers/watchlist_provider.dart';
 import 'screens/main_screen.dart';
 import 'services/storage_service.dart';
 import 'services/download_service.dart';
+import 'services/network_monitor_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -25,6 +26,9 @@ void main() async {
 
   // Initialize local persistent storage
   await StorageService.init();
+
+  // Start network monitor
+  NetworkMonitorService().startMonitoring();
 
   runApp(const MovieBuzzApp());
 }
@@ -57,6 +61,7 @@ class MovieBuzzApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => ContentProvider()),
         ChangeNotifierProvider(create: (_) => WatchlistProvider()),
         ChangeNotifierProvider(create: (_) => DownloadService()),
+        ChangeNotifierProvider(create: (_) => NetworkMonitorService()),
       ],
       child: MaterialApp(
         title: 'MovieBuzz',

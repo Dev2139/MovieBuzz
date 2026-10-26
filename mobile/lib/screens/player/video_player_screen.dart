@@ -310,7 +310,10 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   Future<void> _loadMetadataAndStream() async {
     _initStream();
 
-    // Load series seasons or similar recommendations in parallel
+    // When playing offline downloaded media, avoid online API calls
+    if (widget.offlineFilePath != null && widget.offlineFilePath!.isNotEmpty) {
+      return;
+    }
     if (_currentContent.isSeries) {
       try {
         final seasons = await _api.getSeriesSeasons(_currentContent.id);

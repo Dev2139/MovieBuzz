@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import '../models/content.dart';
 import '../models/watch_history.dart';
 import '../services/api_service.dart';
+import '../services/network_monitor_service.dart';
 
 class ContentProvider extends ChangeNotifier {
   final ApiService _api = ApiService();
@@ -50,6 +51,7 @@ class ContentProvider extends ChangeNotifier {
       }
     } catch (e) {
       _error = e.toString();
+      NetworkMonitorService().markOffline(reason: e.toString());
     } finally {
       _isLoading = false;
       notifyListeners();

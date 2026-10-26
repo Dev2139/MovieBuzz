@@ -31,11 +31,11 @@ export const DownloadAppPage: React.FC = () => {
     staleTime: 5 * 60 * 1000,
   });
 
-  const version = updateData?.version ? `v${updateData.version}` : 'v2.7.0';
+  const version = updateData?.version ? `v${updateData.version}` : 'v2.8.0';
   const apkSize = updateData?.apkSize || '54 MB';
   const downloadUrl = updateData?.downloadUrl || '/moviebuzz.apk';
   const changelog = updateData?.changelog || '';
-  const updateTitle = updateData?.title || 'MovieBuzz v2.7.0 — In-App Offline Downloads & Playable Media Engine';
+  const updateTitle = updateData?.title || 'MovieBuzz v2.8.0 — Smart Offline Mode, Slow Network Auto-Redirect & Zero-Buffer Playback';
 
   // Construct absolute APK URL for QR code
   const absoluteApkUrl = typeof window !== 'undefined'
@@ -194,14 +194,14 @@ export const DownloadAppPage: React.FC = () => {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             <div className="bg-dark-card border border-brand-500/50 hover:border-brand-400 rounded-2xl p-6 space-y-3 transition-colors shadow-lg relative overflow-hidden group">
               <div className="absolute top-3 right-3 text-[10px] font-black uppercase tracking-wider bg-brand-500/20 text-brand-400 border border-brand-500/30 px-2.5 py-0.5 rounded-full">
-                NEW IN v2.7
+                NEW IN v2.8
               </div>
               <div className="p-3 bg-brand-500/10 text-brand-400 rounded-xl w-fit">
                 <Download className="w-6 h-6" />
               </div>
-              <h3 className="text-base font-bold text-white">In-App Offline Downloads</h3>
+              <h3 className="text-base font-bold text-white">Smart Offline & Network Auto-Redirect</h3>
               <p className="text-xs text-gray-400 leading-relaxed">
-                Save complete movies and episodes directly inside the app to watch completely offline with zero buffering and zero internet usage.
+                Automatically detects slow or lost network and provides an instant one-tap redirect to Downloads. Play movies and series 100% offline with zero data consumption.
               </p>
             </div>
 
