@@ -24,14 +24,14 @@ import {
 export const AdminAppUpdatesTab: React.FC = () => {
   const queryClient = useQueryClient();
 
-  const [version, setVersion] = useState('2.4.0');
-  const [versionCode, setVersionCode] = useState('24');
-  const [title, setTitle] = useState('MovieBuzz v2.4.0 — Zero-Lag Cinema Video Ad & Active Stream Prefetching');
+  const [version, setVersion] = useState('2.6.0');
+  const [versionCode, setVersionCode] = useState('26');
+  const [title, setTitle] = useState('MovieBuzz v2.6.0 — High-Speed Cloud Backend & Zero-Buffer Playback');
   const [changelog, setChangelog] = useState(
-    '• Cinema Sponsor Video Ad Integration: Full HD sponsor video plays smoothly before stream startup\n• Concurrent Stream Chunk Pre-Buffering: Video chunks prefetch in parallel while the sponsor video plays\n• Continuous Background Chunk Buffering: Prefetches successive chunks while playing and while paused\n• Zero-Lag Resume: Instantaneous playback resume from pause with continuous background cache\n• Dedicated Web App Installation Hub & Live Changelog'
+    '• Updated Cloud Backend: Direct high-speed connection to Render production API (moviebuzz-qr1i.onrender.com/api)\n• Buffer-Free Edge Streaming: Cloudflare Edge Worker integration for instantaneous startup and zero lag\n• Seamless Cloud Sync: Real-time synchronization of watch progress, continue watching, and watchlist\n• Enhanced Media Controller: Dynamic quality selector (4K/1080p/720p/480p), multi-track audio, and aspect ratio modes\n• Live In-App Update Engine: Automatic notification alerts and direct APK installation\n• Performance & Memory Optimizations: Silky smooth 120Hz navigation with minimal battery consumption'
   );
   const [downloadUrl, setDownloadUrl] = useState('/moviebuzz.apk');
-  const [apkSize, setApkSize] = useState('53 MB');
+  const [apkSize, setApkSize] = useState('54 MB');
   const [isMandatory, setIsMandatory] = useState(false);
   const [broadcastNotification, setBroadcastNotification] = useState(true);
 
