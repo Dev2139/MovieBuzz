@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { usePWA } from '../context/PWAContext';
 import { Film, Bookmark, History, Shield, LogOut, User as UserIcon, Menu, Crown, Smartphone, Download } from 'lucide-react';
 import { NotificationBell } from './NotificationBell';
+import { AppUpdateAnnouncementBar } from './AppUpdateAnnouncementBar';
 
 export const Navbar: React.FC = () => {
   const { user, logout, openAuthModal } = useAuth();
@@ -35,13 +36,15 @@ export const Navbar: React.FC = () => {
   ];
 
   return (
-    <header
-      className={`fixed top-0 left-0 right-0 z-40 transition-all duration-300 ${
-        isScrolled
-          ? 'bg-dark-base/95 backdrop-blur-md border-b border-dark-border py-2.5 shadow-xl'
-          : 'bg-gradient-to-b from-black/85 via-black/40 to-transparent py-3.5'
-      }`}
-    >
+    <div className="fixed top-0 left-0 right-0 z-40">
+      <AppUpdateAnnouncementBar />
+      <header
+        className={`w-full transition-all duration-300 ${
+          isScrolled
+            ? 'bg-dark-base/95 backdrop-blur-md border-b border-dark-border py-2.5 shadow-xl'
+            : 'bg-gradient-to-b from-black/85 via-black/40 to-transparent py-3.5'
+        }`}
+      >
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between">
         {/* Brand Logo */}
         <Link to="/" className="flex items-center space-x-2.5 group">
@@ -98,11 +101,14 @@ export const Navbar: React.FC = () => {
           {/* Direct Android APK Install Button */}
           <button
             onClick={() => setShowInstallModal(true)}
-            className="flex items-center space-x-1.5 text-xs font-bold px-3 py-1.5 rounded-full bg-dark-card hover:bg-dark-hover border border-dark-border hover:border-brand-500/50 text-gray-200 hover:text-white transition-all shadow-sm"
+            className="flex items-center space-x-1.5 text-xs font-bold px-3 py-1.5 rounded-full bg-dark-card hover:bg-dark-hover border border-dark-border hover:border-brand-500/50 text-gray-200 hover:text-white transition-all shadow-sm group"
             title="Download MovieBuzz Android App (APK)"
           >
-            <Smartphone className="w-3.5 h-3.5 text-brand-500" />
+            <Smartphone className="w-3.5 h-3.5 text-brand-500 group-hover:scale-110 transition-transform" />
             <span>Get App</span>
+            <span className="text-[10px] bg-emerald-500/20 text-emerald-400 font-extrabold px-1.5 py-0.5 rounded-full border border-emerald-500/40">
+              v2.7
+            </span>
           </button>
 
           <NotificationBell />
@@ -249,6 +255,9 @@ export const Navbar: React.FC = () => {
             >
               <Smartphone className="w-4 h-4 text-brand-500" />
               <span>Download Android App (.APK)</span>
+              <span className="text-[10px] bg-emerald-500/20 text-emerald-400 font-extrabold px-2 py-0.5 rounded-full border border-emerald-500/40">
+                v2.7
+              </span>
             </button>
           </div>
 
@@ -288,5 +297,6 @@ export const Navbar: React.FC = () => {
         </div>
       )}
     </header>
+  </div>
   );
 };

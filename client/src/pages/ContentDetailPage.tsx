@@ -10,13 +10,14 @@ import {
   toggleWatchlistApi,
   toggleFavoriteApi,
   fetchSimilarContent,
+  resolveStreamingSourcesByTitle,
 } from '../services/api';
 import { HorizontalCarousel } from '../components/HorizontalCarousel';
 import { Play, Download, Star, Calendar, Globe, Users, Film, Plus, Check, Heart, X, Sparkles, Layers } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { getLocalWatchlist, toggleLocalWatchlist, getLocalFavorites, toggleLocalFavorites } from '../utils/localStorage';
-import { resolveMediaUrl } from '../utils/url';
+import { resolveMediaUrl, getDownloadUrl } from '../utils/url';
 
 export const ContentDetailPage: React.FC = () => {
   const { slug } = useParams<{ slug: string }>();
@@ -136,6 +137,80 @@ export const ContentDetailPage: React.FC = () => {
     }
   };
 
+  const [isDownloadingMovie, setIsDownloadingMovie] = useState(false);
+  const [downloadingEpId, setDownloadingEpId] = useState<string | null>(null);
+
+  const handleDirectMovieDownload = async () => {
+    if (!content) return;
+    setIsDownloadingMovie(true);
+    showToast('Resolving high-speed playable MP4 stream...', 'info');
+    try {
+      if (mediaList.length > 0) {
+        const best = mediaList.find((m) => m.quality.includes('1080')) || mediaList[0];
+        const dlUrl = getDownloadUrl(best, content.title);
+        window.open(dlUrl, '_blank');
+        setIsDownloadingMovie(false);
+        return;
+      }
+
+      const res = await resolveStreamingSourcesByTitle(
+        content.title,
+        content.releaseYear,
+        'movie',
+        undefined,
+        undefined,
+        { imdbId: content.imdbId, tmdbId: content.tmdbId }
+      );
+      const sources = res?.sources || [];
+      if (sources.length > 0) {
+        const best = sources[0];
+        const streamUrl = best.rawStreamUrl || best.streamUrl;
+        const dlUrl = getDownloadUrl({ streamUrl, quality: best.quality || '1080p' }, content.title);
+        window.open(dlUrl, '_blank');
+        showToast('Download started! Will play directly on your device as MP4.', 'success');
+      } else {
+        showToast('No downloadable source found for this movie.', 'error');
+      }
+    } catch {
+      showToast('Error preparing download link', 'error');
+    } finally {
+      setIsDownloadingMovie(false);
+    }
+  };
+
+  const handleEpisodeDownload = async (ep: any, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!content) return;
+    const epKey = `s${ep.seasonNumber}e${ep.episodeNumber}`;
+    setDownloadingEpId(epKey);
+    showToast(`Resolving S${ep.seasonNumber} E${ep.episodeNumber} playable MP4...`, 'info');
+    try {
+      const res = await resolveStreamingSourcesByTitle(
+        content.title,
+        content.releaseYear,
+        'series',
+        ep.seasonNumber,
+        ep.episodeNumber,
+        { imdbId: content.imdbId, tmdbId: content.tmdbId }
+      );
+      const sources = res?.sources || [];
+      if (sources.length > 0) {
+        const best = sources[0];
+        const streamUrl = best.rawStreamUrl || best.streamUrl;
+        const epTitle = `${content.title} S${ep.seasonNumber}E${ep.episodeNumber}`;
+        const dlUrl = getDownloadUrl({ streamUrl, quality: best.quality || '1080p' }, epTitle);
+        window.open(dlUrl, '_blank');
+        showToast(`Downloading ${epTitle} (MP4)...`, 'success');
+      } else {
+        showToast('No downloadable source found for this episode.', 'error');
+      }
+    } catch {
+      showToast('Error preparing episode download', 'error');
+    } finally {
+      setDownloadingEpId(null);
+    }
+  };
+
   const handleDownloadClick = async (mediaId: string) => {
     try {
       const res = await fetchMediaDownloadLink(mediaId);
@@ -252,6 +327,17 @@ export const ContentDetailPage: React.FC = () => {
                 >
                   <Play className="w-4 h-4 sm:w-5 sm:h-5 fill-white" />
                   <span>Start Series (S1 E1)</span>
+                </button>
+              )}
+
+              {content.type === 'movie' && (
+                <button
+                  onClick={handleDirectMovieDownload}
+                  disabled={isDownloadingMovie}
+                  className="flex items-center space-x-1.5 px-4 py-2.5 sm:py-3 rounded-xl border border-emerald-500/50 bg-emerald-500/15 hover:bg-emerald-500 text-emerald-400 hover:text-white text-xs sm:text-sm font-bold transition-all active:scale-95 shadow-lg shadow-emerald-500/15"
+                >
+                  <Download className={`w-4 h-4 ${isDownloadingMovie ? 'animate-bounce' : ''}`} />
+                  <span>{isDownloadingMovie ? 'Preparing MP4...' : 'Download Movie (MP4)'}</span>
                 </button>
               )}
 
@@ -410,10 +496,20 @@ export const ContentDetailPage: React.FC = () => {
                               <p className="text-[11px] text-gray-400 line-clamp-2 mt-1 leading-relaxed">{ep.description}</p>
                             </div>
 
-                            <button className="mt-2.5 w-full py-1.5 bg-dark-surface group-hover:bg-brand-500/20 text-gray-300 group-hover:text-brand-400 border border-dark-border group-hover:border-brand-500/40 rounded-lg text-xs font-semibold flex items-center justify-center space-x-1.5 transition-colors">
-                              <Play className="w-3 h-3 fill-current" />
-                              <span>Play Episode {ep.episodeNumber}</span>
-                            </button>
+                            <div className="flex items-center space-x-2 mt-2.5">
+                              <button className="flex-1 py-1.5 bg-dark-surface group-hover:bg-brand-500/20 text-gray-300 group-hover:text-brand-400 border border-dark-border group-hover:border-brand-500/40 rounded-lg text-xs font-semibold flex items-center justify-center space-x-1.5 transition-colors">
+                                <Play className="w-3 h-3 fill-current" />
+                                <span>Play Episode {ep.episodeNumber}</span>
+                              </button>
+                              <button
+                                onClick={(e) => handleEpisodeDownload(ep, e)}
+                                disabled={downloadingEpId === `s${ep.seasonNumber}e${ep.episodeNumber}`}
+                                className="px-2.5 py-1.5 bg-emerald-500/10 hover:bg-emerald-500 text-emerald-400 hover:text-white border border-emerald-500/30 rounded-lg text-xs font-bold transition-all"
+                                title="Download Episode MP4"
+                              >
+                                <Download className={`w-3.5 h-3.5 ${downloadingEpId === `s${ep.seasonNumber}e${ep.episodeNumber}` ? 'animate-bounce' : ''}`} />
+                              </button>
+                            </div>
                           </div>
                         </div>
                       ))}

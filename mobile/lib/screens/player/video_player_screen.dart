@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
@@ -24,6 +25,7 @@ class VideoPlayerScreen extends StatefulWidget {
   final double initialProgress;
   final List<Episode>? playlist;
   final bool startInFullscreen;
+  final String? offlineFilePath;
 
   const VideoPlayerScreen({
     super.key,
@@ -33,6 +35,7 @@ class VideoPlayerScreen extends StatefulWidget {
     this.initialProgress = 0,
     this.playlist,
     this.startInFullscreen = false,
+    this.offlineFilePath,
   });
 
   @override
@@ -297,9 +300,33 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     });
 
     _videoPlayerController?.dispose();
-    _videoPlayerController = null;
-
     try {
+      // Offline Playback from local device cache (100% offline, zero network, zero ads)
+      if (widget.offlineFilePath != null && widget.offlineFilePath!.isNotEmpty) {
+        final file = File(widget.offlineFilePath!);
+        if (await file.exists()) {
+          final controller = VideoPlayerController.file(file);
+          await controller.initialize();
+          if (widget.initialProgress > 0 &&
+              widget.initialProgress < controller.value.duration.inSeconds) {
+            await controller.seekTo(Duration(seconds: widget.initialProgress.toInt()));
+          }
+          controller.setPlaybackSpeed(_playbackSpeed);
+          controller.play();
+
+          setState(() {
+            _isPlayingAd = false;
+            _videoPlayerController = controller;
+            _isLoading = false;
+            _chunkBufferProgress = 1.0;
+            _chunkBufferStatus = 'Playing Offline from Device Storage (Zero Buffering)';
+          });
+
+          _startControlsTimer();
+          return;
+        }
+      }
+
       String streamUrl = '';
 
       if (_currentMedia != null) {

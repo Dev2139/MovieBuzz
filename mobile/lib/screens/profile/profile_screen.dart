@@ -8,6 +8,7 @@ import '../auth/register_screen.dart';
 import '../history/history_screen.dart';
 import '../watchlist/watchlist_screen.dart';
 import '../requests/requests_screen.dart';
+import '../downloads/downloads_screen.dart';
 import '../../widgets/custom_button.dart';
 
 class ProfileScreen extends StatelessWidget {
@@ -341,6 +342,17 @@ class ProfileScreen extends StatelessWidget {
             const SizedBox(height: 20),
 
             // Navigation List Items
+            _buildSettingsTile(
+              icon: Icons.download_for_offline_rounded,
+              title: 'Offline Downloads',
+              subtitle: 'Watch downloaded movies & episodes without internet',
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const DownloadsScreen()),
+                );
+              },
+            ),
+
             _buildSettingsTile(
               icon: Icons.history_rounded,
               title: 'Watch History',

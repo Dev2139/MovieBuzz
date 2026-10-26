@@ -487,6 +487,13 @@ export const downloadStreamAsMp4 = async (req: Request, res: Response) => {
     const safeTitle = title.replace(/[^a-zA-Z0-9_\- ]/g, '').trim().replace(/\s+/g, '_');
     const fileName = `${safeTitle}_${quality}.mp4`;
 
+    let resolvedStreamUrl = streamUrl.trim();
+    if (resolvedStreamUrl.startsWith('/')) {
+      const host = req.get('host') || 'localhost:5000';
+      const protocol = (req.headers['x-forwarded-proto'] as string) || req.protocol || 'http';
+      resolvedStreamUrl = `${protocol}://${host}${resolvedStreamUrl}`;
+    }
+
     // Set response headers for file download
     res.writeHead(200, {
       'Content-Type': 'video/mp4',
@@ -496,13 +503,16 @@ export const downloadStreamAsMp4 = async (req: Request, res: Response) => {
     });
 
     // For direct MP4 URLs (proxy-file or actual .mp4 files), just pipe them
-    const isDirectMp4 = !streamUrl.includes('.m3u8') && !streamUrl.includes('.mpd');
+    const isDirectMp4 = !resolvedStreamUrl.includes('.m3u8') && !resolvedStreamUrl.includes('.mpd');
     if (isDirectMp4) {
-      const upstream = await axios.get(streamUrl, {
+      const upstream = await axios.get(resolvedStreamUrl, {
         responseType: 'stream',
         timeout: 60000,
         maxRedirects: 5,
-        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          'Referer': 'https://cinestream-stream-proxy.dev-patel-codinggita.workers.dev',
+        },
       });
       upstream.data.pipe(res);
       upstream.data.on('error', () => res.end());
@@ -510,29 +520,31 @@ export const downloadStreamAsMp4 = async (req: Request, res: Response) => {
       return;
     }
 
-    // For HLS/DASH streams: use FFmpeg to remux into progressive MP4
+    // For HLS/DASH streams: use FFmpeg to remux into playable MP4
     const ffmpegPath = process.env.FFMPEG_PATH || (ffmpegInstaller as any)?.path || 'ffmpeg';
 
     const ffmpegArgs = [
       '-hide_banner',
       '-loglevel', 'error',
+      '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      '-headers', 'Referer: https://cinestream-stream-proxy.dev-patel-codinggita.workers.dev\r\nOrigin: https://cinestream-stream-proxy.dev-patel-codinggita.workers.dev\r\n',
       // Allow seeking/retry for flaky CDN URLs
       '-reconnect', '1',
       '-reconnect_streamed', '1',
       '-reconnect_delay_max', '5',
       // Input
-      '-i', streamUrl,
+      '-i', resolvedStreamUrl,
       // Map first video + first audio stream
       '-map', '0:v:0',
       '-map', '0:a:0?',
-      // Copy video codec (no re-encode → fast, quality preserved)
+      // Copy video codec (no re-encode → fast, zero quality loss)
       '-c:v', 'copy',
-      // AAC audio for universal device compatibility; if source is already AAC, just copy
+      // AAC audio for universal device compatibility (stereo 192k)
       '-c:a', 'aac',
       '-b:a', '192k',
       '-ac', '2',
-      // Progressive MP4 container for full playability on all devices
-      '-movflags', '+faststart',
+      // Fragmented MP4 flags supported on pipe:1 for immediate, playable download
+      '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
       '-f', 'mp4',
       'pipe:1',
     ];

@@ -16,13 +16,15 @@ export const InstallBanner: React.FC = () => {
     staleTime: 5 * 60 * 1000,
   });
 
-  const version = appUpdate?.version ? `v${appUpdate.version}` : 'v2.6.0';
+  const version = appUpdate?.version ? `v${appUpdate.version}` : 'v2.7.0';
   const apkSize = appUpdate?.apkSize || '54 MB';
 
   useEffect(() => {
-    // Check if dismissed recently (24 hours)
+    // Re-show when a new version is released, or after 24 hours
+    const dismissedVersion = localStorage.getItem('moviebuzz_apk_banner_dismissed_version');
     const lastDismissed = localStorage.getItem('moviebuzz_apk_banner_dismissed');
-    if (lastDismissed) {
+
+    if (dismissedVersion === version && lastDismissed) {
       const diffHours = (Date.now() - Number(lastDismissed)) / (1000 * 60 * 60);
       if (diffHours < 24) {
         setDismissed(true);
@@ -30,7 +32,7 @@ export const InstallBanner: React.FC = () => {
       }
     }
     setDismissed(false);
-  }, []);
+  }, [version]);
 
   // Hide on watch page or if dismissed
   if (dismissed || location.pathname.startsWith('/watch/')) {
@@ -40,6 +42,7 @@ export const InstallBanner: React.FC = () => {
   const handleDismiss = () => {
     setDismissed(true);
     localStorage.setItem('moviebuzz_apk_banner_dismissed', String(Date.now()));
+    localStorage.setItem('moviebuzz_apk_banner_dismissed_version', version);
   };
 
   return (
@@ -59,7 +62,7 @@ export const InstallBanner: React.FC = () => {
               </span>
             </div>
             <p className="text-xs text-gray-300 truncate mt-0.5">
-              Direct universal APK • Fast & smooth streaming ({apkSize})
+              In-App Offline Downloads • Fast edge streaming ({apkSize})
             </p>
           </div>
         </div>

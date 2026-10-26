@@ -8,6 +8,9 @@ import '../../models/episode.dart';
 import '../../models/media.dart';
 import '../../services/api_service.dart';
 import '../../providers/watchlist_provider.dart';
+import '../../services/offline_storage_service.dart';
+import '../../services/download_service.dart';
+import '../downloads/downloads_screen.dart';
 import '../player/video_player_screen.dart';
 import '../../widgets/shimmer_loading.dart';
 
@@ -33,11 +36,22 @@ class _ContentDetailScreenState extends State<ContentDetailScreen> {
   List<Episode> _episodes = [];
   Season? _selectedSeason;
   bool _isLoadingEpisodes = false;
+  Set<String> _downloadedIds = {};
 
   @override
   void initState() {
     super.initState();
     _loadContentDetails();
+    _checkDownloads();
+  }
+
+  Future<void> _checkDownloads() async {
+    final downloads = await OfflineStorageService.getDownloads();
+    if (mounted) {
+      setState(() {
+        _downloadedIds = downloads.map((d) => d.id).toSet();
+      });
+    }
   }
 
   Future<void> _loadContentDetails() async {
@@ -109,12 +123,160 @@ class _ContentDetailScreenState extends State<ContentDetailScreen> {
     );
   }
 
+  Future<void> _handleMovieDownload() async {
+    final movieId = 'movie-${widget.content.id}';
+    if (_downloadedIds.contains(movieId)) {
+      final item = await OfflineStorageService.getDownload(movieId);
+      if (item != null && mounted) {
+        showModalBottomSheet(
+          context: context,
+          backgroundColor: AppColors.darkCard,
+          shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+          builder: (ctx) => Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(widget.content.title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                const SizedBox(height: 6),
+                Text('Downloaded in app storage • ${item.formattedSize}', style: const TextStyle(color: AppColors.textSecondary, fontSize: 13)),
+                const SizedBox(height: 16),
+                ListTile(
+                  leading: const Icon(Icons.play_circle_fill, color: Colors.greenAccent, size: 28),
+                  title: const Text('Play Offline Now', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                  subtitle: const Text('Zero buffering • No internet required', style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => VideoPlayerScreen(
+                          content: widget.content,
+                          offlineFilePath: item.localFilePath,
+                        ),
+                      ),
+                    );
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 28),
+                  title: const Text('Delete from Device Cache', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
+                  onTap: () async {
+                    Navigator.pop(ctx);
+                    await OfflineStorageService.deleteDownload(movieId);
+                    _checkDownloads();
+                  },
+                ),
+              ],
+            ),
+          ),
+        );
+      }
+      return;
+    }
+
+    final dlService = Provider.of<DownloadService>(context, listen: false);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Starting download: "${widget.content.title}" in app storage...'),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+
+    dlService.downloadMovie(
+      content: widget.content,
+      media: _mediaList.isNotEmpty ? _mediaList.first : null,
+      onCompleted: () {
+        _checkDownloads();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('✅ "${widget.content.title}" downloaded! Available offline.'),
+              duration: const Duration(seconds: 3),
+              action: SnackBarAction(
+                label: 'View',
+                textColor: Colors.greenAccent,
+                onPressed: () {
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => const DownloadsScreen()));
+                },
+              ),
+            ),
+          );
+        }
+      },
+      onError: (err) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Download failed: $err'), backgroundColor: Colors.redAccent),
+          );
+        }
+      },
+    );
+  }
+
+  Future<void> _handleEpisodeDownload(Episode ep) async {
+    final epId = 'series-${widget.content.id}-s${ep.seasonNumber}-e${ep.episodeNumber}';
+    if (_downloadedIds.contains(epId)) {
+      final item = await OfflineStorageService.getDownload(epId);
+      if (item != null && mounted) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => VideoPlayerScreen(
+              content: widget.content,
+              episode: ep,
+              offlineFilePath: item.localFilePath,
+            ),
+          ),
+        );
+      }
+      return;
+    }
+
+    final dlService = Provider.of<DownloadService>(context, listen: false);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Downloading S${ep.seasonNumber} E${ep.episodeNumber} for offline playback...'),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+
+    dlService.downloadEpisode(
+      content: widget.content,
+      episode: ep,
+      onCompleted: () {
+        _checkDownloads();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('✅ S${ep.seasonNumber} E${ep.episodeNumber} downloaded! Available offline.'),
+              duration: const Duration(seconds: 3),
+            ),
+          );
+        }
+      },
+      onError: (err) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Download failed: $err'), backgroundColor: Colors.redAccent),
+          );
+        }
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final content = widget.content;
     final watchlistProvider = Provider.of<WatchlistProvider>(context);
+    final downloadService = Provider.of<DownloadService>(context);
     final isBookmarked = watchlistProvider.isInWatchlist(content.id);
     final isFav = watchlistProvider.isFavorite(content.id);
+
+    final movieId = 'movie-${content.id}';
+    final isMovieDownloaded = _downloadedIds.contains(movieId);
+    final isMovieDownloading = downloadService.isDownloading(movieId);
 
     final backdrop = content.backdropUrl.isNotEmpty
         ? content.backdropUrl
@@ -130,6 +292,15 @@ class _ContentDetailScreenState extends State<ContentDetailScreen> {
             expandedHeight: 280,
             pinned: true,
             backgroundColor: AppColors.darkBase,
+            actions: [
+              IconButton(
+                icon: const Icon(Icons.download_for_offline_rounded, color: Colors.white),
+                tooltip: 'Offline Downloads',
+                onPressed: () {
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => const DownloadsScreen()));
+                },
+              ),
+            ],
             leading: IconButton(
               icon: Container(
                 padding: const EdgeInsets.all(6),
@@ -300,6 +471,31 @@ class _ContentDetailScreenState extends State<ContentDetailScreen> {
                           ),
                         ),
                       ),
+                      if (content.isMovie) ...[
+                        const SizedBox(width: 10),
+                        IconButton(
+                          onPressed: _handleMovieDownload,
+                          style: IconButton.styleFrom(
+                            backgroundColor: isMovieDownloaded
+                                ? Colors.greenAccent.withValues(alpha: 0.15)
+                                : AppColors.darkCard,
+                            side: BorderSide(
+                              color: isMovieDownloaded ? Colors.greenAccent : AppColors.darkBorder,
+                            ),
+                          ),
+                          icon: isMovieDownloading
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.brand),
+                                )
+                              : Icon(
+                                  isMovieDownloaded ? Icons.download_done_rounded : Icons.download_rounded,
+                                  color: isMovieDownloaded ? Colors.greenAccent : Colors.white,
+                                ),
+                          tooltip: isMovieDownloaded ? 'Downloaded (Play Offline)' : 'Download Movie',
+                        ),
+                      ],
                       const SizedBox(width: 10),
                       IconButton(
                         onPressed: () {
@@ -576,6 +772,29 @@ class _ContentDetailScreenState extends State<ContentDetailScreen> {
                                       ],
                                     ),
                                   ),
+
+                                  // Episode Download Button
+                                  Builder(builder: (context) {
+                                    final epId = 'series-${content.id}-s${ep.seasonNumber}-e${ep.episodeNumber}';
+                                    final isEpDownloaded = _downloadedIds.contains(epId);
+                                    final isEpDownloading = downloadService.isDownloading(epId);
+
+                                    return IconButton(
+                                      icon: isEpDownloading
+                                          ? const SizedBox(
+                                              width: 18,
+                                              height: 18,
+                                              child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.brand),
+                                            )
+                                          : Icon(
+                                              isEpDownloaded ? Icons.download_done_rounded : Icons.download_rounded,
+                                              color: isEpDownloaded ? Colors.greenAccent : AppColors.textSecondary,
+                                              size: 22,
+                                            ),
+                                      onPressed: () => _handleEpisodeDownload(ep),
+                                      tooltip: isEpDownloaded ? 'Downloaded (Play Offline)' : 'Download Episode',
+                                    );
+                                  }),
                                 ],
                               ),
                             ),

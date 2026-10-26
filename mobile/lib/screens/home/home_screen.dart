@@ -15,6 +15,7 @@ import '../profile/profile_screen.dart';
 import '../../services/api_service.dart';
 import '../../widgets/app_update_dialog.dart';
 import '../../constants/api_constants.dart';
+import '../downloads/downloads_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -170,6 +171,17 @@ class _HomeScreenState extends State<HomeScreen> {
                         ],
                       ),
                     ),
+
+                  // Offline Downloads
+                  IconButton(
+                    icon: const Icon(Icons.download_for_offline_rounded, color: Colors.white, size: 22),
+                    tooltip: 'Offline Downloads',
+                    onPressed: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(builder: (_) => const DownloadsScreen()),
+                      );
+                    },
+                  ),
 
                   // Community Voting / Requests
                   IconButton(

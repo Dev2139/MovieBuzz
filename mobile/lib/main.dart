@@ -8,6 +8,7 @@ import 'providers/content_provider.dart';
 import 'providers/watchlist_provider.dart';
 import 'screens/main_screen.dart';
 import 'services/storage_service.dart';
+import 'services/download_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -55,6 +56,7 @@ class MovieBuzzApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => AuthProvider()),
         ChangeNotifierProvider(create: (_) => ContentProvider()),
         ChangeNotifierProvider(create: (_) => WatchlistProvider()),
+        ChangeNotifierProvider(create: (_) => DownloadService()),
       ],
       child: MaterialApp(
         title: 'MovieBuzz',
