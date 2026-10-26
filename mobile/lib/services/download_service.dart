@@ -239,66 +239,132 @@ class DownloadService extends ChangeNotifier {
     required String url,
     required String localFilePath,
   }) async {
-    final client = http.Client();
-    _clients[id] = client;
-
-    final request = http.Request('GET', Uri.parse(url));
-    request.headers['User-Agent'] = 'Mozilla/5.0 (Linux; Android 10; MovieBuzz Mobile)';
-    request.headers['Referer'] = 'https://cinestream-stream-proxy.dev-patel-codinggita.workers.dev';
-
-    final response = await client.send(request);
-
-    if (response.statusCode >= 400) {
-      throw Exception('Server returned HTTP ${response.statusCode}');
-    }
-
-    final totalBytes = response.contentLength ?? 0;
+    final file = File(localFilePath);
+    int totalBytes = 0;
     int receivedBytes = 0;
 
-    final file = File(localFilePath);
+    // Check if partial download already exists from earlier attempt
     if (await file.exists()) {
-      await file.delete();
+      receivedBytes = await file.length();
     }
-    final sink = file.openWrite();
 
-    final completer = Completer<void>();
+    int retryCount = 0;
+    const maxRetries = 6;
 
-    response.stream.listen(
-      (chunk) {
-        sink.add(chunk);
-        receivedBytes += chunk.length;
+    while (retryCount < maxRetries) {
+      if (!_activeDownloadIds.contains(id)) {
+        throw Exception('Download was cancelled');
+      }
 
-        if (totalBytes > 0) {
-          final progress = receivedBytes / totalBytes;
-          _progressMap[id] = progress.clamp(0.0, 0.99);
-          final mbReceived = (receivedBytes / (1024 * 1024)).toStringAsFixed(1);
-          final mbTotal = (totalBytes / (1024 * 1024)).toStringAsFixed(1);
-          _statusMap[id] = '$mbReceived MB / $mbTotal MB (${(progress * 100).toInt()}%)';
-        } else {
-          final mbReceived = (receivedBytes / (1024 * 1024)).toStringAsFixed(1);
-          _statusMap[id] = '$mbReceived MB downloaded';
-          _progressMap[id] = 0.5; // indeterminate
+      http.Client? client;
+      IOSink? sink;
+
+      try {
+        client = http.Client();
+        _clients[id] = client;
+
+        final request = http.Request('GET', Uri.parse(url));
+        request.headers['User-Agent'] = 'Mozilla/5.0 (Linux; Android 10; MovieBuzz Mobile)';
+        request.headers['Referer'] = 'https://cinestream-stream-proxy.dev-patel-codinggita.workers.dev';
+
+        // Request Range if resuming from existing bytes
+        if (receivedBytes > 0) {
+          request.headers['Range'] = 'bytes=$receivedBytes-';
         }
-        notifyListeners();
-      },
-      onDone: () async {
-        await sink.flush();
-        await sink.close();
-        completer.complete();
-      },
-      onError: (err) async {
-        await sink.close();
-        if (await file.exists()) {
-          try {
+
+        final response = await client.send(request);
+
+        // If range was requested and server returned 206 Partial Content
+        final isPartial = response.statusCode == 206;
+        if (response.statusCode == 200 && receivedBytes > 0) {
+          // Server doesn't support Range, must restart from byte 0
+          receivedBytes = 0;
+          if (await file.exists()) {
             await file.delete();
-          } catch (_) {}
+          }
+        } else if (response.statusCode >= 400) {
+          throw Exception('Server returned HTTP ${response.statusCode}');
         }
-        completer.completeError(err);
-      },
-      cancelOnError: true,
-    );
 
-    return completer.future;
+        if (totalBytes <= 0) {
+          if (isPartial && response.headers.containsKey('content-range')) {
+            final match = RegExp(r'/(\d+)').firstMatch(response.headers['content-range'] ?? '');
+            if (match != null) {
+              totalBytes = int.tryParse(match.group(1) ?? '') ?? 0;
+            }
+          }
+          if (totalBytes <= 0 && response.contentLength != null) {
+            totalBytes = receivedBytes + response.contentLength!;
+          }
+        }
+
+        sink = file.openWrite(mode: receivedBytes > 0 ? FileMode.append : FileMode.write);
+        final completer = Completer<void>();
+
+        response.stream.listen(
+          (chunk) {
+            sink?.add(chunk);
+            receivedBytes += chunk.length;
+
+            if (totalBytes > 0) {
+              final progress = (receivedBytes / totalBytes).clamp(0.0, 0.99);
+              _progressMap[id] = progress;
+              final mbReceived = (receivedBytes / (1024 * 1024)).toStringAsFixed(1);
+              final mbTotal = (totalBytes / (1024 * 1024)).toStringAsFixed(1);
+              _statusMap[id] = '$mbReceived MB / $mbTotal MB (${(progress * 100).toInt()}%)';
+            } else {
+              final mbReceived = (receivedBytes / (1024 * 1024)).toStringAsFixed(1);
+              _statusMap[id] = '$mbReceived MB downloaded';
+              _progressMap[id] = 0.5;
+            }
+            notifyListeners();
+          },
+          onDone: () async {
+            try {
+              await sink?.flush();
+              await sink?.close();
+            } catch (_) {}
+            completer.complete();
+          },
+          onError: (err) async {
+            try {
+              await sink?.close();
+            } catch (_) {}
+            completer.completeError(err);
+          },
+          cancelOnError: true,
+        );
+
+        await completer.future;
+
+        // If we reached here without error, verify completeness
+        if (totalBytes <= 0 || receivedBytes >= totalBytes) {
+          return; // Successfully finished
+        }
+      } catch (err) {
+        try {
+          await sink?.close();
+        } catch (_) {}
+
+        if (!_activeDownloadIds.contains(id)) {
+          if (await file.exists()) {
+            try { await file.delete(); } catch (_) {}
+          }
+          throw Exception('Download cancelled by user');
+        }
+
+        retryCount++;
+        if (retryCount >= maxRetries) {
+          rethrow;
+        }
+
+        _statusMap[id] = 'Reconnecting download (attempt $retryCount/$maxRetries)...';
+        notifyListeners();
+        await Future.delayed(Duration(seconds: retryCount * 2));
+      } finally {
+        client?.close();
+      }
+    }
   }
 
   void cancelDownload(String id) {

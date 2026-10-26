@@ -320,9 +320,10 @@ export const downloadTelegramFile = async (req: Request, res: Response) => {
       clientDisconnected = true;
     });
 
+    const totalSize = (await telegramStreamService.getFileSize(activeFileId, messageId)) || (mediaDoc as any)?.fileSize || 0;
+
     if (range) {
       // Range request (download resume): fetch size and serve 206 partial
-      const totalSize = await telegramStreamService.getFileSize(activeFileId, messageId);
       if (!totalSize || totalSize <= 0) {
         return res.status(503).json({ message: 'Unable to determine file size for range download' });
       }
@@ -345,6 +346,7 @@ export const downloadTelegramFile = async (req: Request, res: Response) => {
         'Content-Type': outputMime,
         'Content-Disposition': `attachment; filename="${fileName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`,
         'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
         'Access-Control-Allow-Origin': '*',
       });
 
@@ -352,40 +354,64 @@ export const downloadTelegramFile = async (req: Request, res: Response) => {
       for (let offset = start; offset <= end; offset += chunkSize) {
         if (clientDisconnected) break;
         const currentChunkSize = Math.min(chunkSize, end - offset + 1);
-        const chunk = await telegramStreamService.getChunk(activeFileId, offset, currentChunkSize, messageId);
-        if (!chunk || chunk.length === 0) break;
+
+        let chunk: Buffer | null = null;
+        for (let retry = 0; retry < 6; retry++) {
+          if (clientDisconnected) break;
+          chunk = await telegramStreamService.getChunk(activeFileId, offset, currentChunkSize, messageId);
+          if (chunk && chunk.length > 0) break;
+          await new Promise((resolve) => setTimeout(resolve, 300 * (retry + 1)));
+        }
+
+        if (!chunk || chunk.length === 0) {
+          console.warn(`[downloadTelegramFile] Failed retrieving range chunk at offset ${offset}`);
+          break;
+        }
+
         const canContinue = res.write(chunk);
         if (!canContinue) await new Promise((resolve) => res.once('drain', resolve));
       }
       return res.end();
     }
 
-    // Full-file download (no Range): use chunked transfer encoding for guaranteed completeness
-    // No Content-Length → browser tracks download by received bytes; connection close = file done
-    res.writeHead(200, {
+    // Full-file download: send Content-Length when available so browsers track exact progress
+    const headers: Record<string, any> = {
       'Content-Type': outputMime,
       'Content-Disposition': `attachment; filename="${fileName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`,
       'Accept-Ranges': 'bytes',
       'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
       'Access-Control-Allow-Origin': '*',
-      // No Content-Length set → Node.js uses Transfer-Encoding: chunked automatically
-    });
+    };
+    if (totalSize > 0) {
+      headers['Content-Length'] = totalSize;
+    }
+    res.writeHead(200, headers);
 
     const chunkSize = 1024 * 1024; // 1MB chunks
     let offset = 0;
-    let consecutiveEmpty = 0;
 
-    while (!clientDisconnected && consecutiveEmpty < 3) {
-      const chunk = await telegramStreamService.getChunk(activeFileId, offset, chunkSize, messageId);
-
-      if (!chunk || chunk.length === 0) {
-        consecutiveEmpty++;
-        // Small delay before retry to handle transient MTProto timeouts
-        await new Promise((resolve) => setTimeout(resolve, 500 * consecutiveEmpty));
-        continue;
+    while (!clientDisconnected) {
+      if (totalSize > 0 && offset >= totalSize) {
+        break; // Clean file completion
       }
 
-      consecutiveEmpty = 0; // reset on successful data
+      const currentChunkSize = totalSize > 0 ? Math.min(chunkSize, totalSize - offset) : chunkSize;
+      if (currentChunkSize <= 0) break;
+
+      let chunk: Buffer | null = null;
+      for (let retry = 0; retry < 8; retry++) {
+        if (clientDisconnected) break;
+        chunk = await telegramStreamService.getChunk(activeFileId, offset, currentChunkSize, messageId);
+        if (chunk && chunk.length > 0) break;
+        await new Promise((resolve) => setTimeout(resolve, 350 * (retry + 1)));
+      }
+
+      if (!chunk || chunk.length === 0) {
+        console.warn(`[downloadTelegramFile] Stream EOF or repeated failure at offset ${offset}`);
+        break;
+      }
+
       offset += chunk.length;
 
       const canContinue = res.write(chunk);
@@ -494,44 +520,86 @@ export const downloadStreamAsMp4 = async (req: Request, res: Response) => {
       resolvedStreamUrl = `${protocol}://${host}${resolvedStreamUrl}`;
     }
 
-    // Set response headers for file download
-    res.writeHead(200, {
-      'Content-Type': 'video/mp4',
-      'Content-Disposition': `attachment; filename="${fileName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`,
-      'Cache-Control': 'no-cache',
-      'Access-Control-Allow-Origin': '*',
-    });
-
-    // For direct MP4 URLs (proxy-file or actual .mp4 files), just pipe them
+    // For direct MP4 URLs (proxy-file or actual .mp4 files):
     const isDirectMp4 = !resolvedStreamUrl.includes('.m3u8') && !resolvedStreamUrl.includes('.mpd');
     if (isDirectMp4) {
+      // If it points to an internal Telegram proxy file, delegate directly to downloadTelegramFile
+      const proxyMatch = resolvedStreamUrl.match(/\/api\/media\/proxy-file\/([^?&#]+)/);
+      if (proxyMatch) {
+        req.params.fileId = proxyMatch[1];
+        return downloadTelegramFile(req, res);
+      }
+
+      // If it's an external direct URL, redirect the client so the client downloads directly from the source with native resume/multi-thread support!
+      if (!resolvedStreamUrl.includes('localhost') && !resolvedStreamUrl.includes('127.0.0.1')) {
+        return res.redirect(302, resolvedStreamUrl);
+      }
+
+      // If local or loopback MP4, stream it with zero timeout and Range forwarding
+      const reqHeaders: Record<string, string> = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Referer': (req.query.referer as string) || 'https://cinestream-stream-proxy.dev-patel-codinggita.workers.dev',
+      };
+      if (req.headers.range) {
+        reqHeaders['Range'] = req.headers.range;
+      }
       const upstream = await axios.get(resolvedStreamUrl, {
         responseType: 'stream',
-        timeout: 60000,
+        timeout: 0,
         maxRedirects: 5,
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-          'Referer': 'https://cinestream-stream-proxy.dev-patel-codinggita.workers.dev',
-        },
+        headers: reqHeaders,
+        validateStatus: (s) => s < 400,
       });
+
+      const statusCode = upstream.status === 206 ? 206 : 200;
+      const respHeaders: Record<string, any> = {
+        'Content-Type': upstream.headers['content-type'] || 'video/mp4',
+        'Content-Disposition': `attachment; filename="${fileName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+        'Accept-Ranges': 'bytes',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'Access-Control-Allow-Origin': '*',
+      };
+      if (upstream.headers['content-length']) {
+        respHeaders['Content-Length'] = upstream.headers['content-length'];
+      }
+      if (upstream.headers['content-range']) {
+        respHeaders['Content-Range'] = upstream.headers['content-range'];
+      }
+      res.writeHead(statusCode, respHeaders);
       upstream.data.pipe(res);
-      upstream.data.on('error', () => res.end());
-      req.on('close', () => upstream.data.destroy());
+      upstream.data.on('error', (err: any) => {
+        console.warn('[downloadStreamAsMp4] Upstream stream error:', err.message);
+        if (!res.writableEnded) res.end();
+      });
+      req.on('close', () => {
+        try { upstream.data.destroy(); } catch {}
+      });
       return;
     }
 
     // For HLS/DASH streams: use FFmpeg to remux into playable MP4
     const ffmpegPath = process.env.FFMPEG_PATH || (ffmpegInstaller as any)?.path || 'ffmpeg';
 
+    const streamReferer =
+      (req.query.referer as string) ||
+      (resolvedStreamUrl.includes('moviebox') || resolvedStreamUrl.includes('aoneroom')
+        ? 'https://sportslive.wine'
+        : 'https://cinestream-stream-proxy.dev-patel-codinggita.workers.dev');
+
     const ffmpegArgs = [
       '-hide_banner',
-      '-loglevel', 'error',
+      '-loglevel', 'warning',
+      '-err_detect', 'ignore_err',
+      '-fflags', '+genpts+discardcorrupt',
       '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-      '-headers', 'Referer: https://cinestream-stream-proxy.dev-patel-codinggita.workers.dev\r\nOrigin: https://cinestream-stream-proxy.dev-patel-codinggita.workers.dev\r\n',
-      // Allow seeking/retry for flaky CDN URLs
+      '-headers', `Referer: ${streamReferer}\r\nOrigin: ${streamReferer}\r\n`,
+      // Robust reconnect for network streaming
       '-reconnect', '1',
+      '-reconnect_at_eof', '1',
       '-reconnect_streamed', '1',
-      '-reconnect_delay_max', '5',
+      '-reconnect_delay_max', '10',
+      '-max_muxing_queue_size', '4096',
       // Input
       '-i', resolvedStreamUrl,
       // Map first video + first audio stream
@@ -551,10 +619,28 @@ export const downloadStreamAsMp4 = async (req: Request, res: Response) => {
 
     const ffmpeg = spawn(ffmpegPath, ffmpegArgs);
 
-    ffmpeg.stdout.pipe(res);
-
-    // Collect stderr for logging (not sent to client)
+    let headersSent = false;
     let stderrData = '';
+
+    ffmpeg.stdout.on('data', (chunk) => {
+      if (!headersSent) {
+        headersSent = true;
+        res.writeHead(200, {
+          'Content-Type': 'video/mp4',
+          'Content-Disposition': `attachment; filename="${fileName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+          'Accept-Ranges': 'none',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
+          'Access-Control-Allow-Origin': '*',
+        });
+      }
+      const canContinue = res.write(chunk);
+      if (!canContinue) {
+        ffmpeg.stdout.pause();
+        res.once('drain', () => ffmpeg.stdout.resume());
+      }
+    });
+
     ffmpeg.stderr.on('data', (d) => {
       stderrData += d.toString();
       if (stderrData.length > 4000) stderrData = stderrData.slice(-2000);
@@ -564,14 +650,18 @@ export const downloadStreamAsMp4 = async (req: Request, res: Response) => {
       if (code !== 0) {
         console.warn(`[downloadStreamAsMp4] FFmpeg exited with code ${code}:`, stderrData.slice(-500));
       }
-      if (!res.writableEnded) res.end();
+      if (!headersSent) {
+        res.status(502).json({ message: 'Media stream could not be converted for download' });
+      } else if (!res.writableEnded) {
+        res.end();
+      }
     });
 
     ffmpeg.on('error', (err) => {
       console.error('[downloadStreamAsMp4] FFmpeg spawn error:', err.message);
-      if (!res.headersSent) {
+      if (!headersSent) {
         res.status(500).json({ message: 'Download conversion error. FFmpeg not available.' });
-      } else {
+      } else if (!res.writableEnded) {
         res.end();
       }
     });
