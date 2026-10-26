@@ -31,11 +31,11 @@ export const DownloadAppPage: React.FC = () => {
     staleTime: 5 * 60 * 1000,
   });
 
-  const version = updateData?.version ? `v${updateData.version}` : 'v2.5.0';
+  const version = updateData?.version ? `v${updateData.version}` : 'v2.6.0';
   const apkSize = updateData?.apkSize || '54 MB';
   const downloadUrl = updateData?.downloadUrl || '/moviebuzz.apk';
   const changelog = updateData?.changelog || '';
-  const updateTitle = updateData?.title || 'MovieBuzz v2.5.0 — Cloudflare Edge Streaming & MovieBox Controller';
+  const updateTitle = updateData?.title || 'MovieBuzz v2.6.0 — High-Speed Cloud Backend & Zero-Buffer Playback';
 
   // Construct absolute APK URL for QR code
   const absoluteApkUrl = typeof window !== 'undefined'
@@ -323,7 +323,7 @@ export const DownloadAppPage: React.FC = () => {
             </div>
             <div className="py-2.5 flex justify-between">
               <span className="text-gray-400">Current Version</span>
-              <span className="font-semibold text-white">{version} (Build 22)</span>
+              <span className="font-semibold text-white">{version} (Build 26)</span>
             </div>
             <div className="py-2.5 flex justify-between">
               <span className="text-gray-400">Minimum Android OS</span>

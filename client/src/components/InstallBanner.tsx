@@ -16,7 +16,7 @@ export const InstallBanner: React.FC = () => {
     staleTime: 5 * 60 * 1000,
   });
 
-  const version = appUpdate?.version ? `v${appUpdate.version}` : 'v2.5.0';
+  const version = appUpdate?.version ? `v${appUpdate.version}` : 'v2.6.0';
   const apkSize = appUpdate?.apkSize || '54 MB';
 
   useEffect(() => {

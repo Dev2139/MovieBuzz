@@ -7,8 +7,8 @@ class ApiConstants {
   static const String cloudflareStreamProxyUrl = 'https://cinestream-stream-proxy.dev-patel-codinggita.workers.dev';
 
   // Mobile App Release Version
-  static const String appVersion = '2.5.0';
-  static const int appVersionCode = 25;
+  static const String appVersion = '2.6.0';
+  static const int appVersionCode = 26;
 
   // Local development backend presets
   static const String localHostBaseUrl = 'http://localhost:5000/api';

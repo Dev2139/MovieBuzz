@@ -33,7 +33,11 @@ class ApiService {
   void init() {
     final saved = StorageService.getSavedBaseUrl();
     if (saved != null && saved.isNotEmpty) {
-      _baseUrl = saved;
+      if (saved.contains('localhost') || saved.contains('10.0.2.2') || saved.contains('10.251.')) {
+        _baseUrl = ApiConstants.defaultBaseUrl;
+      } else {
+        _baseUrl = saved;
+      }
     }
   }
 
