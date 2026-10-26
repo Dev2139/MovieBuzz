@@ -38,6 +38,11 @@ class OfflineStorageService {
     }
   }
 
+  static Future<Set<String>> getDownloadedIds() async {
+    final list = await getDownloads();
+    return list.map((i) => i.id).toSet();
+  }
+
   static Future<void> saveDownload(OfflineDownloadItem item) async {
     final prefs = await SharedPreferences.getInstance();
     final current = await getDownloads();

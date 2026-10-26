@@ -495,6 +495,48 @@ class _ContentDetailScreenState extends State<ContentDetailScreen> {
                                 ),
                           tooltip: isMovieDownloaded ? 'Downloaded (Play Offline)' : 'Download Movie',
                         ),
+                      ] else ...[
+                        const SizedBox(width: 10),
+                        Builder(
+                          builder: (context) {
+                            final firstEpId = _episodes.isNotEmpty
+                                ? 'series-${content.id}-s${_episodes.first.seasonNumber}-e${_episodes.first.episodeNumber}'
+                                : '';
+                            final isFirstEpDownloaded = firstEpId.isNotEmpty && _downloadedIds.contains(firstEpId);
+                            final isFirstEpDownloading = firstEpId.isNotEmpty && downloadService.isDownloading(firstEpId);
+
+                            return IconButton(
+                              onPressed: () {
+                                if (_episodes.isNotEmpty) {
+                                  _handleEpisodeDownload(_episodes.first);
+                                } else {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('Loading episodes for download...')),
+                                  );
+                                }
+                              },
+                              style: IconButton.styleFrom(
+                                backgroundColor: isFirstEpDownloaded
+                                    ? Colors.greenAccent.withValues(alpha: 0.15)
+                                    : AppColors.darkCard,
+                                side: BorderSide(
+                                  color: isFirstEpDownloaded ? Colors.greenAccent : AppColors.darkBorder,
+                                ),
+                              ),
+                              icon: isFirstEpDownloading
+                                  ? const SizedBox(
+                                      width: 18,
+                                      height: 18,
+                                      child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.brand),
+                                    )
+                                  : Icon(
+                                      isFirstEpDownloaded ? Icons.download_done_rounded : Icons.download_rounded,
+                                      color: isFirstEpDownloaded ? Colors.greenAccent : Colors.white,
+                                    ),
+                              tooltip: isFirstEpDownloaded ? 'Downloaded (Play Offline)' : 'Download Episode',
+                            );
+                          },
+                        ),
                       ],
                       const SizedBox(width: 10),
                       IconButton(

@@ -31,9 +31,9 @@ class ContentProvider extends ChangeNotifier {
 
     try {
       final results = await Future.wait([
-        _api.getContentList(featured: true, limit: 5),
-        _api.getMovies(limit: 15, sort: 'popularity'),
-        _api.getSeries(limit: 15, sort: 'popularity'),
+        _api.getContentList(featured: true, limit: 10),
+        _api.getMovies(limit: 30, sort: 'popularity'),
+        _api.getSeries(limit: 30, sort: 'popularity'),
         _api.getContinueWatching(),
         _api.getGenres(),
       ]);

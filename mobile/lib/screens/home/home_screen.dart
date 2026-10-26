@@ -16,6 +16,8 @@ import '../../services/api_service.dart';
 import '../../widgets/app_update_dialog.dart';
 import '../../constants/api_constants.dart';
 import '../downloads/downloads_screen.dart';
+import '../../models/content.dart';
+import '../../widgets/content_card.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -409,7 +411,108 @@ class _HomeScreenState extends State<HomeScreen> {
                           ..sort((a, b) => b.rating.compareTo(a.rating))),
                       ),
 
-                    const SizedBox(height: 24),
+                    const SizedBox(height: 22),
+
+                    // 8. All Movies & Series Combined Grid
+                    Builder(
+                      builder: (context) {
+                        final seenIds = <String>{};
+                        final combinedList = <Content>[];
+
+                        for (final item in [
+                          ...contentProvider.trendingMovies,
+                          ...contentProvider.popularSeries,
+                          ...contentProvider.featured,
+                        ]) {
+                          if (seenIds.add(item.id)) {
+                            if (_selectedCategory == 'All') {
+                              combinedList.add(item);
+                            } else if (_selectedCategory == 'Movies' && item.isMovie) {
+                              combinedList.add(item);
+                            } else if (_selectedCategory == 'Series' && item.isSeries) {
+                              combinedList.add(item);
+                            } else if (item.genres.any((g) => g.toLowerCase() == _selectedCategory.toLowerCase())) {
+                              combinedList.add(item);
+                            }
+                          }
+                        }
+
+                        if (combinedList.isEmpty) {
+                          return const SizedBox.shrink();
+                        }
+
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 16),
+                              child: Row(
+                                children: [
+                                  Container(
+                                    width: 4,
+                                    height: 18,
+                                    decoration: BoxDecoration(
+                                      color: AppColors.brand,
+                                      borderRadius: BorderRadius.circular(2),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  const Expanded(
+                                    child: Text(
+                                      'All Movies & Series',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.bold,
+                                        letterSpacing: -0.3,
+                                      ),
+                                    ),
+                                  ),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+                                    decoration: BoxDecoration(
+                                      color: AppColors.darkCard,
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: Border.all(color: AppColors.darkBorder, width: 0.5),
+                                    ),
+                                    child: Text(
+                                      '${combinedList.length} Titles',
+                                      style: const TextStyle(
+                                        color: AppColors.textMuted,
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 14),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 16),
+                              child: GridView.builder(
+                                shrinkWrap: true,
+                                physics: const NeverScrollableScrollPhysics(),
+                                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                                  crossAxisCount: 3,
+                                  childAspectRatio: 0.58,
+                                  crossAxisSpacing: 10,
+                                  mainAxisSpacing: 14,
+                                ),
+                                itemCount: combinedList.length,
+                                itemBuilder: (context, index) {
+                                  return ContentCard(
+                                    content: combinedList[index],
+                                    isGrid: true,
+                                  );
+                                },
+                              ),
+                            ),
+                            const SizedBox(height: 32),
+                          ],
+                        );
+                      },
+                    ),
                   ]),
                 ),
             ],

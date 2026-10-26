@@ -14,6 +14,9 @@ import '../../models/media.dart';
 import '../../services/api_service.dart';
 import '../../providers/watchlist_provider.dart';
 import '../../utils/media_url_resolver.dart';
+import '../../services/download_service.dart';
+import '../../services/offline_storage_service.dart';
+import '../downloads/downloads_screen.dart';
 import 'widgets/double_tap_indicator.dart';
 
 enum VideoFitMode { fit, fill, stretch }
@@ -70,6 +73,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   List<Media> _availableQualities = [];
   Media? _currentMedia;
   List<Content> _similarContent = [];
+  Set<String> _downloadedIds = {};
 
   // Pre-roll Sponsor Video Ad & Background Chunk Buffering States
   static const String preRollAdVideoUrl =
@@ -97,6 +101,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       _setPortraitOrientations();
     }
 
+    _checkDownloads();
     _loadMetadataAndStream();
   }
 
@@ -144,6 +149,164 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     }
   }
 
+  Future<void> _checkDownloads() async {
+    try {
+      final ids = await OfflineStorageService.getDownloadedIds();
+      if (mounted) {
+        setState(() => _downloadedIds = ids);
+      }
+    } catch (_) {}
+  }
+
+  void _handlePlayerDownload() {
+    final dlService = Provider.of<DownloadService>(context, listen: false);
+
+    if (_currentContent.isMovie) {
+      final movieId = 'movie-${_currentContent.id}';
+      if (_downloadedIds.contains(movieId)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('✅ "${_currentContent.title}" is already downloaded in your offline library.'),
+            duration: const Duration(seconds: 3),
+            action: SnackBarAction(
+              label: 'View',
+              textColor: Colors.greenAccent,
+              onPressed: () {
+                Navigator.push(context, MaterialPageRoute(builder: (_) => const DownloadsScreen()));
+              },
+            ),
+          ),
+        );
+        return;
+      }
+
+      if (dlService.isDownloading(movieId)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Downloading "${_currentContent.title}" in background...'),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Starting download: "${_currentContent.title}"...'),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+
+      dlService.downloadMovie(
+        content: _currentContent,
+        media: _currentMedia ?? (_availableQualities.isNotEmpty ? _availableQualities.first : null),
+        onCompleted: () {
+          _checkDownloads();
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('✅ "${_currentContent.title}" downloaded! Available offline.'),
+                duration: const Duration(seconds: 3),
+                action: SnackBarAction(
+                  label: 'View',
+                  textColor: Colors.greenAccent,
+                  onPressed: () {
+                    Navigator.push(context, MaterialPageRoute(builder: (_) => const DownloadsScreen()));
+                  },
+                ),
+              ),
+            );
+          }
+        },
+        onError: (err) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Download failed: $err'), backgroundColor: Colors.redAccent),
+            );
+          }
+        },
+      );
+    } else {
+      final ep = _currentEpisode ?? (_playlist.isNotEmpty ? _playlist.first : null);
+      if (ep == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No episode available to download.')),
+        );
+        return;
+      }
+      _downloadSpecificEpisode(ep);
+    }
+  }
+
+  void _downloadSpecificEpisode(Episode ep) {
+    final dlService = Provider.of<DownloadService>(context, listen: false);
+    final epId = 'series-${_currentContent.id}-s${ep.seasonNumber}-e${ep.episodeNumber}';
+
+    if (_downloadedIds.contains(epId)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('✅ S${ep.seasonNumber} E${ep.episodeNumber}: "${ep.title}" is already downloaded.'),
+          duration: const Duration(seconds: 3),
+          action: SnackBarAction(
+            label: 'View',
+            textColor: Colors.greenAccent,
+            onPressed: () {
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const DownloadsScreen()));
+            },
+          ),
+        ),
+      );
+      return;
+    }
+
+    if (dlService.isDownloading(epId)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Downloading S${ep.seasonNumber} E${ep.episodeNumber} in background...'),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Starting download: S${ep.seasonNumber} E${ep.episodeNumber}: "${ep.title}"...'),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+
+    dlService.downloadEpisode(
+      content: _currentContent,
+      episode: ep,
+      onCompleted: () {
+        _checkDownloads();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('✅ S${ep.seasonNumber} E${ep.episodeNumber} downloaded! Available offline.'),
+              duration: const Duration(seconds: 3),
+              action: SnackBarAction(
+                label: 'View',
+                textColor: Colors.greenAccent,
+                onPressed: () {
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => const DownloadsScreen()));
+                },
+              ),
+            ),
+          );
+        }
+      },
+      onError: (err) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Download failed: $err'), backgroundColor: Colors.redAccent),
+          );
+        }
+      },
+    );
+  }
+
   Future<void> _loadMetadataAndStream() async {
     _initStream();
 
@@ -151,21 +314,33 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     if (_currentContent.isSeries) {
       try {
         final seasons = await _api.getSeriesSeasons(_currentContent.id);
-        setState(() {
-          _seasons = seasons;
-          if (_seasons.isNotEmpty) {
-            _selectedSeason = _seasons.first;
-          }
-        });
+        if (mounted) {
+          setState(() {
+            _seasons = seasons;
+            if (_seasons.isNotEmpty) {
+              _selectedSeason = _seasons.first;
+            }
+          });
+        }
         if (_selectedSeason != null && _playlist.isEmpty) {
           final episodes = await _api.getSeasonEpisodes(_selectedSeason!.id);
-          setState(() => _playlist = episodes);
+          if (mounted) {
+            setState(() => _playlist = episodes);
+          }
+        }
+      } catch (_) {}
+      try {
+        final similar = await _api.getContentList(type: 'series', limit: 9, sort: 'popularity');
+        if (mounted) {
+          setState(() => _similarContent = similar.where((c) => c.id != _currentContent.id).toList());
         }
       } catch (_) {}
     } else {
       try {
-        final similar = await _api.getMovies(limit: 6, sort: 'popularity');
-        setState(() => _similarContent = similar.where((c) => c.id != _currentContent.id).toList());
+        final similar = await _api.getContentList(type: 'movie', limit: 9, sort: 'popularity');
+        if (mounted) {
+          setState(() => _similarContent = similar.where((c) => c.id != _currentContent.id).toList());
+        }
       } catch (_) {}
     }
   }
@@ -735,8 +910,19 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   Widget build(BuildContext context) {
     final controller = _videoPlayerController;
     final watchlistProvider = Provider.of<WatchlistProvider>(context);
+    final downloadService = Provider.of<DownloadService>(context);
     final isBookmarked = watchlistProvider.isInWatchlist(_currentContent.id);
     final isFav = watchlistProvider.isFavorite(_currentContent.id);
+
+    final currentTargetId = _currentContent.isMovie
+        ? 'movie-${_currentContent.id}'
+        : (_currentEpisode != null
+            ? 'series-${_currentContent.id}-s${_currentEpisode!.seasonNumber}-e${_currentEpisode!.episodeNumber}'
+            : (_playlist.isNotEmpty
+                ? 'series-${_currentContent.id}-s${_playlist.first.seasonNumber}-e${_playlist.first.episodeNumber}'
+                : ''));
+    final isTargetDownloaded = currentTargetId.isNotEmpty && _downloadedIds.contains(currentTargetId);
+    final isTargetDownloading = currentTargetId.isNotEmpty && downloadService.isDownloading(currentTargetId);
 
     // Calculate aspect ratio / fit
     BoxFit videoBoxFit = BoxFit.contain;
@@ -1387,7 +1573,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
 
                     const SizedBox(height: 12),
 
-                    // Quick Action Icons: Watchlist, Favorite, Speed, Share
+                    // Quick Action Icons: Watchlist, Like, Download, Speed, Quality
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceAround,
                       children: [
@@ -1402,6 +1588,19 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                           label: 'Like',
                           color: isFav ? AppColors.brand : Colors.white70,
                           onTap: () => watchlistProvider.toggleFavorite(_currentContent),
+                        ),
+                        _buildActionBtn(
+                          icon: isTargetDownloaded
+                              ? Icons.download_done_rounded
+                              : (isTargetDownloading ? Icons.downloading_rounded : Icons.file_download_outlined),
+                          label: isTargetDownloaded
+                              ? 'Downloaded'
+                              : (isTargetDownloading ? 'Downloading' : 'Download'),
+                          color: isTargetDownloaded
+                              ? Colors.greenAccent
+                              : (isTargetDownloading ? AppColors.brand : Colors.white70),
+                          isLoading: isTargetDownloading,
+                          onTap: _handlePlayerDownload,
                         ),
                         _buildActionBtn(
                           icon: Icons.speed,
@@ -1531,6 +1730,51 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                                               child: const Icon(Icons.play_arrow_rounded,
                                                   color: Colors.white, size: 18),
                                             ),
+                                          // Episode download button
+                                          Positioned(
+                                            top: 4,
+                                            right: 4,
+                                            child: Builder(
+                                              builder: (context) {
+                                                final epId = 'series-${_currentContent.id}-s${ep.seasonNumber}-e${ep.episodeNumber}';
+                                                final isEpDownloaded = _downloadedIds.contains(epId);
+                                                final isEpDownloading = downloadService.isDownloading(epId);
+
+                                                return GestureDetector(
+                                                  onTap: () {
+                                                    if (!isEpDownloaded && !isEpDownloading) {
+                                                      _downloadSpecificEpisode(ep);
+                                                    }
+                                                  },
+                                                  child: Container(
+                                                    padding: const EdgeInsets.all(3),
+                                                    decoration: BoxDecoration(
+                                                      color: Colors.black.withValues(alpha: 0.75),
+                                                      shape: BoxShape.circle,
+                                                    ),
+                                                    child: isEpDownloading
+                                                        ? const SizedBox(
+                                                            width: 14,
+                                                            height: 14,
+                                                            child: CircularProgressIndicator(
+                                                              strokeWidth: 1.5,
+                                                              color: AppColors.brand,
+                                                            ),
+                                                          )
+                                                        : Icon(
+                                                            isEpDownloaded
+                                                                ? Icons.check_circle_rounded
+                                                                : Icons.download_rounded,
+                                                            color: isEpDownloaded
+                                                                ? Colors.greenAccent
+                                                                : Colors.white,
+                                                            size: 14,
+                                                          ),
+                                                  ),
+                                                );
+                                              },
+                                            ),
+                                          ),
                                         ],
                                       ),
                                       Padding(
@@ -1556,65 +1800,142 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                       const SizedBox(height: 16),
                     ],
 
-                    // More Like This
+                    // More Like This (3-Column Grid)
                     if (_similarContent.isNotEmpty) ...[
-                      const Text(
-                        'More Like This',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                        ),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text(
+                            'More Like This',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          Text(
+                            '${_similarContent.length} titles',
+                            style: const TextStyle(
+                              color: AppColors.textMuted,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
                       ),
-                      const SizedBox(height: 10),
-                      SizedBox(
-                        height: 160,
-                        child: ListView.builder(
-                          scrollDirection: Axis.horizontal,
-                          itemCount: _similarContent.length,
-                          itemBuilder: (context, index) {
-                            final item = _similarContent[index];
-                            return GestureDetector(
-                              onTap: () {
-                                Navigator.of(context).pushReplacement(
-                                  MaterialPageRoute(
-                                    builder: (_) => VideoPlayerScreen(content: item),
-                                  ),
-                                );
-                              },
-                              child: Container(
-                                width: 100,
-                                margin: const EdgeInsets.only(right: 10),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    ClipRRect(
-                                      borderRadius: BorderRadius.circular(6),
-                                      child: SizedBox(
-                                        width: 100,
-                                        height: 125,
-                                        child: item.posterUrl.isNotEmpty
-                                            ? CachedNetworkImage(
-                                                imageUrl: item.posterUrl,
-                                                fit: BoxFit.cover,
-                                              )
-                                            : Container(color: AppColors.darkCard),
-                                      ),
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      item.title,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(color: Colors.white, fontSize: 11),
-                                    ),
-                                  ],
+                      const SizedBox(height: 12),
+                      GridView.builder(
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 3,
+                          childAspectRatio: 0.62,
+                          crossAxisSpacing: 10,
+                          mainAxisSpacing: 12,
+                        ),
+                        itemCount: _similarContent.length,
+                        itemBuilder: (context, index) {
+                          final item = _similarContent[index];
+                          return GestureDetector(
+                            onTap: () {
+                              Navigator.of(context).pushReplacement(
+                                MaterialPageRoute(
+                                  builder: (_) => VideoPlayerScreen(content: item),
                                 ),
-                              ),
-                            );
-                          },
-                        ),
+                              );
+                            },
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Expanded(
+                                  child: Stack(
+                                    children: [
+                                      ClipRRect(
+                                        borderRadius: BorderRadius.circular(8),
+                                        child: Container(
+                                          width: double.infinity,
+                                          height: double.infinity,
+                                          color: AppColors.darkCard,
+                                          child: item.posterUrl.isNotEmpty
+                                              ? CachedNetworkImage(
+                                                  imageUrl: item.posterUrl,
+                                                  fit: BoxFit.cover,
+                                                  memCacheWidth: 300,
+                                                  placeholder: (_, __) => Container(color: AppColors.darkCard),
+                                                  errorWidget: (_, __, ___) => const Center(
+                                                    child: Icon(Icons.movie, color: AppColors.textMuted),
+                                                  ),
+                                                )
+                                              : const Center(
+                                                  child: Icon(Icons.movie, color: AppColors.textMuted),
+                                                ),
+                                        ),
+                                      ),
+                                      if (item.rating > 0)
+                                        Positioned(
+                                          top: 5,
+                                          left: 5,
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                                            decoration: BoxDecoration(
+                                              color: Colors.black.withValues(alpha: 0.75),
+                                              borderRadius: BorderRadius.circular(4),
+                                            ),
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                const Icon(Icons.star, color: Colors.amber, size: 10),
+                                                const SizedBox(width: 2),
+                                                Text(
+                                                  item.rating.toStringAsFixed(1),
+                                                  style: const TextStyle(
+                                                    color: Colors.white,
+                                                    fontSize: 10,
+                                                    fontWeight: FontWeight.bold,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      Positioned(
+                                        bottom: 5,
+                                        right: 5,
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                                          decoration: BoxDecoration(
+                                            color: AppColors.brand.withValues(alpha: 0.85),
+                                            borderRadius: BorderRadius.circular(3),
+                                          ),
+                                          child: Text(
+                                            item.isSeries ? 'SERIES' : 'MOVIE',
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 8,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(height: 5),
+                                Text(
+                                  item.title,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
                       ),
+                      const SizedBox(height: 20),
                     ],
                   ],
                 ),
@@ -1631,14 +1952,24 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     required String label,
     required Color color,
     required VoidCallback onTap,
+    bool isLoading = false,
   }) {
     return GestureDetector(
       onTap: onTap,
+      behavior: HitTestBehavior.opaque,
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, color: color, size: 22),
+          if (isLoading)
+            const SizedBox(
+              width: 22,
+              height: 22,
+              child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.brand),
+            )
+          else
+            Icon(icon, color: color, size: 22),
           const SizedBox(height: 4),
-          Text(label, style: TextStyle(color: color, fontSize: 11)),
+          Text(label, style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w500)),
         ],
       ),
     );
