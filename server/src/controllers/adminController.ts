@@ -7,7 +7,7 @@ import { User } from '../models/User';
 import { TelegramImport } from '../models/TelegramImport';
 import { TelegramImporter } from '../services/telegram/telegramImporter';
 import { parseTelegramCaption } from '../services/telegram/telegramParser';
-
+import { cleanMovieTitle, tmdbService } from '../services/tmdb/tmdbService';
 import { ContentRequest } from '../models/ContentRequest';
 
 export const getAdminStats = async (req: Request, res: Response) => {
@@ -70,23 +70,31 @@ export const createMovie = async (req: Request, res: Response) => {
     const { title, description, posterUrl, backdropUrl, trailerUrl, releaseYear, genres, languages, cast, director, rating, qualities } = req.body;
 
     const rawTitle = (title || 'Untitled Movie').trim();
-    const targetYear = Number(releaseYear) || 2026;
-    const slug = await generateUniqueSlug(rawTitle, targetYear, 'movie');
+    const { cleanTitle, extractedYear } = cleanMovieTitle(rawTitle);
+    const finalTitle = cleanTitle || rawTitle;
+    const targetYear = Number(releaseYear) || extractedYear || 2026;
+    const slug = await generateUniqueSlug(finalTitle, targetYear, 'movie');
+
+    // Auto-enrich from TMDB / OMDb if posters or synopsis are not provided
+    let enriched: any = null;
+    if (!posterUrl || posterUrl.includes('unsplash') || !description) {
+      enriched = await tmdbService.fetchMetadata(finalTitle, targetYear, 'movie').catch(() => null);
+    }
 
     const movie = new Content({
-      title: rawTitle,
+      title: enriched?.title || finalTitle,
       slug,
       type: 'movie',
-      description: description || `Watch ${rawTitle} in Ultra HD on CineStream.`,
-      posterUrl: posterUrl || 'https://images.unsplash.com/photo-1542751371-adc38448a05e?w=800',
-      backdropUrl: backdropUrl || posterUrl || 'https://images.unsplash.com/photo-1509198397868-475647b2a1e5?w=1600',
+      description: description || enriched?.description || `Watch ${finalTitle} in Ultra HD on CineStream.`,
+      posterUrl: (posterUrl && !posterUrl.includes('unsplash')) ? posterUrl : (enriched?.posterUrl || 'https://images.unsplash.com/photo-1542751371-adc38448a05e?w=800'),
+      backdropUrl: (backdropUrl && !backdropUrl.includes('unsplash')) ? backdropUrl : (enriched?.backdropUrl || posterUrl || 'https://images.unsplash.com/photo-1509198397868-475647b2a1e5?w=1600'),
       trailerUrl: trailerUrl || '',
-      releaseYear: targetYear,
-      genres: parseStringArray(genres, ['Action', 'Drama']),
-      languages: parseStringArray(languages, ['English']),
-      cast: parseStringArray(cast, []),
-      director: director || '',
-      rating: Number(rating) || 7.5,
+      releaseYear: enriched?.releaseYear || targetYear,
+      genres: genres ? parseStringArray(genres) : (enriched?.genres || ['Action', 'Drama']),
+      languages: languages ? parseStringArray(languages) : (enriched?.languages || ['English']),
+      cast: cast ? parseStringArray(cast) : (enriched?.cast || []),
+      director: director || enriched?.director || '',
+      rating: Number(rating) || enriched?.rating || 7.5,
       status: 'published',
     });
 
@@ -240,22 +248,30 @@ export const createSeries = async (req: Request, res: Response) => {
   try {
     const { title, description, posterUrl, backdropUrl, releaseYear, genres, languages, cast, director, rating, seasons } = req.body;
     const rawTitle = (title || 'Untitled Series').trim();
-    const targetYear = Number(releaseYear) || 2026;
-    const slug = await generateUniqueSlug(rawTitle, targetYear, 'series');
+    const { cleanTitle, extractedYear } = cleanMovieTitle(rawTitle);
+    const finalTitle = cleanTitle || rawTitle;
+    const targetYear = Number(releaseYear) || extractedYear || 2026;
+    const slug = await generateUniqueSlug(finalTitle, targetYear, 'series');
+
+    // Auto-enrich from TMDB / OMDb if posters or synopsis are not provided
+    let enriched: any = null;
+    if (!posterUrl || posterUrl.includes('unsplash') || !description) {
+      enriched = await tmdbService.fetchMetadata(finalTitle, targetYear, 'series').catch(() => null);
+    }
 
     const series = new Content({
-      title: rawTitle,
+      title: enriched?.title || finalTitle,
       slug,
       type: 'series',
-      description: description || `Watch ${rawTitle} all seasons and episodes on CineStream.`,
-      posterUrl: posterUrl || 'https://images.unsplash.com/photo-1574375927938-d5a98e8ffe85?w=800',
-      backdropUrl: backdropUrl || posterUrl || 'https://images.unsplash.com/photo-1517604931442-7e0c8ed2963c?w=1600',
-      releaseYear: targetYear,
-      genres: parseStringArray(genres, ['Drama', 'Action']),
-      languages: parseStringArray(languages, ['English']),
-      cast: parseStringArray(cast, []),
-      director: director || '',
-      rating: Number(rating) || 8.0,
+      description: description || enriched?.description || `Watch ${finalTitle} all seasons and episodes on CineStream.`,
+      posterUrl: (posterUrl && !posterUrl.includes('unsplash')) ? posterUrl : (enriched?.posterUrl || 'https://images.unsplash.com/photo-1574375927938-d5a98e8ffe85?w=800'),
+      backdropUrl: (backdropUrl && !backdropUrl.includes('unsplash')) ? backdropUrl : (enriched?.backdropUrl || posterUrl || 'https://images.unsplash.com/photo-1517604931442-7e0c8ed2963c?w=1600'),
+      releaseYear: enriched?.releaseYear || targetYear,
+      genres: genres ? parseStringArray(genres) : (enriched?.genres || ['Drama', 'Action']),
+      languages: languages ? parseStringArray(languages) : (enriched?.languages || ['English']),
+      cast: cast ? parseStringArray(cast) : (enriched?.cast || []),
+      director: director || enriched?.director || '',
+      rating: Number(rating) || enriched?.rating || 8.0,
       status: 'published',
     });
 
@@ -575,9 +591,17 @@ export const publishTelegramImport = async (req: Request, res: Response) => {
       return res.json({ message: 'Post marked as IGNORED', importDoc });
     }
 
-    const finalTitle = title || importDoc.detectedTitle;
+    const rawTitle = (title || importDoc.detectedTitle || '').trim();
+    const { cleanTitle, extractedYear } = cleanMovieTitle(rawTitle);
+    const finalTitle = cleanTitle || rawTitle;
     const finalQuality = quality || importDoc.detectedQuality || '1080p';
-    const finalYear = importDoc.detectedYear || 2026;
+    const finalYear = Number(req.body.releaseYear) || extractedYear || importDoc.detectedYear || 2026;
+
+    // Fetch official TMDB/IMDb metadata if default/unsplash poster or missing description
+    let enrichedMeta: any = null;
+    if (!posterUrl || posterUrl.includes('unsplash') || !description) {
+      enrichedMeta = await tmdbService.fetchMetadata(finalTitle, finalYear, targetType as any).catch(() => null);
+    }
 
     const host = req.get('host') || 'localhost:5000';
     const protocol = (req.headers['x-forwarded-proto'] as string) || req.protocol || 'http';
@@ -588,15 +612,17 @@ export const publishTelegramImport = async (req: Request, res: Response) => {
       if (!movie) {
         const movieSlug = await generateUniqueSlug(finalTitle, finalYear, 'movie');
         movie = new Content({
-          title: finalTitle,
+          title: enrichedMeta?.title || finalTitle,
           slug: movieSlug,
           type: 'movie',
-          description: description || importDoc.originalCaption,
-          posterUrl: posterUrl || 'https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=800',
-          backdropUrl: backdropUrl || 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=1600',
-          releaseYear: finalYear,
-          genres: parseStringArray(genres, ['Action', 'Sci-Fi']),
+          description: description || enrichedMeta?.description || importDoc.originalCaption,
+          posterUrl: (posterUrl && !posterUrl.includes('unsplash')) ? posterUrl : (enrichedMeta?.posterUrl || 'https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=800'),
+          backdropUrl: (backdropUrl && !backdropUrl.includes('unsplash')) ? backdropUrl : (enrichedMeta?.backdropUrl || posterUrl || 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=1600'),
+          releaseYear: enrichedMeta?.releaseYear || finalYear,
+          genres: genres ? parseStringArray(genres) : (enrichedMeta?.genres || parseStringArray(genres, ['Action', 'Sci-Fi'])),
           languages: [importDoc.detectedLanguage || 'English'],
+          rating: enrichedMeta?.rating || 7.5,
+          cast: enrichedMeta?.cast || [],
           status: 'published',
         });
         await movie.save();
@@ -631,15 +657,17 @@ export const publishTelegramImport = async (req: Request, res: Response) => {
       if (!series) {
         const seriesSlug = await generateUniqueSlug(finalTitle, finalYear, 'series');
         series = new Content({
-          title: finalTitle,
+          title: enrichedMeta?.title || finalTitle,
           slug: seriesSlug,
           type: 'series',
-          description: description || importDoc.originalCaption,
-          posterUrl: posterUrl || 'https://images.unsplash.com/photo-1574375927938-d5a98e8ffe85?w=800',
-          backdropUrl: backdropUrl || 'https://images.unsplash.com/photo-1517604931442-7e0c8ed2963c?w=1600',
-          releaseYear: finalYear,
-          genres: parseStringArray(genres, ['Drama', 'Mystery']),
+          description: description || enrichedMeta?.description || importDoc.originalCaption,
+          posterUrl: (posterUrl && !posterUrl.includes('unsplash')) ? posterUrl : (enrichedMeta?.posterUrl || 'https://images.unsplash.com/photo-1574375927938-d5a98e8ffe85?w=800'),
+          backdropUrl: (backdropUrl && !backdropUrl.includes('unsplash')) ? backdropUrl : (enrichedMeta?.backdropUrl || posterUrl || 'https://images.unsplash.com/photo-1517604931442-7e0c8ed2963c?w=1600'),
+          releaseYear: enrichedMeta?.releaseYear || finalYear,
+          genres: genres ? parseStringArray(genres) : (enrichedMeta?.genres || parseStringArray(genres, ['Drama', 'Mystery'])),
           languages: [importDoc.detectedLanguage || 'English'],
+          rating: enrichedMeta?.rating || 8.0,
+          cast: enrichedMeta?.cast || [],
           status: 'published',
         });
         await series.save();

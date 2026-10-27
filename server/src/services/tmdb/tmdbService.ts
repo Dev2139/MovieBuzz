@@ -51,33 +51,88 @@ const GENRE_MAP: Record<number, string> = {
   10765: 'Sci-Fi & Fantasy',
 };
 
-export function cleanMovieTitle(rawTitle: string): { cleanTitle: string; coreTitle: string } {
-  let title = rawTitle;
+export interface CleanTitleResult {
+  cleanTitle: string;
+  coreTitle: string;
+  extractedYear?: number;
+}
 
-  // 1. Remove parenthetical years e.g. (2026), [2021]
-  title = title.replace(/[\(\[]?\b(19\d{2}|20\d{2})\b[\)\]]?/g, ' ');
+export function cleanMovieTitle(rawTitle: string): CleanTitleResult {
+  if (!rawTitle) {
+    return { cleanTitle: '', coreTitle: '', extractedYear: undefined };
+  }
 
-  // 2. Remove video quality & source tags
-  title = title.replace(/\b(1080p|720p|480p|4K|2160p|FHD|HD|SD|WEB-?DL|WEBRip|BluRay|BRRip|PreDVDRip|DVDRip|HDRip|Theatre Print|Print|HQ|CAMRip|x264|x265|HEVC|10Bit|AAC|ESub|MSub)\b/gi, ' ');
+  let text = String(rawTitle).trim();
 
-  // 3. Remove language & audio tags
-  title = title.replace(/\b(Dual Audio|Multi Audio|Hindi|Malayalam|Tamil|Telugu|Kannada|English|Bengali|Marathi|Punjabi|Spanish|Dubbed|Org Audio|ORG)\b/gi, ' ');
+  // 1. Remove trailing file extensions e.g. .mkv, .mp4, or trailing word 'mkv'
+  text = text.replace(/\.(mkv|mp4|avi|mov|wmv|webm|ts|m4v|flv)$/i, '');
+  text = text.replace(/\s+\b(mkv|mp4|avi|mov|wmv|webm|ts)\b$/i, '');
 
-  // 4. Remove season/episode tags
-  title = title.replace(/\b(S\d{1,2}\s*E\d{1,2}|Season\s*\d+|Episode\s*\d+|Ep\s*\d+)\b/gi, ' ');
+  // 2. Convert dots and underscores in filenames to spaces (e.g. Men.in.Black.3 -> Men in Black 3)
+  text = text.replace(/[\._]/g, ' ');
 
-  // 5. Remove hashtags & unwanted symbols
+  // 3. Extract 4-digit release year (1900-2099)
+  let extractedYear: number | undefined;
+  const yearRegex = /(?:[\(\[]\s*)?\b(19\d{2}|20\d{2})\b(?:\s*[\)\]])?/;
+  const yearMatch = text.match(yearRegex);
+  if (yearMatch) {
+    extractedYear = parseInt(yearMatch[1], 10);
+  }
+
+  // 4. Detect Season/Episode markers (e.g. S01E02, Season 1)
+  const sAndEMatch = text.match(/\b(S\d{1,2}\s*E\d{1,2}|Season\s*\d+|Episode\s*\d+|Ep\s*\d+)\b/i);
+
+  // 5. Detect video quality & scene tags
+  const qualityMarker = text.match(/\b(2160p|1080p|720p|480p|4k|uhd|fhd|bluray|bdrip|brrip|web-?dl|web-?rip|dvdrip|theatre\s*print|predvdrip|camrip|hdcam|10bit|8bit|12bit|x264|x265|hevc|avc|h\.?264|h\.?265)\b/i);
+
+  // 6. Intelligent cutoff boundary: Scene filenames follow [Movie Title] [(Year) or (Season)] [Technical Tags]
+  // Anything after year, season, or quality tags is technical metadata (e.g. "10bit Bluray x265 HEVC [Org BD 5 mkv")
+  let cutoffIndex = -1;
+  if (yearMatch && yearMatch.index !== undefined && yearMatch.index >= 2) {
+    cutoffIndex = yearMatch.index;
+  }
+  if (sAndEMatch && sAndEMatch.index !== undefined && sAndEMatch.index >= 2) {
+    if (cutoffIndex === -1 || sAndEMatch.index < cutoffIndex) {
+      cutoffIndex = sAndEMatch.index;
+    }
+  }
+  if (qualityMarker && qualityMarker.index !== undefined && qualityMarker.index >= 2) {
+    if (cutoffIndex === -1 || qualityMarker.index < cutoffIndex) {
+      cutoffIndex = qualityMarker.index;
+    }
+  }
+
+  let title = text;
+  if (cutoffIndex > 0) {
+    title = text.slice(0, cutoffIndex);
+  }
+
+  // 7. Strip leftover brackets, scene tags, hashtags, and punctuation
+  title = title.replace(/\[.*?\]/g, ' ');
+  title = title.replace(/\(.*?\)/g, ' ');
+  title = title.replace(/\{.*?\}/g, ' ');
+  title = title.replace(/\[.*$/g, ' ');
+  title = title.replace(/\(.*$/g, ' ');
   title = title.replace(/#[a-z0-9_]+/gi, ' ');
-  title = title.replace(/[:\-_+\/\\|,]+/g, ' ');
+  title = title.replace(/\b(1080p|720p|480p|4k|2160p|uhd|fhd|hd|sd|10bit|8bit|12bit|hdr10\+|hdr10|hdr|dovi|dv|bluray|bdrip|brrip|web-?dl|web-?rip|dvdrip|theatre\s*print|predvdrip|hq|camrip|x264|x265|hevc|avc|dual\s*audio|multi\s*audio|org\s*audio|org\s*bd|dts|truehd|atmos|ddp|ac3|aac|5\.1|7\.1|esub|msub|proper|repack|yts|yify|mkv|mp4)\b/gi, ' ');
+  title = title.replace(/[\-–—:_|/\\]+$/g, ' ');
+  title = title.replace(/^[\-–—:_|/\\]+/g, ' ');
   title = title.replace(/\s+/g, ' ').trim();
 
-  // Core title (first 3-4 main words before colons or dashes)
-  const words = title.split(' ').filter(Boolean);
-  const coreTitle = words.slice(0, 3).join(' ').trim();
+  const cleanTitle = title || text.replace(/[\._]/g, ' ').replace(/\s+/g, ' ').trim() || rawTitle;
+
+  // 8. Core title: If title has a colon, dash, or pipe separating a subtitle, isolate primary name
+  // e.g. "Mission: Impossible - Fallout" -> "Mission Impossible"
+  let coreTitle = cleanTitle;
+  const subDivider = cleanTitle.split(/[:\-|]/);
+  if (subDivider.length > 1 && subDivider[0].trim().length >= 3) {
+    coreTitle = subDivider[0].trim();
+  }
 
   return {
-    cleanTitle: title || rawTitle,
-    coreTitle: coreTitle || title || rawTitle,
+    cleanTitle,
+    coreTitle,
+    extractedYear,
   };
 }
 
@@ -94,16 +149,17 @@ class TMDBService {
    * Search TMDB and OMDb to fetch official movie/series artwork, ratings & synopsis
    */
   async fetchMetadata(rawTitle: string, year?: number, preferType?: 'movie' | 'series'): Promise<EnrichedMetadata | null> {
-    const { cleanTitle, coreTitle } = cleanMovieTitle(rawTitle);
+    const { cleanTitle, coreTitle, extractedYear } = cleanMovieTitle(rawTitle);
+    const targetYear = year || extractedYear;
 
     try {
       let searchResults: any[] = [];
       const isTvPreferred = preferType === 'series';
 
       // Step 1: If year is known, search with exact release year filter
-      if (year) {
+      if (targetYear) {
         const endpoint = isTvPreferred ? 'search/tv' : 'search/movie';
-        const yearParam = isTvPreferred ? `&first_air_date_year=${year}` : `&primary_release_year=${year}`;
+        const yearParam = isTvPreferred ? `&first_air_date_year=${targetYear}` : `&primary_release_year=${targetYear}`;
         const yearUrl = `https://api.themoviedb.org/3/${endpoint}?api_key=${this.apiKey}&query=${encodeURIComponent(cleanTitle)}${yearParam}&include_adult=false`;
         const res = await axios.get(yearUrl, { timeout: 6000 }).catch(() => null);
         if (res?.data?.results && res.data.results.length > 0) {
@@ -156,8 +212,8 @@ class TMDBService {
           if (ts !== 0) return ts;
           const aYear = parseInt((a.release_date || a.first_air_date || '').slice(0, 4), 10);
           const bYear = parseInt((b.release_date || b.first_air_date || '').slice(0, 4), 10);
-          if (year && aYear === year && bYear !== year) return -1;
-          if (year && bYear === year && aYear !== year) return 1;
+          if (targetYear && aYear === targetYear && bYear !== targetYear) return -1;
+          if (targetYear && bYear === targetYear && aYear !== targetYear) return 1;
           return (b.popularity || 0) - (a.popularity || 0);
         });
 
@@ -197,7 +253,7 @@ class TMDBService {
 
         const releaseYearResolved = releaseDateStr
           ? parseInt(releaseDateStr.split('-')[0], 10)
-          : (year || 2026);
+          : (targetYear || 2026);
 
         // Real TMDB Rating
         let realRating = 0;
@@ -234,8 +290,15 @@ class TMDBService {
     // OMDb API Fallback (with 401 handling)
     try {
       if (this.omdbApiKey && this.omdbApiKey.length > 3) {
-        const omdbUrl = `http://www.omdbapi.com/?apikey=${this.omdbApiKey}&t=${encodeURIComponent(cleanTitle)}`;
-        const omdbRes = await axios.get(omdbUrl, { timeout: 5000 }).catch(() => null);
+        const yearParam = targetYear ? `&y=${targetYear}` : '';
+        let omdbUrl = `http://www.omdbapi.com/?apikey=${this.omdbApiKey}&t=${encodeURIComponent(cleanTitle)}${yearParam}`;
+        let omdbRes = await axios.get(omdbUrl, { timeout: 5000 }).catch(() => null);
+
+        // Retry with coreTitle if cleanTitle failed
+        if ((!omdbRes?.data || omdbRes.data.Response !== 'True') && coreTitle && coreTitle !== cleanTitle) {
+          omdbUrl = `http://www.omdbapi.com/?apikey=${this.omdbApiKey}&t=${encodeURIComponent(coreTitle)}${yearParam}`;
+          omdbRes = await axios.get(omdbUrl, { timeout: 5000 }).catch(() => null);
+        }
 
         if (omdbRes?.data && omdbRes.data.Response === 'True') {
           const data = omdbRes.data;
@@ -248,7 +311,7 @@ class TMDBService {
             posterUrl,
             backdropUrl: posterUrl,
             rating: !isNaN(imdbRating) ? imdbRating : 8.4,
-            releaseYear: parseInt(data.Year, 10) || year || 2026,
+            releaseYear: parseInt(data.Year, 10) || targetYear || 2026,
             genres: data.Genre && data.Genre !== 'N/A' ? data.Genre.split(', ') : ['Drama', 'Thriller'],
             languages: data.Language && data.Language !== 'N/A' ? data.Language.split(', ') : ['English'],
             cast: data.Actors && data.Actors !== 'N/A' ? data.Actors.split(', ') : ['Lead Actors'],

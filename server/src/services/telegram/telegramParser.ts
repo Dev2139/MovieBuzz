@@ -9,7 +9,14 @@ import { ParsedTelegramMetadata } from './types';
  */
 export function parseTelegramCaption(caption: string): ParsedTelegramMetadata {
   const lines = caption.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-  const firstLine = lines[0] || '';
+  let firstLine = lines[0] || '';
+
+  // 0. Pre-clean trailing file extension
+  firstLine = firstLine.replace(/\.(mkv|mp4|avi|mov|wmv|webm|ts|m4v|flv)$/i, '');
+  firstLine = firstLine.replace(/\s+\b(mkv|mp4|avi|mov|wmv|webm|ts)\b$/i, '');
+
+  // Convert dots and underscores in filenames to spaces (e.g. Men.in.Black.3 -> Men in Black 3)
+  const normalizedLine = firstLine.replace(/[\._]/g, ' ');
 
   // 1. Detect Season & Episode (Single or Bulk Range e.g. S01-S04, E01-E08, Eps 1-4, 1 to 8)
   let season: number | undefined;
@@ -17,7 +24,6 @@ export function parseTelegramCaption(caption: string): ParsedTelegramMetadata {
   let episode: number | undefined;
   let episodeEnd: number | undefined;
 
-  // Check for season range first e.g. "S01-S03", "Season 1-2", "Season 1 to 3", "Season 1 & 2"
   const seasonRangeRegex = /(?:Season|S)\s*(\d{1,2})\s*(?:-|to|&)\s*(?:Season|S)?\s*(\d{1,2})/i;
   const seasonRangeMatch = caption.match(seasonRangeRegex);
   if (seasonRangeMatch && parseInt(seasonRangeMatch[2], 10) >= parseInt(seasonRangeMatch[1], 10)) {
@@ -28,24 +34,21 @@ export function parseTelegramCaption(caption: string): ParsedTelegramMetadata {
   const rangeRegex = /(?:S(\d{1,2})\s*)?(?:E|Ep|Episode|Episodes|Eps)?\s*(\d{1,2})\s*(?:-|to)\s*(?:E|Ep|Episode|Episodes|Eps)?\s*(\d{1,2})/i;
   const rangeMatch = caption.match(rangeRegex);
 
+  let sAndEMatch = normalizedLine.match(/\bS(\d{1,2})\s*E(\d{1,2})\b/i);
+
   if (rangeMatch && parseInt(rangeMatch[3], 10) > parseInt(rangeMatch[2], 10)) {
     if (rangeMatch[1] && !season) season = parseInt(rangeMatch[1], 10);
     episode = parseInt(rangeMatch[2], 10);
     episodeEnd = parseInt(rangeMatch[3], 10);
+  } else if (sAndEMatch) {
+    if (!season) season = parseInt(sAndEMatch[1], 10);
+    episode = parseInt(sAndEMatch[2], 10);
   } else {
-    const sAndERegex = /S(\d{1,2})\s*E(\d{1,2})/i;
-    const sAndEMatch = caption.match(sAndERegex);
+    const seasonMatch = caption.match(/(?:Season|S)\s*(\d{1,2})/i);
+    if (seasonMatch && !season) season = parseInt(seasonMatch[1], 10);
 
-    if (sAndEMatch) {
-      if (!season) season = parseInt(sAndEMatch[1], 10);
-      episode = parseInt(sAndEMatch[2], 10);
-    } else {
-      const seasonMatch = caption.match(/(?:Season|S)\s*(\d{1,2})/i);
-      if (seasonMatch && !season) season = parseInt(seasonMatch[1], 10);
-
-      const epMatch = caption.match(/(?:Episode|Ep|E)\s*(\d{1,2})/i);
-      if (epMatch) episode = parseInt(epMatch[1], 10);
-    }
+    const epMatch = caption.match(/(?:Episode|Ep|E)\s*(\d{1,2})/i);
+    if (epMatch) episode = parseInt(epMatch[1], 10);
   }
 
   // Construct structured season-wise episode list
@@ -89,7 +92,8 @@ export function parseTelegramCaption(caption: string): ParsedTelegramMetadata {
 
   // 3. Release Year
   let year: number | undefined;
-  const yearMatch = caption.match(/\b(19\d{2}|20\d{2})\b/);
+  const yearRegex = /(?:[\(\[]\s*)?\b(19\d{2}|20\d{2})\b(?:\s*[\)\]])?/;
+  const yearMatch = normalizedLine.match(yearRegex) || caption.match(yearRegex);
   if (yearMatch) {
     year = parseInt(yearMatch[1], 10);
   }
@@ -123,22 +127,50 @@ export function parseTelegramCaption(caption: string): ParsedTelegramMetadata {
     genres = genresMatch[1].split(',').map((g) => g.trim()).filter(Boolean);
   }
 
-  // 7. Title Extraction from first line
-  let title = firstLine;
-  if (rangeMatch && rangeMatch[0]) {
-    title = title.replace(rangeMatch[0], '');
+  // 7. Intelligent Title Extraction (Isolate clean movie name from scene metadata)
+  let workingText = normalizedLine;
+  let cutoffIndex = -1;
+
+  // Cutoff at year marker if at least 2 characters precede it
+  const lineYearMatch = workingText.match(yearRegex);
+  if (lineYearMatch && lineYearMatch.index !== undefined && lineYearMatch.index >= 2) {
+    cutoffIndex = lineYearMatch.index;
   }
-  // Strip year
-  title = title.replace(/\s*[\(\[]?\b(19\d{2}|20\d{2})\b[\)\]]?\s*/g, ' ');
-  // Strip quality tags
-  title = title.replace(/\b(1080p|720p|480p|4K|2160p|HD|FHD|WEB-DL|WEBRip|BluRay|Dual Audio)\b/gi, '');
-  // Strip hashtags & unwanted text
-  title = title.replace(/#[a-z0-9_]+/gi, '');
-  title = title.replace(/\b(Theatre Print|PreDVDRip|HQ|x264|HEVC)\b/gi, '');
+
+  // Cutoff at season/episode marker if earlier than year
+  if (sAndEMatch && sAndEMatch.index !== undefined && sAndEMatch.index >= 2) {
+    if (cutoffIndex === -1 || sAndEMatch.index < cutoffIndex) {
+      cutoffIndex = sAndEMatch.index;
+    }
+  }
+
+  // Cutoff at resolution/source tag if earlier than year
+  const qualityCutoff = workingText.match(/\b(2160p|1080p|720p|480p|4k|uhd|fhd|bluray|bdrip|brrip|web-?dl|web-?rip|dvdrip|theatre\s*print|predvdrip|camrip|hdcam)\b/i);
+  if (qualityCutoff && qualityCutoff.index !== undefined && qualityCutoff.index >= 2) {
+    if (cutoffIndex === -1 || qualityCutoff.index < cutoffIndex) {
+      cutoffIndex = qualityCutoff.index;
+    }
+  }
+
+  let title = workingText;
+  if (cutoffIndex > 0) {
+    title = workingText.slice(0, cutoffIndex);
+  }
+
+  // Thorough strip of any remaining brackets and scene tags
+  title = title.replace(/\[.*?\]/g, ' ');
+  title = title.replace(/\(.*?\)/g, ' ');
+  title = title.replace(/\{.*?\}/g, ' ');
+  title = title.replace(/\[.*$/g, ' ');
+  title = title.replace(/\(.*$/g, ' ');
+  title = title.replace(/#[a-z0-9_]+/gi, ' ');
+  title = title.replace(/\b(1080p|720p|480p|4k|2160p|uhd|fhd|hd|sd|10bit|8bit|12bit|hdr10\+|hdr10|hdr|dovi|dv|bluray|bdrip|brrip|web-?dl|web-?rip|dvdrip|theatre\s*print|predvdrip|hq|camrip|x264|x265|hevc|avc|h\.264|h\.265|dual\s*audio|multi\s*audio|org\s*audio|org\s*bd|dts-?hd(\s*ma)?|dts|truehd|atmos|ddp5\.1|ddp|dd|ac3|aac|5\.1|7\.1|esub|msub|proper|repack|yts|yify|psa|galaxy|mkv|mp4)\b/gi, ' ');
+  title = title.replace(/[\-–—:_|/\\]+$/g, ' ');
+  title = title.replace(/^[\-–—:_|/\\]+/g, ' ');
   title = title.replace(/\s+/g, ' ').trim();
 
   if (!title) {
-    title = 'Untitled Movie';
+    title = firstLine.replace(/[\._]/g, ' ').replace(/\s+/g, ' ').trim() || 'Untitled Content';
   }
 
   return {

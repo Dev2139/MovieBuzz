@@ -68,7 +68,7 @@ export class TelegramImporter {
       if (!title || title.startsWith('/') || title.toLowerCase() === 'start' || title.length < 2) {
         return null;
       }
-      const year = parsed.year || 2026;
+      const year = parsed.year;
       const quality = parsed.quality || '1080p';
       const language = parsed.language || 'English';
       const baseSlug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
@@ -83,7 +83,7 @@ export class TelegramImporter {
       const genres = tmdbMeta?.genres || (parsed.genres && parsed.genres.length > 0 ? parsed.genres : ['Action', 'Drama']);
       const cast = tmdbMeta?.cast || (parsed.cast && parsed.cast.length > 0 ? parsed.cast : ['Popular Cast']);
       const languages = tmdbMeta?.languages || [language];
-      const releaseYear = tmdbMeta?.releaseYear || year;
+      const releaseYear = tmdbMeta?.releaseYear || year || 2026;
       const releaseDate = tmdbMeta?.releaseDate ? new Date(tmdbMeta.releaseDate) : new Date(`${releaseYear}-01-01`);
       const baseUrl = process.env.VERCEL_URL 
         ? `https://${process.env.VERCEL_URL}` 
