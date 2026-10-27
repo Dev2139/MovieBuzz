@@ -1,7 +1,7 @@
 class ApiConstants {
   // Deployed Render backend (handles Database, Auth, Catalog, and Telegram MTProto media)
-  static const String deployedRenderBackend = 'https://moviebuzz-qr1i.onrender.com';
-  static const String productionBaseUrl = 'https://moviebuzz-qr1i.onrender.com/api';
+  static const String deployedRenderBackend = 'https://moviebuzz-4slf.onrender.com';
+  static const String productionBaseUrl = 'https://moviebuzz-4slf.onrender.com/api';
 
   // Deployed Cloudflare Stream Worker (handles high-speed CDN streaming, edge caching, and CORS bypass)
   static const String cloudflareStreamProxyUrl = 'https://cinestream-stream-proxy.dev-patel-codinggita.workers.dev';

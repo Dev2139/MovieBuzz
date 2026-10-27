@@ -23,9 +23,11 @@ export const getMediaWatchStream = async (req: Request, res: Response) => {
     const protocol = (req.headers['x-forwarded-proto'] as string) || req.protocol || 'http';
     const baseUrl = `${protocol}://${host}`;
 
+    const cfRoot = (process.env.CLOUDFLARE_STREAM_PROXY_URL || 'https://cinestream-stream-proxy.dev-patel-codinggita.workers.dev').trim().replace(/\/+$/, '');
+
     let streamUrl = mediaObj.streamUrl;
     if (mediaObj.provider === 'telegram' && mediaObj.providerMediaId) {
-      streamUrl = `${baseUrl}/api/media/proxy-file/${encodeURIComponent(mediaObj.providerMediaId)}`;
+      streamUrl = `${cfRoot}/tg/${encodeURIComponent(mediaObj.providerMediaId)}`;
     }
 
     return res.json({
@@ -52,13 +54,15 @@ export const getMediaDownloadLink = async (req: Request, res: Response) => {
       return res.json({ downloadUrl, quality: '1080p', fileSize: '1.2 GB' });
     }
 
-    const host = req.get('host') || 'localhost:5000';
-    const protocol = (req.headers['x-forwarded-proto'] as string) || req.protocol || 'http';
-    const baseUrl = `${protocol}://${host}`;
+    const cfRoot = (process.env.CLOUDFLARE_STREAM_PROXY_URL || 'https://cinestream-stream-proxy.dev-patel-codinggita.workers.dev').trim().replace(/\/+$/, '');
+    const title = (mediaObj as any).title || mediaObj.quality || 'video';
 
     let downloadUrl = mediaObj.downloadUrl;
     if (mediaObj.provider === 'telegram' && mediaObj.providerMediaId) {
-      downloadUrl = `${baseUrl}/api/media/download-file/${encodeURIComponent(mediaObj.providerMediaId)}`;
+      const tgFileUrl = `${cfRoot}/tg/${encodeURIComponent(mediaObj.providerMediaId)}`;
+      downloadUrl = `${cfRoot}/download?url=${encodeURIComponent(tgFileUrl)}&title=${encodeURIComponent(title)}`;
+    } else if (downloadUrl) {
+      downloadUrl = `${cfRoot}/download?url=${encodeURIComponent(downloadUrl)}&title=${encodeURIComponent(title)}`;
     }
 
     return res.json({
@@ -520,20 +524,9 @@ export const downloadStreamAsMp4 = async (req: Request, res: Response) => {
       resolvedStreamUrl = `${protocol}://${host}${resolvedStreamUrl}`;
     }
 
-    // For direct MP4 URLs (proxy-file or actual .mp4 files):
-    const isDirectMp4 = !resolvedStreamUrl.includes('.m3u8') && !resolvedStreamUrl.includes('.mpd');
-    if (isDirectMp4) {
-      // If it points to an internal Telegram proxy file, delegate directly to downloadTelegramFile
-      const proxyMatch = resolvedStreamUrl.match(/\/api\/media\/proxy-file\/([^?&#]+)/);
-      if (proxyMatch) {
-        req.params.fileId = proxyMatch[1];
-        return downloadTelegramFile(req, res);
-      }
-
-      // If it's an external direct URL, redirect the client so the client downloads directly from the source with native resume/multi-thread support!
-      if (!resolvedStreamUrl.includes('localhost') && !resolvedStreamUrl.includes('127.0.0.1')) {
-        return res.redirect(302, resolvedStreamUrl);
-      }
+    // Route 100% of download bytes through Cloudflare Workers (0 Render bandwidth)
+    const cfRoot = (process.env.CLOUDFLARE_STREAM_PROXY_URL || 'https://cinestream-stream-proxy.dev-patel-codinggita.workers.dev').trim().replace(/\/+$/, '');
+    return res.redirect(302, `${cfRoot}/download?url=${encodeURIComponent(resolvedStreamUrl)}&title=${encodeURIComponent(fileName)}`);
 
       // If local or loopback MP4, stream it with zero timeout and Range forwarding
       const reqHeaders: Record<string, string> = {

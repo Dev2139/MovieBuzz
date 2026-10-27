@@ -8,7 +8,7 @@ const getApiBase = (): string => {
   if (!raw) {
     return typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
       ? 'http://localhost:5000/api'
-      : 'https://moviebuzz-qr1i.onrender.com/api';
+      : 'https://moviebuzz-4slf.onrender.com/api';
   }
   let clean = raw.trim().replace(/\/+$/, '');
   if (!clean.endsWith('/api')) {
@@ -39,12 +39,19 @@ export const wrapStreamWithCloudflare = (rawUrl?: string): string => {
 
   // Route Telegram proxy-file streams through Cloudflare /tg/ edge cache for fastest chunk loading & 0 server bandwidth
   if (resolved.includes('/proxy-file/')) {
-    const fileId = resolved.substring(resolved.indexOf('/proxy-file/') + '/proxy-file/'.length);
+    const fileId = resolved.substring(resolved.indexOf('/proxy-file/') + '/proxy-file/'.length).split('?')[0];
     return `${cfProxy}/tg/${fileId}`;
   }
 
-  if (resolved.includes('/media/') || resolved.includes('/streaming/')) {
-    return resolved;
+  // If it's a backend /streaming/proxy?url=..., extract raw upstream CDN target and route directly through CF /proxy
+  if (resolved.includes('/api/streaming/proxy')) {
+    try {
+      const u = new URL(resolved);
+      const upstream = u.searchParams.get('url');
+      if (upstream) {
+        return `${cfProxy}/proxy?url=${encodeURIComponent(upstream)}`;
+      }
+    } catch {}
   }
 
   // If it's an external embed or CDN stream, route through Cloudflare /embed
@@ -54,9 +61,46 @@ export const wrapStreamWithCloudflare = (rawUrl?: string): string => {
 
 export const resolveMediaUrl = (rawUrl?: string): string => {
   if (!rawUrl) return '';
+  const cfProxy = getCloudflareProxyUrl()?.trim().replace(/\/+$/, '');
   const apiBase = getApiBase();
   const backendOrigin = apiBase.replace(/\/api\/?$/, '');
 
+  // 1. If already a Cloudflare Worker URL, return as is
+  if (rawUrl.includes('workers.dev') || rawUrl.includes('cloudflare')) {
+    return rawUrl;
+  }
+
+  // 2. Telegram stream proxy: route to Cloudflare /tg/ edge cache
+  if (rawUrl.includes('/proxy-file/')) {
+    const fileId = rawUrl.substring(rawUrl.indexOf('/proxy-file/') + '/proxy-file/'.length).split('?')[0];
+    if (cfProxy && !rawUrl.includes('localhost') && !rawUrl.includes('127.0.0.1')) {
+      return `${cfProxy}/tg/${fileId}`;
+    }
+  }
+
+  // 3. Streaming proxy: route to Cloudflare /proxy
+  if (rawUrl.includes('/api/streaming/proxy')) {
+    try {
+      const u = new URL(rawUrl.startsWith('http') ? rawUrl : `${backendOrigin}${rawUrl}`);
+      const upstream = u.searchParams.get('url');
+      if (upstream && cfProxy) {
+        return `${cfProxy}/proxy?url=${encodeURIComponent(upstream)}`;
+      }
+    } catch {}
+  }
+
+  // 4. External HLS, DASH, or CDN streams: route to Cloudflare /embed
+  if (
+    cfProxy &&
+    !rawUrl.includes('localhost') &&
+    !rawUrl.includes('127.0.0.1') &&
+    (rawUrl.includes('.m3u8') || rawUrl.includes('.mpd') || rawUrl.includes('sportslive') || rawUrl.includes('aoneroom') || rawUrl.includes('fmovies'))
+  ) {
+    const marker = rawUrl.includes('.m3u8') ? '.m3u8' : rawUrl.includes('.mpd') ? '.mpd' : '.mp4';
+    return `${cfProxy}/embed?url=${encodeURIComponent(rawUrl)}&ext=${marker}`;
+  }
+
+  // Standard API base resolution
   if (rawUrl.includes('/api/media/')) {
     const mediaPath = rawUrl.substring(rawUrl.indexOf('/api/media/'));
     return `${backendOrigin}${mediaPath}`;
@@ -76,41 +120,36 @@ export const resolveMediaUrl = (rawUrl?: string): string => {
 
 /**
  * Computes a proper MP4 download URL for any media item regardless of provider.
- * - Telegram media → MTProto download endpoint
- * - HLS/DASH/proxy streams → FFmpeg remux-to-MP4 endpoint
- * - Direct files → pass-through with Content-Disposition
- * The resulting URL always produces a playable .mp4 file.
+ * Routes 100% of video download bytes through Cloudflare Workers with Content-Disposition attachment.
+ * Uses 0 backend/server bandwidth!
  */
 export const getDownloadUrl = (
   media: { provider?: string; providerMediaId?: string; streamUrl?: string; downloadUrl?: string; quality?: string } | null | undefined,
   title?: string,
 ): string => {
   if (!media) return '';
-  const apiBase = getApiBase();
+  const cfProxy = getCloudflareProxyUrl()?.trim().replace(/\/+$/, '');
+  const safeTitle = (title || 'CineStream').trim();
+  const quality = media.quality || '1080p';
+  const fullTitle = `${safeTitle}_${quality}`;
 
-  // Telegram media: dedicated MTProto chunk download
+  // 1. Telegram media: route through Cloudflare Worker's /download with /tg/ file URL
   if (media.provider === 'telegram' && media.providerMediaId) {
-    return `${apiBase}/media/download-file/${encodeURIComponent(media.providerMediaId)}`;
+    if (cfProxy) {
+      const tgFileUrl = `${cfProxy}/tg/${encodeURIComponent(media.providerMediaId)}`;
+      return `${cfProxy}/download?url=${encodeURIComponent(tgFileUrl)}&title=${encodeURIComponent(fullTitle)}`;
+    }
   }
 
-  // HLS, DASH, proxy-file, or direct MP4 stream: use the download-stream remux endpoint
-  const resolvedStream = resolveMediaUrl(media.streamUrl);
-  if (
-    resolvedStream &&
-    (resolvedStream.includes('.m3u8') ||
-      resolvedStream.includes('.mpd') ||
-      resolvedStream.includes('/streaming/') ||
-      resolvedStream.includes('/proxy-file/') ||
-      resolvedStream.includes('.mp4'))
-  ) {
-    const params = new URLSearchParams({
-      url: resolvedStream,
-      title: title || 'CineStream',
-      quality: media.quality || '1080p',
-    });
-    return `${apiBase}/media/download-stream?${params.toString()}`;
+  // 2. Direct MP4 or external stream: route through Cloudflare /download
+  const stream = media.streamUrl || media.downloadUrl || '';
+  if (stream) {
+    const wrapped = wrapStreamWithCloudflare(stream);
+    if (cfProxy && !wrapped.includes('localhost') && !wrapped.includes('127.0.0.1')) {
+      return `${cfProxy}/download?url=${encodeURIComponent(wrapped)}&title=${encodeURIComponent(fullTitle)}`;
+    }
+    return wrapped;
   }
 
-  // Fallback: use stored downloadUrl or resolved stream URL directly
-  return resolveMediaUrl(media.downloadUrl) || resolvedStream || '';
+  return '';
 };

@@ -535,7 +535,7 @@ export default {
       }
 
       // --- 2. Cache Miss: Fetch chunk from origin backend with Keep-Alive ---
-      const backendOrigin = (env.ORIGIN_URL || 'https://moviebuzz-qr1i.onrender.com').replace(/\/+$/, '');
+      const backendOrigin = (env.ORIGIN_URL || 'https://moviebuzz-4slf.onrender.com').replace(/\/+$/, '');
       const targetUrl = `${backendOrigin}/api/media/proxy-file/${encodeURIComponent(fileId)}?direct=true${searchStr ? '&' + searchStr.slice(1) : ''}`;
 
       const upstreamHeaders = new Headers();
@@ -592,6 +592,76 @@ export default {
       const errHeaders = new Headers(upstreamRes.headers);
       errHeaders.set('Access-Control-Allow-Origin', '*');
       return new Response(upstreamRes.body, { status: upstreamRes.status, headers: errHeaders });
+    }
+
+    // 8. Universal Direct Attachment Download: /download?url=...&title=...&r=...&c=...
+    // Streams video directly from upstream CDN or edge cache as an attachment file.
+    // 100% free unlimited edge egress bandwidth — 0 origin server bandwidth consumed.
+    if (url.pathname === '/download') {
+      const targetUrl = url.searchParams.get('url') || '';
+      const title = url.searchParams.get('title') || 'video';
+      const referer = url.searchParams.get('r') || '';
+      const cookie = url.searchParams.get('c') || '';
+
+      if (!targetUrl) {
+        return new Response('Missing download URL', { status: 400, headers: corsHeaders() });
+      }
+
+      let resolvedTarget = targetUrl;
+      if (resolvedTarget.startsWith('/')) {
+        resolvedTarget = `${url.protocol}//${url.host}${resolvedTarget}`;
+      }
+
+      if (!isSafeExternalUrl(resolvedTarget) && !resolvedTarget.startsWith(url.origin)) {
+        return new Response('Invalid or disallowed download URL', { status: 403, headers: corsHeaders() });
+      }
+
+      const safeTitle = title.replace(/[^a-zA-Z0-9_\-\. ]/g, '').trim().replace(/\s+/g, '_') || 'video';
+      const fileName = safeTitle.endsWith('.mp4') || safeTitle.endsWith('.mkv') ? safeTitle : `${safeTitle}.mp4`;
+
+      const upstreamHeaders = new Headers();
+      upstreamHeaders.set(
+        'User-Agent',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+      );
+      if (referer) {
+        upstreamHeaders.set('Referer', referer);
+        try {
+          upstreamHeaders.set('Origin', new URL(referer).origin);
+        } catch {}
+      }
+      if (cookie) {
+        upstreamHeaders.set('Cookie', cookie);
+      }
+      const range = request.headers.get('range');
+      if (range) {
+        upstreamHeaders.set('Range', range);
+      }
+
+      const upstreamRes = await fetch(resolvedTarget, {
+        headers: upstreamHeaders,
+        redirect: 'follow',
+      });
+
+      const respHeaders = new Headers(upstreamRes.headers);
+      respHeaders.set('Access-Control-Allow-Origin', '*');
+      respHeaders.set('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+      respHeaders.set('Access-Control-Allow-Headers', '*');
+      respHeaders.set('Accept-Ranges', 'bytes');
+      respHeaders.set(
+        'Content-Disposition',
+        `attachment; filename="${fileName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`
+      );
+
+      const upstreamType = upstreamRes.headers.get('content-type') || '';
+      if (!upstreamType || upstreamType.includes('text') || upstreamType.includes('octet-stream')) {
+        respHeaders.set('Content-Type', 'video/mp4');
+      }
+
+      return new Response(upstreamRes.body, {
+        status: upstreamRes.status,
+        headers: respHeaders,
+      });
     }
 
     return new Response('Not Found', { status: 404 });

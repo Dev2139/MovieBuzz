@@ -5,7 +5,7 @@ const normalizeApiUrl = (raw?: string): string => {
   if (!raw) {
     return typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
       ? 'http://localhost:5000/api'
-      : 'https://moviebuzz-qr1i.onrender.com/api';
+      : 'https://moviebuzz-4slf.onrender.com/api';
   }
   let clean = raw.trim().replace(/\/+$/, '');
   if (!clean.endsWith('/api')) {

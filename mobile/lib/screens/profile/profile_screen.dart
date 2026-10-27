@@ -46,7 +46,7 @@ class ProfileScreen extends StatelessWidget {
                           labelStyle: const TextStyle(fontSize: 11, color: Colors.white),
                           onPressed: () {
                             setDialogState(() {
-                              controller.text = 'https://moviebuzz-qr1i.onrender.com/api';
+                              controller.text = 'https://moviebuzz-4slf.onrender.com/api';
                             });
                           },
                         ),
