@@ -24,11 +24,11 @@ import {
 export const AdminAppUpdatesTab: React.FC = () => {
   const queryClient = useQueryClient();
 
-  const [version, setVersion] = useState('2.6.0');
-  const [versionCode, setVersionCode] = useState('26');
-  const [title, setTitle] = useState('MovieBuzz v2.6.0 — High-Speed Cloud Backend & Zero-Buffer Playback');
+  const [version, setVersion] = useState('2.9.0');
+  const [versionCode, setVersionCode] = useState('29');
+  const [title, setTitle] = useState('MovieBuzz v2.9.0 — Cloudflare Edge Streaming & Website Update Hub');
   const [changelog, setChangelog] = useState(
-    '• Updated Cloud Backend: Direct high-speed connection to Render production API (moviebuzz-qr1i.onrender.com/api)\n• Buffer-Free Edge Streaming: Cloudflare Edge Worker integration for instantaneous startup and zero lag\n• Seamless Cloud Sync: Real-time synchronization of watch progress, continue watching, and watchlist\n• Enhanced Media Controller: Dynamic quality selector (4K/1080p/720p/480p), multi-track audio, and aspect ratio modes\n• Live In-App Update Engine: Automatic notification alerts and direct APK installation\n• Performance & Memory Optimizations: Silky smooth 120Hz navigation with minimal battery consumption'
+    '• Cloudflare Edge High-Speed Streaming: 100% free unmetered edge bandwidth for instantaneous video playback\n• Direct Website APK Download: Seamless one-tap redirect to website download hub for easy updates\n• Dedicated In-App Update Screen: Full-screen clean update dashboard with changelog details (zero popups)\n• High-Performance MP4 Downloads: Lightning-fast multi-threaded video downloads powered by Cloudflare CDN\n• Offline Downloads Hub: Watch downloaded movies & web series with zero internet connection'
   );
   const [downloadUrl, setDownloadUrl] = useState('/moviebuzz.apk');
   const [apkSize, setApkSize] = useState('54 MB');
@@ -68,8 +68,8 @@ export const AdminAppUpdatesTab: React.FC = () => {
   });
 
   // Standalone Custom Notification Broadcast
-  const [quickTitle, setQuickTitle] = useState('🔥 New App Update v2.4.0 is Ready to Install!');
-  const [quickBody, setQuickBody] = useState('Experience zero-lag background stream buffering & sponsor cinema video ad. Tap here to install!');
+  const [quickTitle, setQuickTitle] = useState('🔥 New App Update v2.9.0 is Ready to Install!');
+  const [quickBody, setQuickBody] = useState('Experience zero-lag Cloudflare streaming, offline mode, and high-speed downloads. Tap here to install from our website!');
   const [quickLink, setQuickLink] = useState('/download');
 
   const broadcastMutation = useMutation({

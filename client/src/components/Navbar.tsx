@@ -4,7 +4,6 @@ import { useAuth } from '../context/AuthContext';
 import { usePWA } from '../context/PWAContext';
 import { Film, Bookmark, History, Shield, LogOut, User as UserIcon, Menu, Crown, Smartphone, Download } from 'lucide-react';
 import { NotificationBell } from './NotificationBell';
-import { AppUpdateAnnouncementBar } from './AppUpdateAnnouncementBar';
 
 export const Navbar: React.FC = () => {
   const { user, logout, openAuthModal } = useAuth();
@@ -37,12 +36,11 @@ export const Navbar: React.FC = () => {
 
   return (
     <div className="fixed top-0 left-0 right-0 z-40">
-      <AppUpdateAnnouncementBar />
       <header
         className={`w-full transition-all duration-300 ${
           isScrolled
-            ? 'bg-dark-base/95 backdrop-blur-md border-b border-dark-border py-2.5 shadow-xl'
-            : 'bg-gradient-to-b from-black/85 via-black/40 to-transparent py-3.5'
+            ? 'bg-dark-base/95 backdrop-blur-xl border-b border-white/5 py-2.5 shadow-2xl shadow-black/50'
+            : 'bg-gradient-to-b from-black/90 via-black/50 to-transparent py-4'
         }`}
       >
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between">

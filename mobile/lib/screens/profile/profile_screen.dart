@@ -9,6 +9,8 @@ import '../history/history_screen.dart';
 import '../watchlist/watchlist_screen.dart';
 import '../requests/requests_screen.dart';
 import '../downloads/downloads_screen.dart';
+import '../update/app_update_screen.dart';
+import '../../services/api_service.dart';
 import '../../widgets/custom_button.dart';
 
 class ProfileScreen extends StatelessWidget {
@@ -391,6 +393,40 @@ class ProfileScreen extends StatelessWidget {
               title: 'Backend API Server Configuration',
               subtitle: authProvider.currentBaseUrl,
               onTap: () => _showServerSettingsDialog(context, authProvider),
+            ),
+
+            _buildSettingsTile(
+              icon: Icons.system_update_rounded,
+              title: 'Check for Updates',
+              subtitle: 'Current v${ApiConstants.appVersion} • Tap to view latest release',
+              onTap: () async {
+                try {
+                  final update = await ApiService().getLatestAppUpdate();
+                  if (context.mounted) {
+                    if (update != null) {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => AppUpdateScreen(updateInfo: update),
+                        ),
+                      );
+                    } else {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('You are already running the latest version!'),
+                          backgroundColor: Colors.green,
+                        ),
+                      );
+                    }
+                  }
+                } catch (e) {
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Error checking updates: $e')),
+                    );
+                  }
+                }
+              },
             ),
 
             _buildSettingsTile(

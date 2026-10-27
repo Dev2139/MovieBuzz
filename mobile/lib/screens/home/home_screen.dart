@@ -13,7 +13,7 @@ import '../series/series_screen.dart';
 import '../requests/requests_screen.dart';
 import '../profile/profile_screen.dart';
 import '../../services/api_service.dart';
-import '../../widgets/app_update_dialog.dart';
+import '../update/app_update_screen.dart';
 import '../../constants/api_constants.dart';
 import '../downloads/downloads_screen.dart';
 import '../../models/content.dart';
@@ -65,7 +65,12 @@ class _HomeScreenState extends State<HomeScreen> {
             : (serverVersion.isNotEmpty && serverVersion != ApiConstants.appVersion);
 
         if (isNewer) {
-          AppUpdateDialog.show(context, update);
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => AppUpdateScreen(updateInfo: update),
+            ),
+          );
         }
       }
     } catch (_) {}

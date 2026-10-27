@@ -6,9 +6,12 @@ class ApiConstants {
   // Deployed Cloudflare Stream Worker (handles high-speed CDN streaming, edge caching, and CORS bypass)
   static const String cloudflareStreamProxyUrl = 'https://cinestream-stream-proxy.dev-patel-codinggita.workers.dev';
 
+  // Official Website App Download Link
+  static const String websiteDownloadUrl = 'https://cinestream.devdhar.in/download';
+
   // Mobile App Release Version
-  static const String appVersion = '2.8.0';
-  static const int appVersionCode = 28;
+  static const String appVersion = '2.9.0';
+  static const int appVersionCode = 29;
 
   // Local development backend presets
   static const String localHostBaseUrl = 'http://localhost:5000/api';
